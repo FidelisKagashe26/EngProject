@@ -15,7 +15,7 @@ import {
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { projects } from "../data/mockData";
 import { UnsavedChangesRouteGuard } from "../guards/UnsavedChangesGuard";
-import type { AuthUser } from "../services/api";
+import type { AuthUser, CompanyProfile } from "../services/api";
 import { mainNavItems, quickAddActions, utilityNavItems } from "./navigation";
 
 const routeTitles: Record<string, string> = {
@@ -40,11 +40,13 @@ const routeTitles: Record<string, string> = {
 };
 
 export const AppShell = ({
+  company,
   darkMode,
   onToggleDarkMode,
   onLogout,
   user,
 }: {
+  company: CompanyProfile | null;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   onLogout: () => Promise<void>;
@@ -53,6 +55,19 @@ export const AppShell = ({
   const location = useLocation();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const companyName =
+    company?.name.trim().length ? company.name.trim() : "EngiCost Manager";
+  const companySubtitle =
+    company?.location.trim().length
+      ? company.location.trim()
+      : "Engineering Cost Control";
+  const companyInitials = companyName
+    .split(" ")
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   const breadcrumbTitle = useMemo(() => {
     if (location.pathname.startsWith("/projects/") && location.pathname.endsWith("/edit")) {
@@ -74,11 +89,11 @@ export const AppShell = ({
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
         <Link className="mb-8 flex items-center gap-3" to="/dashboard">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#0b2a53] text-white">
-            <span className="text-lg font-bold">EC</span>
+            <span className="text-lg font-bold">{companyInitials || "EC"}</span>
           </div>
           <div>
-            <p className="text-base font-bold text-slate-900">EngiCost Manager</p>
-            <p className="text-xs text-slate-500">Engineering Cost Control</p>
+            <p className="text-base font-bold text-slate-900">{companyName}</p>
+            <p className="text-xs text-slate-500">{companySubtitle}</p>
           </div>
         </Link>
 

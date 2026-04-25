@@ -1,8 +1,13 @@
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
+import { useCompanySettings } from "../company/CompanySettingsContext";
 import { SectionTitle, SuccessToast, SurfaceCard, GuiSelect } from "../components/ui";
-import { expenseCategories, materialUnits, paymentMethods } from "../data/mockData";
+import {
+  expenseCategories as fallbackExpenseCategories,
+  materialUnits as fallbackMaterialUnits,
+  paymentMethods as fallbackPaymentMethods,
+} from "../data/mockData";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { api, ApiError, type SmtpStatusResponse } from "../services/api";
 
@@ -11,6 +16,25 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const SettingsPage = () => {
   const { user } = useAuth();
   const { markSaved } = useUnsavedChanges();
+  const {
+    company,
+    expenseCategories,
+    materialUnits,
+    paymentMethods,
+    loading: companySettingsLoading,
+    errorMessage: companySettingsErrorMessage,
+    saveCompanyProfile,
+  } = useCompanySettings();
+
+  const [companyName, setCompanyName] = useState("");
+  const [companyEmail, setCompanyEmail] = useState("");
+  const [companyPhone, setCompanyPhone] = useState("");
+  const [companyLocation, setCompanyLocation] = useState("");
+  const [companyCurrency, setCompanyCurrency] = useState("TZS");
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companyErrorMessage, setCompanyErrorMessage] = useState("");
+  const [companySuccessMessage, setCompanySuccessMessage] = useState("");
+
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -26,6 +50,15 @@ export const SettingsPage = () => {
   const [smtpSuccess, setSmtpSuccess] = useState("");
   const [smtpTestEmail, setSmtpTestEmail] = useState("");
   const [smtpTesting, setSmtpTesting] = useState(false);
+
+  const resolvedExpenseCategories =
+    expenseCategories.length > 0
+      ? expenseCategories
+      : fallbackExpenseCategories;
+  const resolvedMaterialUnits =
+    materialUnits.length > 0 ? materialUnits : fallbackMaterialUnits;
+  const resolvedPaymentMethods =
+    paymentMethods.length > 0 ? paymentMethods : fallbackPaymentMethods;
 
   useEffect(() => {
     let mounted = true;
@@ -67,9 +100,81 @@ export const SettingsPage = () => {
     }
   }, [smtpTestEmail, user?.email]);
 
+  useEffect(() => {
+    if (!company) {
+      return;
+    }
+    setCompanyName(company.name);
+    setCompanyEmail(company.email);
+    setCompanyPhone(company.phone);
+    setCompanyLocation(company.location);
+    setCompanyCurrency(company.currency);
+  }, [company]);
+
   const handleSimpleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     markSaved();
+  };
+
+  const handleCompanyProfileSave = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    setCompanyErrorMessage("");
+    setCompanySuccessMessage("");
+
+    const payload = {
+      name: companyName.trim(),
+      email: companyEmail.trim().toLowerCase(),
+      phone: companyPhone.trim(),
+      location: companyLocation.trim(),
+      currency: companyCurrency.trim().toUpperCase(),
+    };
+
+    if (payload.name.length < 2) {
+      setCompanyErrorMessage(
+        "Company name must have at least 2 characters.",
+      );
+      return;
+    }
+    if (!emailPattern.test(payload.email)) {
+      setCompanyErrorMessage("Please enter a valid company email address.");
+      return;
+    }
+    if (payload.phone.length < 7) {
+      setCompanyErrorMessage("Phone number must have at least 7 characters.");
+      return;
+    }
+    if (payload.location.length < 2) {
+      setCompanyErrorMessage("Location must have at least 2 characters.");
+      return;
+    }
+    if (payload.currency.length !== 3) {
+      setCompanyErrorMessage("Currency must be a 3-letter code like TZS.");
+      return;
+    }
+
+    setCompanySaving(true);
+    try {
+      const updated = await saveCompanyProfile(payload);
+      setCompanyName(updated.name);
+      setCompanyEmail(updated.email);
+      setCompanyPhone(updated.phone);
+      setCompanyLocation(updated.location);
+      setCompanyCurrency(updated.currency);
+      setCompanySuccessMessage("Company profile updated successfully.");
+      markSaved();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setCompanyErrorMessage(error.message);
+      } else {
+        setCompanyErrorMessage(
+          "Failed to save company profile. Please try again.",
+        );
+      }
+    } finally {
+      setCompanySaving(false);
+    }
   };
 
   const handlePasswordChange = async (event: FormEvent<HTMLFormElement>) => {
@@ -145,29 +250,74 @@ export const SettingsPage = () => {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SurfaceCard title="Company Profile">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleSimpleSave}>
+          <form
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            onSubmit={handleCompanyProfileSave}
+          >
+            {(companySettingsErrorMessage || companyErrorMessage) && (
+              <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {companyErrorMessage || companySettingsErrorMessage}
+              </div>
+            )}
+            {companySuccessMessage && (
+              <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {companySuccessMessage}
+              </div>
+            )}
+            {companySettingsLoading && !company && (
+              <div className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading company profile...</span>
+              </div>
+            )}
             <label className="form-field">
               <span>Company Name</span>
-              <input className="input-field" defaultValue="Nexivo Company Limited" />
+              <input
+                className="input-field"
+                disabled={companySettingsLoading || companySaving}
+                onChange={(event) => setCompanyName(event.target.value)}
+                required
+                value={companyName}
+              />
             </label>
             <label className="form-field">
               <span>Email</span>
-              <input className="input-field" defaultValue="info@nexivo.co.tz" type="email" />
+              <input
+                className="input-field"
+                disabled={companySettingsLoading || companySaving}
+                onChange={(event) => setCompanyEmail(event.target.value)}
+                required
+                type="email"
+                value={companyEmail}
+              />
             </label>
             <label className="form-field">
               <span>Phone</span>
-              <input className="input-field" defaultValue="+255 754 000 100" />
+              <input
+                className="input-field"
+                disabled={companySettingsLoading || companySaving}
+                onChange={(event) => setCompanyPhone(event.target.value)}
+                required
+                value={companyPhone}
+              />
             </label>
             <label className="form-field">
               <span>Location</span>
-              <input className="input-field" defaultValue="Dar es Salaam, Tanzania" />
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Logo Upload</span>
-              <input className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-[#0b2a53] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white" type="file" />
+              <input
+                className="input-field"
+                disabled={companySettingsLoading || companySaving}
+                onChange={(event) => setCompanyLocation(event.target.value)}
+                required
+                value={companyLocation}
+              />
             </label>
             <div className="sm:col-span-2 flex justify-end">
-              <button className="btn-primary" type="submit">
+              <button
+                className="btn-primary"
+                disabled={companySettingsLoading || companySaving}
+                type="submit"
+              >
+                {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Save Company Profile
               </button>
             </div>
@@ -175,20 +325,39 @@ export const SettingsPage = () => {
         </SurfaceCard>
 
         <SurfaceCard title="Currency Settings">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleSimpleSave}>
+          <form
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            onSubmit={handleCompanyProfileSave}
+          >
             <label className="form-field">
               <span>Default Currency</span>
-              <input className="input-field bg-slate-50" readOnly value="TZS" />
+              <GuiSelect
+                className="input-field"
+                disabled={companySettingsLoading || companySaving}
+                onChange={(event) => setCompanyCurrency(event.target.value)}
+                value={companyCurrency}
+              >
+                <option value="TZS">TZS</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="KES">KES</option>
+                <option value="UGX">UGX</option>
+              </GuiSelect>
             </label>
             <label className="form-field">
               <span>Number Format</span>
-              <GuiSelect className="input-field">
-                <option>TZS 1,000,000</option>
-                <option>TZS 1 000 000</option>
+              <GuiSelect className="input-field" disabled>
+                <option>{`${companyCurrency || "TZS"} 1,000,000`}</option>
+                <option>{`${companyCurrency || "TZS"} 1 000 000`}</option>
               </GuiSelect>
             </label>
             <div className="sm:col-span-2 flex justify-end">
-              <button className="btn-primary" type="submit">
+              <button
+                className="btn-primary"
+                disabled={companySettingsLoading || companySaving}
+                type="submit"
+              >
+                {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Save Currency Settings
               </button>
             </div>
@@ -199,7 +368,7 @@ export const SettingsPage = () => {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SurfaceCard title="Expense Categories">
           <div className="space-y-2">
-            {expenseCategories.map((category) => (
+            {resolvedExpenseCategories.map((category) => (
               <label className="form-field" key={`set-exp-${category}`}>
                 <span>{category}</span>
                 <input className="input-field" defaultValue={category} />
@@ -210,7 +379,7 @@ export const SettingsPage = () => {
 
         <SurfaceCard title="Material Units">
           <div className="space-y-2">
-            {materialUnits.map((unit) => (
+            {resolvedMaterialUnits.map((unit) => (
               <label className="form-field" key={`set-unit-${unit}`}>
                 <span>{unit}</span>
                 <input className="input-field" defaultValue={unit} />
@@ -223,7 +392,7 @@ export const SettingsPage = () => {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SurfaceCard title="Payment Methods">
           <div className="space-y-2">
-            {paymentMethods.map((method) => (
+            {resolvedPaymentMethods.map((method) => (
               <label className="form-field" key={`set-pay-${method}`}>
                 <span>{method}</span>
                 <input className="input-field" defaultValue={method} />

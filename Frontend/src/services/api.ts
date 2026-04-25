@@ -333,6 +333,28 @@ export interface SmtpTestResponse {
   recipient: string;
 }
 
+export interface CompanyProfile {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  location: string;
+  currency: string;
+}
+
+export interface SettingsResponse {
+  singleTenantMode: boolean;
+  company: CompanyProfile;
+  expenseCategories: string[];
+  materialUnits: string[];
+  paymentMethods: string[];
+}
+
+export type UpdateCompanyProfilePayload = Pick<
+  CompanyProfile,
+  "name" | "email" | "phone" | "location" | "currency"
+>;
+
 export class ApiError extends Error {
   status: number;
   details: unknown;
@@ -462,6 +484,12 @@ export const api = {
     apiRequest<SmtpTestResponse>("/auth/smtp/test", {
       method: "POST",
       body: JSON.stringify(payload ?? {}),
+    }),
+  getSettings: () => apiRequest<SettingsResponse>("/settings"),
+  updateCompanyProfile: (payload: UpdateCompanyProfilePayload) =>
+    apiRequest<CompanyProfile>("/settings/company", {
+      method: "PUT",
+      body: JSON.stringify(payload),
     }),
   getDashboard: () => apiRequest<DashboardResponse>("/dashboard"),
   getProjects: (params?: { search?: string; status?: string }) => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute, useAuth } from "./auth";
+import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
 import { AppShell } from "./layout/AppShell";
 import {
@@ -31,6 +32,7 @@ import {
 
 const ProtectedAppLayout = () => {
   const { user, logout } = useAuth();
+  const { company } = useCompanySettings();
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
@@ -43,6 +45,7 @@ const ProtectedAppLayout = () => {
 
   return (
     <AppShell
+      company={company}
       darkMode={darkMode}
       onLogout={logout}
       onToggleDarkMode={() => setDarkMode((current) => !current)}

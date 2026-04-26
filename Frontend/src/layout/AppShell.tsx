@@ -1,5 +1,5 @@
 import { GuiSelect } from "../components/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bell,
   ChevronDown,
@@ -12,17 +12,16 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { projects } from "../data/mockData";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UnsavedChangesRouteGuard } from "../guards/UnsavedChangesGuard";
-import type { AuthUser, CompanyProfile } from "../services/api";
+import { api, type AuthUser, type CompanyProfile, type ProjectApiRecord } from "../services/api";
 import { mainNavItems, quickAddActions, utilityNavItems } from "./navigation";
 
 const routeTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/projects": "Projects / Sites",
   "/projects/new": "Add / Edit Project",
-  "/tenders": "Tenders & Contracts",
+  "/tenders": "Contracts Governance",
   "/labor": "Labor / Workforce",
   "/materials": "Materials",
   "/expenses": "Expenses",
@@ -53,21 +52,13 @@ export const AppShell = ({
   user: AuthUser | null;
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  const companyName =
-    company?.name.trim().length ? company.name.trim() : "EngiCost Manager";
-  const companySubtitle =
-    company?.location.trim().length
-      ? company.location.trim()
-      : "Engineering Cost Control";
-  const companyInitials = companyName
-    .split(" ")
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
+  const [projectJump, setProjectJump] = useState("");
+  const companyLogoAlt =
+    company?.name.trim().length ? `${company.name.trim()} logo` : "Company logo";
 
   const breadcrumbTitle = useMemo(() => {
     if (location.pathname.startsWith("/projects/") && location.pathname.endsWith("/edit")) {
@@ -83,18 +74,42 @@ export const AppShell = ({
     return routeTitles[location.pathname] ?? "Dashboard";
   }, [location.pathname]);
 
+  useEffect(() => {
+    let mounted = true;
+    const loadProjects = async () => {
+      try {
+        const rows = await api.getProjects();
+        if (!mounted) {
+          return;
+        }
+        setProjects(rows);
+      } catch {
+        if (!mounted) {
+          return;
+        }
+        setProjects([]);
+      }
+    };
+
+    void loadProjects();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleProjectJumpChange = (projectId: string) => {
+    setProjectJump(projectId);
+    if (projectId.length > 0) {
+      navigate(`/projects/${encodeURIComponent(projectId)}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
       <UnsavedChangesRouteGuard />
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
-        <Link className="mb-8 flex items-center gap-3" to="/dashboard">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#0b2a53] text-white">
-            <span className="text-lg font-bold">{companyInitials || "EC"}</span>
-          </div>
-          <div>
-            <p className="text-base font-bold text-slate-900">{companyName}</p>
-            <p className="text-xs text-slate-500">{companySubtitle}</p>
-          </div>
+        <Link className="mb-8 flex items-center justify-center" to="/dashboard">
+          <img alt={companyLogoAlt} className="h-14 w-auto object-contain" src="/EngLogo.png" />
         </Link>
 
         <nav className="space-y-1">
@@ -149,7 +164,12 @@ export const AppShell = ({
                 type="search"
               />
             </div>
-            <GuiSelect className="input-field !w-auto !py-2 text-xs sm:text-sm" fullWidth={false}>
+            <GuiSelect
+              className="input-field !w-auto !py-2 text-xs sm:text-sm"
+              fullWidth={false}
+              onChange={(event) => handleProjectJumpChange(event.target.value)}
+              value={projectJump}
+            >
               <option value="">All Projects</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>

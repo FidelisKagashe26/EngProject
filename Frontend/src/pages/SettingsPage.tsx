@@ -1,8 +1,8 @@
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
 import { useCompanySettings } from "../company/CompanySettingsContext";
-import { SectionTitle, SuccessToast, SurfaceCard, GuiSelect } from "../components/ui";
+import { AppToast, GuiSelect, SectionTitle, SurfaceCard } from "../components/ui";
 import {
   expenseCategories as fallbackExpenseCategories,
   materialUnits as fallbackMaterialUnits,
@@ -13,8 +13,29 @@ import { api, ApiError, type SmtpStatusResponse } from "../services/api";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+type SettingsSection = "my-profile" | "system-settings" | "change-password";
+type ToastTone = "success" | "error" | "info";
+
+const sectionOptions: Array<{
+  id: SettingsSection;
+  label: string;
+}> = [
+  {
+    id: "my-profile",
+    label: "My Profile",
+  },
+  {
+    id: "system-settings",
+    label: "System Settings",
+  },
+  {
+    id: "change-password",
+    label: "Change Password",
+  },
+];
+
 export const SettingsPage = () => {
-  const { user } = useAuth();
+  const { user, updateCurrentUser } = useAuth();
   const { markSaved } = useUnsavedChanges();
   const {
     company,
@@ -26,14 +47,16 @@ export const SettingsPage = () => {
     saveCompanyProfile,
   } = useCompanySettings();
 
+  const [activeSection, setActiveSection] = useState<SettingsSection>("my-profile");
+  const [myFullName, setMyFullName] = useState("");
+  const [myEmail, setMyEmail] = useState("");
+  const [myAccountSaving, setMyAccountSaving] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [companyEmail, setCompanyEmail] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyLocation, setCompanyLocation] = useState("");
   const [companyCurrency, setCompanyCurrency] = useState("TZS");
   const [companySaving, setCompanySaving] = useState(false);
-  const [companyErrorMessage, setCompanyErrorMessage] = useState("");
-  const [companySuccessMessage, setCompanySuccessMessage] = useState("");
 
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -41,20 +64,34 @@ export const SettingsPage = () => {
   const [showOldPassword, setShowOldPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
-  const [showPasswordToast, setShowPasswordToast] = useState(false);
+
   const [smtpStatus, setSmtpStatus] = useState<SmtpStatusResponse | null>(null);
   const [smtpLoading, setSmtpLoading] = useState(true);
-  const [smtpError, setSmtpError] = useState("");
-  const [smtpSuccess, setSmtpSuccess] = useState("");
   const [smtpTestEmail, setSmtpTestEmail] = useState("");
   const [smtpTesting, setSmtpTesting] = useState(false);
 
+  const [toastOpen, setToastOpen] = useState(false);
+  const [toastTone, setToastTone] = useState<ToastTone>("success");
+  const [toastTitle, setToastTitle] = useState("Done");
+  const [toastMessage, setToastMessage] = useState("");
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = (tone: ToastTone, title: string, message: string) => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToastTone(tone);
+    setToastTitle(title);
+    setToastMessage(message);
+    setToastOpen(true);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastOpen(false);
+    }, 2600);
+  };
+
   const resolvedExpenseCategories =
-    expenseCategories.length > 0
-      ? expenseCategories
-      : fallbackExpenseCategories;
+    expenseCategories.length > 0 ? expenseCategories : fallbackExpenseCategories;
   const resolvedMaterialUnits =
     materialUnits.length > 0 ? materialUnits : fallbackMaterialUnits;
   const resolvedPaymentMethods =
@@ -65,7 +102,6 @@ export const SettingsPage = () => {
 
     const loadSmtpStatus = async () => {
       setSmtpLoading(true);
-      setSmtpError("");
 
       try {
         const response = await api.getSmtpStatus();
@@ -75,9 +111,9 @@ export const SettingsPage = () => {
       } catch (error) {
         if (mounted) {
           if (error instanceof ApiError) {
-            setSmtpError(error.message);
+            showToast("error", "SMTP", error.message);
           } else {
-            setSmtpError("Unable to load SMTP settings.");
+            showToast("error", "SMTP", "Unable to load SMTP settings.");
           }
         }
       } finally {
@@ -95,10 +131,32 @@ export const SettingsPage = () => {
   }, []);
 
   useEffect(() => {
+    if (companySettingsErrorMessage) {
+      showToast("error", "Settings", companySettingsErrorMessage);
+    }
+  }, [companySettingsErrorMessage]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (user?.email && smtpTestEmail.trim().length === 0) {
       setSmtpTestEmail(user.email);
     }
   }, [smtpTestEmail, user?.email]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    setMyFullName(user.fullName);
+    setMyEmail(user.email);
+  }, [user]);
 
   useEffect(() => {
     if (!company) {
@@ -114,14 +172,48 @@ export const SettingsPage = () => {
   const handleSimpleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     markSaved();
+    showToast("success", "Saved", "Changes saved.");
   };
 
-  const handleCompanyProfileSave = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
+  const handleMyAccountSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setCompanyErrorMessage("");
-    setCompanySuccessMessage("");
+
+    const payload = {
+      fullName: myFullName.trim(),
+      email: myEmail.trim().toLowerCase(),
+    };
+
+    if (payload.fullName.length < 2) {
+      showToast("error", "My Account", "Full name must have at least 2 characters.");
+      return;
+    }
+
+    if (!emailPattern.test(payload.email)) {
+      showToast("error", "My Account", "Enter a valid email address.");
+      return;
+    }
+
+    setMyAccountSaving(true);
+    try {
+      const response = await api.updateMyProfile(payload);
+      updateCurrentUser(response.user);
+      setMyFullName(response.user.fullName);
+      setMyEmail(response.user.email);
+      markSaved();
+      showToast("success", "My Account", "Profile updated.");
+    } catch (error) {
+      if (error instanceof ApiError) {
+        showToast("error", "My Account", error.message);
+      } else {
+        showToast("error", "My Account", "Failed to update profile.");
+      }
+    } finally {
+      setMyAccountSaving(false);
+    }
+  };
+
+  const handleCompanyProfileSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
     const payload = {
       name: companyName.trim(),
@@ -132,25 +224,23 @@ export const SettingsPage = () => {
     };
 
     if (payload.name.length < 2) {
-      setCompanyErrorMessage(
-        "Company name must have at least 2 characters.",
-      );
+      showToast("error", "Company", "Company name must have at least 2 characters.");
       return;
     }
     if (!emailPattern.test(payload.email)) {
-      setCompanyErrorMessage("Please enter a valid company email address.");
+      showToast("error", "Company", "Enter a valid company email.");
       return;
     }
     if (payload.phone.length < 7) {
-      setCompanyErrorMessage("Phone number must have at least 7 characters.");
+      showToast("error", "Company", "Phone number must have at least 7 characters.");
       return;
     }
     if (payload.location.length < 2) {
-      setCompanyErrorMessage("Location must have at least 2 characters.");
+      showToast("error", "Company", "Location must have at least 2 characters.");
       return;
     }
     if (payload.currency.length !== 3) {
-      setCompanyErrorMessage("Currency must be a 3-letter code like TZS.");
+      showToast("error", "Company", "Currency must be a 3-letter code.");
       return;
     }
 
@@ -162,15 +252,13 @@ export const SettingsPage = () => {
       setCompanyPhone(updated.phone);
       setCompanyLocation(updated.location);
       setCompanyCurrency(updated.currency);
-      setCompanySuccessMessage("Company profile updated successfully.");
       markSaved();
+      showToast("success", "Company", "Profile updated.");
     } catch (error) {
       if (error instanceof ApiError) {
-        setCompanyErrorMessage(error.message);
+        showToast("error", "Company", error.message);
       } else {
-        setCompanyErrorMessage(
-          "Failed to save company profile. Please try again.",
-        );
+        showToast("error", "Company", "Failed to save profile.");
       }
     } finally {
       setCompanySaving(false);
@@ -179,15 +267,14 @@ export const SettingsPage = () => {
 
   const handlePasswordChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setPasswordError("");
 
     if (newPassword.length < 8) {
-      setPasswordError("New password must have at least 8 characters.");
+      showToast("error", "Password", "New password must have at least 8 characters.");
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setPasswordError("New password and confirm password do not match.");
+      showToast("error", "Password", "New password and confirm password do not match.");
       return;
     }
 
@@ -201,13 +288,12 @@ export const SettingsPage = () => {
       setNewPassword("");
       setConfirmPassword("");
       markSaved();
-      setShowPasswordToast(true);
-      window.setTimeout(() => setShowPasswordToast(false), 2500);
+      showToast("success", "Password", "Password updated.");
     } catch (error) {
       if (error instanceof ApiError) {
-        setPasswordError(error.message);
+        showToast("error", "Password", error.message);
       } else {
-        setPasswordError("Failed to update password. Please try again.");
+        showToast("error", "Password", "Failed to update password.");
       }
     } finally {
       setPasswordSaving(false);
@@ -216,25 +302,23 @@ export const SettingsPage = () => {
 
   const handleSmtpTest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSmtpError("");
-    setSmtpSuccess("");
 
     const recipient = smtpTestEmail.trim().toLowerCase();
     if (!emailPattern.test(recipient)) {
-      setSmtpError("Enter a valid email address for SMTP test.");
+      showToast("error", "SMTP", "Enter a valid recipient email.");
       return;
     }
 
     setSmtpTesting(true);
     try {
       const response = await api.sendSmtpTestEmail({ to: recipient });
-      setSmtpSuccess(response.message);
       markSaved();
+      showToast("success", "SMTP", response.message);
     } catch (error) {
       if (error instanceof ApiError) {
-        setSmtpError(error.message);
+        showToast("error", "SMTP", error.message);
       } else {
-        setSmtpError("Failed to send SMTP test email.");
+        showToast("error", "SMTP", "Failed to send SMTP test email.");
       }
     } finally {
       setSmtpTesting(false);
@@ -243,301 +327,402 @@ export const SettingsPage = () => {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        subtitle="Configure company profile, currency, categories, notifications and security."
-        title="Settings"
-      />
+      <SectionTitle title="Settings" />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Company Profile">
-          <form
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-            onSubmit={handleCompanyProfileSave}
-          >
-            {(companySettingsErrorMessage || companyErrorMessage) && (
-              <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {companyErrorMessage || companySettingsErrorMessage}
-              </div>
-            )}
-            {companySuccessMessage && (
-              <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                {companySuccessMessage}
-              </div>
-            )}
-            {companySettingsLoading && !company && (
-              <div className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Loading company profile...</span>
-              </div>
-            )}
-            <label className="form-field">
-              <span>Company Name</span>
-              <input
-                className="input-field"
-                disabled={companySettingsLoading || companySaving}
-                onChange={(event) => setCompanyName(event.target.value)}
-                required
-                value={companyName}
-              />
-            </label>
-            <label className="form-field">
-              <span>Email</span>
-              <input
-                className="input-field"
-                disabled={companySettingsLoading || companySaving}
-                onChange={(event) => setCompanyEmail(event.target.value)}
-                required
-                type="email"
-                value={companyEmail}
-              />
-            </label>
-            <label className="form-field">
-              <span>Phone</span>
-              <input
-                className="input-field"
-                disabled={companySettingsLoading || companySaving}
-                onChange={(event) => setCompanyPhone(event.target.value)}
-                required
-                value={companyPhone}
-              />
-            </label>
-            <label className="form-field">
-              <span>Location</span>
-              <input
-                className="input-field"
-                disabled={companySettingsLoading || companySaving}
-                onChange={(event) => setCompanyLocation(event.target.value)}
-                required
-                value={companyLocation}
-              />
-            </label>
-            <div className="sm:col-span-2 flex justify-end">
-              <button
-                className="btn-primary"
-                disabled={companySettingsLoading || companySaving}
-                type="submit"
-              >
-                {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Save Company Profile
-              </button>
-            </div>
-          </form>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[250px_1fr]">
+        <SurfaceCard className="hidden h-fit lg:block" title="Menu">
+          <div className="space-y-2">
+            {sectionOptions.map((option) => {
+              const isActive = option.id === activeSection;
+              return (
+                <button
+                  className={`relative w-full rounded-xl border px-3 py-2 text-left transition ${
+                    isActive
+                      ? "text-white shadow-sm"
+                      : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                  key={option.id}
+                  onClick={() => setActiveSection(option.id)}
+                  style={
+                    isActive
+                      ? {
+                          backgroundColor: "var(--primary)",
+                          borderColor: "var(--accent)",
+                        }
+                      : undefined
+                  }
+                  type="button"
+                >
+                  {isActive && (
+                    <span
+                      className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
+                      style={{ backgroundColor: "var(--accent)" }}
+                    />
+                  )}
+                  <p className="text-sm font-semibold">{option.label}</p>
+                </button>
+              );
+            })}
+          </div>
         </SurfaceCard>
 
-        <SurfaceCard title="Currency Settings">
-          <form
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-            onSubmit={handleCompanyProfileSave}
-          >
+        <div className="space-y-4">
+          <SurfaceCard className="lg:hidden" title="Menu">
             <label className="form-field">
-              <span>Default Currency</span>
+              <span>Section</span>
               <GuiSelect
                 className="input-field"
-                disabled={companySettingsLoading || companySaving}
-                onChange={(event) => setCompanyCurrency(event.target.value)}
-                value={companyCurrency}
+                onChange={(event) =>
+                  setActiveSection(event.target.value as SettingsSection)
+                }
+                value={activeSection}
               >
-                <option value="TZS">TZS</option>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="KES">KES</option>
-                <option value="UGX">UGX</option>
+                {sectionOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
               </GuiSelect>
             </label>
-            <label className="form-field">
-              <span>Number Format</span>
-              <GuiSelect className="input-field" disabled>
-                <option>{`${companyCurrency || "TZS"} 1,000,000`}</option>
-                <option>{`${companyCurrency || "TZS"} 1 000 000`}</option>
-              </GuiSelect>
-            </label>
-            <div className="sm:col-span-2 flex justify-end">
-              <button
-                className="btn-primary"
-                disabled={companySettingsLoading || companySaving}
-                type="submit"
-              >
-                {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Save Currency Settings
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-      </div>
+          </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Expense Categories">
-          <div className="space-y-2">
-            {resolvedExpenseCategories.map((category) => (
-              <label className="form-field" key={`set-exp-${category}`}>
-                <span>{category}</span>
-                <input className="input-field" defaultValue={category} />
-              </label>
-            ))}
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard title="Material Units">
-          <div className="space-y-2">
-            {resolvedMaterialUnits.map((unit) => (
-              <label className="form-field" key={`set-unit-${unit}`}>
-                <span>{unit}</span>
-                <input className="input-field" defaultValue={unit} />
-              </label>
-            ))}
-          </div>
-        </SurfaceCard>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Payment Methods">
-          <div className="space-y-2">
-            {resolvedPaymentMethods.map((method) => (
-              <label className="form-field" key={`set-pay-${method}`}>
-                <span>{method}</span>
-                <input className="input-field" defaultValue={method} />
-              </label>
-            ))}
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard title="Notification Settings">
-          <div className="space-y-3 text-sm text-slate-700">
-            <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-              <span>Overspending alerts</span>
-              <input defaultChecked type="checkbox" />
-            </label>
-            <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-              <span>Pending client payments</span>
-              <input defaultChecked type="checkbox" />
-            </label>
-            <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-              <span>Outstanding labor payments</span>
-              <input defaultChecked type="checkbox" />
-            </label>
-            <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-              <span>Project deadline reminders</span>
-              <input type="checkbox" />
-            </label>
-          </div>
-        </SurfaceCard>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="SMTP Email">
-          <div className="space-y-3 text-sm text-slate-700">
-            {smtpLoading ? (
-              <div className="flex items-center gap-2 text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Loading SMTP status...</span>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                  <span>Status</span>
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                      smtpStatus?.configured
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-amber-200 bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    {smtpStatus?.configured ? "Configured" : "Not configured"}
-                  </span>
-                </div>
-                <label className="form-field">
-                  <span>SMTP Host</span>
-                  <input className="input-field bg-slate-50" readOnly value={smtpStatus?.host ?? ""} />
-                </label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {activeSection === "my-profile" && (
+            <>
+              <SurfaceCard title="My Account">
+                <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleMyAccountSave}>
                   <label className="form-field">
-                    <span>Port</span>
+                    <span>Full Name</span>
                     <input
-                      className="input-field bg-slate-50"
-                      readOnly
-                      value={smtpStatus ? String(smtpStatus.port) : ""}
+                      className="input-field"
+                      disabled={myAccountSaving}
+                      onChange={(event) => setMyFullName(event.target.value)}
+                      required
+                      value={myFullName}
                     />
                   </label>
                   <label className="form-field">
-                    <span>Secure</span>
+                    <span>Email</span>
+                    <input
+                      className="input-field"
+                      disabled={myAccountSaving}
+                      onChange={(event) => setMyEmail(event.target.value)}
+                      required
+                      type="email"
+                      value={myEmail}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Role</span>
                     <input
                       className="input-field bg-slate-50"
                       readOnly
-                      value={smtpStatus?.secure ? "Yes" : "No"}
+                      value={user?.role ?? ""}
                     />
                   </label>
-                </div>
-                <label className="form-field">
-                  <span>From Email</span>
-                  <input className="input-field bg-slate-50" readOnly value={smtpStatus?.fromEmail ?? ""} />
-                </label>
-              </>
-            )}
-
-            {smtpError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {smtpError}
-              </div>
-            )}
-            {smtpSuccess && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                {smtpSuccess}
-              </div>
-            )}
-
-            <form className="space-y-3 border-t border-slate-200 pt-3" onSubmit={handleSmtpTest}>
-              <label className="form-field">
-                <span>Test Recipient Email</span>
-                <input
-                  className="input-field"
-                  onChange={(event) => setSmtpTestEmail(event.target.value)}
-                  placeholder="admin@company.com"
-                  type="email"
-                  value={smtpTestEmail}
-                />
-              </label>
-              <button
-                className="btn-primary w-full justify-center"
-                disabled={smtpTesting || smtpLoading}
-                type="submit"
-              >
-                {smtpTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Send SMTP Test Email
-              </button>
-            </form>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard title="Security Settings">
-          <div className="space-y-3 text-sm text-slate-700">
-            <form className="space-y-3" onSubmit={handleSimpleSave}>
-              <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                <span>Two-factor authentication</span>
-                <input defaultChecked type="checkbox" />
-              </label>
-              <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                <span>Enforce strong password policy</span>
-                <input defaultChecked type="checkbox" />
-              </label>
-              <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                <span>Session timeout (30 mins)</span>
-                <input defaultChecked type="checkbox" />
-              </label>
-              <button className="btn-primary" type="submit">
-                Save Security Settings
-              </button>
-            </form>
-
-            <div className="border-t border-slate-200 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                Change Password
-              </p>
-              <form className="mt-3 space-y-3" onSubmit={handlePasswordChange}>
-                {passwordError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {passwordError}
+                  <label className="form-field">
+                    <span>Status</span>
+                    <input
+                      className="input-field bg-slate-50"
+                      readOnly
+                      value={user?.status ?? ""}
+                    />
+                  </label>
+                  <div className="sm:col-span-2 flex justify-end">
+                    <button className="btn-primary" disabled={myAccountSaving} type="submit">
+                      {myAccountSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Save
+                    </button>
                   </div>
-                )}
+                </form>
+              </SurfaceCard>
+
+              <SurfaceCard title="Company Profile">
+                <form
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                  onSubmit={handleCompanyProfileSave}
+                >
+                  {companySettingsLoading && !company && (
+                    <div className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Loading...</span>
+                    </div>
+                  )}
+                  <label className="form-field">
+                    <span>Company Name</span>
+                    <input
+                      className="input-field"
+                      disabled={companySettingsLoading || companySaving}
+                      onChange={(event) => setCompanyName(event.target.value)}
+                      required
+                      value={companyName}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Email</span>
+                    <input
+                      className="input-field"
+                      disabled={companySettingsLoading || companySaving}
+                      onChange={(event) => setCompanyEmail(event.target.value)}
+                      required
+                      type="email"
+                      value={companyEmail}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Phone</span>
+                    <input
+                      className="input-field"
+                      disabled={companySettingsLoading || companySaving}
+                      onChange={(event) => setCompanyPhone(event.target.value)}
+                      required
+                      value={companyPhone}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Location</span>
+                    <input
+                      className="input-field"
+                      disabled={companySettingsLoading || companySaving}
+                      onChange={(event) => setCompanyLocation(event.target.value)}
+                      required
+                      value={companyLocation}
+                    />
+                  </label>
+                  <div className="sm:col-span-2 flex justify-end">
+                    <button
+                      className="btn-primary"
+                      disabled={companySettingsLoading || companySaving}
+                      type="submit"
+                    >
+                      {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Save
+                    </button>
+                  </div>
+                </form>
+              </SurfaceCard>
+            </>
+          )}
+
+          {activeSection === "system-settings" && (
+            <>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <SurfaceCard title="Currency Settings">
+                  <form
+                    className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                    onSubmit={handleCompanyProfileSave}
+                  >
+                    <label className="form-field">
+                      <span>Default Currency</span>
+                      <GuiSelect
+                        className="input-field"
+                        disabled={companySettingsLoading || companySaving}
+                        onChange={(event) => setCompanyCurrency(event.target.value)}
+                        value={companyCurrency}
+                      >
+                        <option value="TZS">TZS</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="KES">KES</option>
+                        <option value="UGX">UGX</option>
+                      </GuiSelect>
+                    </label>
+                    <label className="form-field">
+                      <span>Number Format</span>
+                      <GuiSelect className="input-field" disabled>
+                        <option>{`${companyCurrency || "TZS"} 1,000,000`}</option>
+                        <option>{`${companyCurrency || "TZS"} 1 000 000`}</option>
+                      </GuiSelect>
+                    </label>
+                    <div className="sm:col-span-2 flex justify-end">
+                      <button
+                        className="btn-primary"
+                        disabled={companySettingsLoading || companySaving}
+                        type="submit"
+                      >
+                        {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </SurfaceCard>
+
+                <SurfaceCard title="Notification Settings">
+                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Overspending alerts</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Pending client payments</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Outstanding labor payments</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Project deadline reminders</span>
+                      <input type="checkbox" />
+                    </label>
+                    <button className="btn-primary" type="submit">
+                      Save
+                    </button>
+                  </form>
+                </SurfaceCard>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <SurfaceCard title="Expense Categories">
+                  <div className="space-y-2">
+                    {resolvedExpenseCategories.map((category) => (
+                      <label className="form-field" key={`set-exp-${category}`}>
+                        <span>{category}</span>
+                        <input className="input-field" defaultValue={category} />
+                      </label>
+                    ))}
+                  </div>
+                </SurfaceCard>
+
+                <SurfaceCard title="Material Units">
+                  <div className="space-y-2">
+                    {resolvedMaterialUnits.map((unit) => (
+                      <label className="form-field" key={`set-unit-${unit}`}>
+                        <span>{unit}</span>
+                        <input className="input-field" defaultValue={unit} />
+                      </label>
+                    ))}
+                  </div>
+                </SurfaceCard>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <SurfaceCard title="Payment Methods">
+                  <div className="space-y-2">
+                    {resolvedPaymentMethods.map((method) => (
+                      <label className="form-field" key={`set-pay-${method}`}>
+                        <span>{method}</span>
+                        <input className="input-field" defaultValue={method} />
+                      </label>
+                    ))}
+                  </div>
+                </SurfaceCard>
+
+                <SurfaceCard title="Security Settings">
+                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Two-factor authentication</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Enforce strong password policy</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                      <span>Session timeout (30 mins)</span>
+                      <input defaultChecked type="checkbox" />
+                    </label>
+                    <button className="btn-primary" type="submit">
+                      Save
+                    </button>
+                  </form>
+                </SurfaceCard>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <SurfaceCard title="SMTP Email">
+                  <div className="space-y-3 text-sm text-slate-700">
+                    {smtpLoading ? (
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Loading...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                          <span>Status</span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                              smtpStatus?.configured
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-amber-200 bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {smtpStatus?.configured ? "Configured" : "Not configured"}
+                          </span>
+                        </div>
+                        <label className="form-field">
+                          <span>SMTP Host</span>
+                          <input className="input-field bg-slate-50" readOnly value={smtpStatus?.host ?? ""} />
+                        </label>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="form-field">
+                            <span>Port</span>
+                            <input
+                              className="input-field bg-slate-50"
+                              readOnly
+                              value={smtpStatus ? String(smtpStatus.port) : ""}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span>Secure</span>
+                            <input
+                              className="input-field bg-slate-50"
+                              readOnly
+                              value={smtpStatus?.secure ? "Yes" : "No"}
+                            />
+                          </label>
+                        </div>
+                        <label className="form-field">
+                          <span>From Email</span>
+                          <input className="input-field bg-slate-50" readOnly value={smtpStatus?.fromEmail ?? ""} />
+                        </label>
+                      </>
+                    )}
+
+                    <form className="space-y-3 border-t border-slate-200 pt-3" onSubmit={handleSmtpTest}>
+                      <label className="form-field">
+                        <span>Test Recipient Email</span>
+                        <input
+                          className="input-field"
+                          onChange={(event) => setSmtpTestEmail(event.target.value)}
+                          placeholder="admin@company.com"
+                          type="email"
+                          value={smtpTestEmail}
+                        />
+                      </label>
+                      <button
+                        className="btn-primary w-full justify-center"
+                        disabled={smtpTesting || smtpLoading}
+                        type="submit"
+                      >
+                        {smtpTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Send Test
+                      </button>
+                    </form>
+                  </div>
+                </SurfaceCard>
+
+                <SurfaceCard title="Backup Settings">
+                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
+                    <p>Auto backup: Daily 23:00</p>
+                    <p>Last: 23 Apr 2026 23:01</p>
+                    <div className="flex gap-2">
+                      <button className="btn-secondary" type="button">
+                        Run Backup Now
+                      </button>
+                      <button className="btn-primary" type="submit">
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </SurfaceCard>
+              </div>
+            </>
+          )}
+
+          {activeSection === "change-password" && (
+            <SurfaceCard title="Change Password">
+              <form className="space-y-3" onSubmit={handlePasswordChange}>
                 <label className="form-field">
                   <span>Current Password</span>
                   <div className="relative">
@@ -611,37 +796,18 @@ export const SettingsPage = () => {
                   Update Password
                 </button>
               </form>
-            </div>
-          </div>
-        </SurfaceCard>
+            </SurfaceCard>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Backup Settings">
-          <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
-            <p>Automatic backup: Daily at 11:00 PM</p>
-            <p>Last backup: 23 Apr 2026, 23:01</p>
-            <div className="flex gap-2">
-              <button className="btn-secondary" type="button">
-                Run Backup Now
-              </button>
-              <button className="btn-primary" type="submit">
-                Save Backup Settings
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-
-      </div>
-
-      <SuccessToast
-        message="Password updated successfully."
-        onClose={() => setShowPasswordToast(false)}
-        open={showPasswordToast}
-        title="Security Updated"
+      <AppToast
+        message={toastMessage}
+        onClose={() => setToastOpen(false)}
+        open={toastOpen}
+        title={toastTitle}
+        tone={toastTone}
       />
     </div>
   );
 };
-
-

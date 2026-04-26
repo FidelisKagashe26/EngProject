@@ -23,6 +23,11 @@ const loginSchema = z.object({
   password: z.string().min(6),
 });
 
+const updateMeSchema = z.object({
+  fullName: z.string().min(2).max(160),
+  email: z.string().email(),
+});
+
 const changePasswordSchema = z.object({
   oldPassword: z.string().min(6),
   newPassword: z.string().min(8),
@@ -520,6 +525,87 @@ router.get(
     }
 
     res.json({ user: mapUser(user) });
+  }),
+);
+
+router.put(
+  "/me",
+  authenticateToken,
+  handleAsync(async (req, res) => {
+    const authUser = req.authUser;
+    if (!authUser) {
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const parsed = updateMeSchema.parse(req.body);
+    const nextFullName = parsed.fullName.trim();
+    const nextEmail = normalizeEmail(parsed.email);
+
+    if (nextFullName.length < 2) {
+      res.status(400).json({ message: "Full name must have at least 2 characters." });
+      return;
+    }
+
+    const userResult = await db.query<UserRow>(
+      `
+      SELECT id, company_id, full_name, email, role, status, password_hash
+      FROM engicost.users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [authUser.userId],
+    );
+
+    if (userResult.rowCount === 0) {
+      res.status(404).json({ message: "User not found." });
+      return;
+    }
+
+    const user = userResult.rows[0];
+
+    const duplicateResult = await db.query<{ id: number }>(
+      `
+      SELECT id
+      FROM engicost.users
+      WHERE lower(email) = $1
+        AND id <> $2
+      LIMIT 1
+      `,
+      [nextEmail, user.id],
+    );
+
+    if (duplicateResult.rows.length > 0) {
+      res.status(409).json({ message: "Email address is already in use by another account." });
+      return;
+    }
+
+    const updatedResult = await db.query<UserRow>(
+      `
+      UPDATE engicost.users
+      SET full_name = $2, email = $3, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, company_id, full_name, email, role, status, password_hash
+      `,
+      [user.id, nextFullName, nextEmail],
+    );
+
+    const updatedUser = updatedResult.rows[0];
+
+    await db.query(
+      `
+      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+      VALUES ($1, $2, $3, 'Update Profile', 'Auth', NULL, 'User updated own account profile details', $4)
+      `,
+      [
+        makeId("ACT"),
+        updatedUser.company_id,
+        updatedUser.full_name,
+        req.ip || "unknown",
+      ],
+    );
+
+    res.json({ user: mapUser(updatedUser) });
   }),
 );
 

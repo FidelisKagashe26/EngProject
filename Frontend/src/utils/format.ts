@@ -54,3 +54,24 @@ export const formatDate = (date: string): string =>
     month: "short",
     year: "numeric",
   });
+
+export const formatDateTime = (value: string): string => {
+  if (!value || value.trim().length === 0) {
+    return "Date/time unavailable";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Date/time unavailable";
+  }
+
+  return parsed.toLocaleString("en-TZ", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+};

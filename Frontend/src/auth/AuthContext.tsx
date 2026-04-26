@@ -46,6 +46,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: (input: LoginInput) => Promise<void>;
   logout: () => Promise<void>;
+  updateCurrentUser: (nextUser: AuthUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -116,6 +117,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [resetAuth]);
 
+  const updateCurrentUser = useCallback((nextUser: AuthUser) => {
+    setUser(nextUser);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -123,8 +128,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isAuthenticated: user !== null,
       login,
       logout,
+      updateCurrentUser,
     }),
-    [user, loading, login, logout],
+    [user, loading, login, logout, updateCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

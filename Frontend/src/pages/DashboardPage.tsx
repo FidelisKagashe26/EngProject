@@ -32,7 +32,7 @@ import {
 } from "../data/mockData";
 import { useTablePagination } from "../hooks/useTablePagination";
 import { api, type DashboardResponse } from "../services/api";
-import { formatTzs } from "../utils/format";
+import { formatDateTime, formatTzs } from "../utils/format";
 
 const statusColorMap: Record<string, string> = {
   Active: "#0b2a53",
@@ -81,7 +81,7 @@ const fallbackDashboard: DashboardResponse = {
     title: "Recent Activity",
     module: "General",
     description: item,
-    createdAt: "",
+    createdAt: new Date(Date.now() - index * 30 * 60 * 1000).toISOString(),
   })),
 };
 
@@ -89,7 +89,6 @@ export const DashboardPage = () => {
   const [dashboard, setDashboard] = useState<DashboardResponse>(fallbackDashboard);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showLoadingPreview, setShowLoadingPreview] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -133,13 +132,6 @@ export const DashboardPage = () => {
       <SectionTitle
         action={
           <div className="flex gap-2">
-            <button
-              className="btn-secondary text-xs"
-              onClick={() => setShowLoadingPreview((current) => !current)}
-              type="button"
-            >
-              {showLoadingPreview ? "Hide Loading State" : "Show Loading State"}
-            </button>
             <button className="btn-accent">Export Snapshot</button>
           </div>
         }
@@ -150,15 +142,6 @@ export const DashboardPage = () => {
       {error && (
         <SurfaceCard>
           <p className="text-sm text-amber-700">{error}</p>
-        </SurfaceCard>
-      )}
-
-      {showLoadingPreview && (
-        <SurfaceCard subtitle="Example loading UI for cards and tables" title="Loading State Preview">
-          <div className="space-y-4">
-            <SkeletonCards />
-            <SkeletonTable rows={3} />
-          </div>
         </SurfaceCard>
       )}
 
@@ -218,7 +201,7 @@ export const DashboardPage = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SurfaceCard subtitle="Monthly Income vs Expenses (Jan-Jun)" title="Financial Overview">
           <IncomeExpenseChart data={dashboard.monthlyFinance} />
         </SurfaceCard>
@@ -230,7 +213,8 @@ export const DashboardPage = () => {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <SurfaceCard
-          right={<Link className="text-xs font-semibold text-[#0b2a53]" to="/projects">View all</Link>}
+          className="xl:col-span-2"
+          right={<Link className="text-xs font-semibold text-[var(--primary)] hover:opacity-90" to="/projects">View all</Link>}
           title="Recent Projects"
         >
           {loading ? (
@@ -299,9 +283,9 @@ export const DashboardPage = () => {
           )}
         </SurfaceCard>
 
-        <div className="space-y-4">
+        <div className="space-y-4 xl:col-span-1">
           <SurfaceCard title="Overspending / Budget Alerts">
-            <div className="space-y-3">
+            <div className="space-y-4">
               {dashboard.alerts.map((alert) => (
                 <AlertCallout
                   key={alert.id}
@@ -323,7 +307,13 @@ export const DashboardPage = () => {
             <ul className="space-y-3 text-sm text-slate-700">
               {dashboard.recentActivities.map((activity) => (
                 <li className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2" key={activity.id}>
-                  {activity.description}
+                  <p className="text-sm text-slate-700">{activity.description}</p>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                    <span className="font-semibold text-slate-600">{activity.module}</span>
+                    <time dateTime={activity.createdAt}>
+                      {formatDateTime(activity.createdAt)}
+                    </time>
+                  </div>
                 </li>
               ))}
             </ul>

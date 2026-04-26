@@ -65,7 +65,7 @@ export const DonutChart = ({
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Projects</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
         {data.map((item) => (
           <div className="flex items-center gap-2 text-xs font-medium text-slate-700" key={item.label}>
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />

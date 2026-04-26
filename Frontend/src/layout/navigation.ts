@@ -2,7 +2,6 @@ import {
   Activity,
   Bell,
   BriefcaseBusiness,
-  ClipboardList,
   Cog,
   CreditCard,
   DollarSign,
@@ -27,7 +26,6 @@ export interface NavItem {
 export const mainNavItems: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: Gauge },
   { label: "Projects / Sites", path: "/projects", icon: BriefcaseBusiness },
-  { label: "Tenders & Contracts", path: "/tenders", icon: ClipboardList },
   { label: "Labor / Workforce", path: "/labor", icon: HardHat },
   { label: "Materials", path: "/materials", icon: Package },
   { label: "Expenses", path: "/expenses", icon: Receipt },

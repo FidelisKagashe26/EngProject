@@ -140,17 +140,35 @@ export const TendersPage = () => {
       .slice(0, 5);
   }, [documents, selectedTender]);
 
+  const contractsWithVariations = useMemo(
+    () => rows.filter((row) => row.variationOrders > 0).length,
+    [rows],
+  );
+
+  const contractsWithoutDocuments = useMemo(
+    () => rows.filter((row) => row.documents === 0).length,
+    [rows],
+  );
+
+  const averageWorkersLinked = useMemo(() => {
+    if (rows.length === 0) {
+      return 0;
+    }
+    const totalWorkers = rows.reduce((sum, row) => sum + row.workerCount, 0);
+    return Math.round(totalWorkers / rows.length);
+  }, [rows]);
+
   return (
     <div className="space-y-6">
       <SectionTitle
         action={
           <Link className="btn-primary" to="/projects/new">
             <Plus className="h-4 w-4" />
-            Add Contract
+            Register Contract
           </Link>
         }
-        subtitle="Manage contracts, and trace labor/material linkage per project/site."
-        title="Tenders & Contracts"
+        subtitle="Contract governance view: terms, milestones, variation orders, and compliance linkage."
+        title="Contracts Governance"
       />
 
       {error && (
@@ -159,28 +177,39 @@ export const TendersPage = () => {
         </SurfaceCard>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <SurfaceCard>
+        <p className="text-sm text-slate-600">
+          Use <span className="font-semibold text-slate-900">Projects / Sites</span> for execution
+          performance and budget tracking. Use this page for{" "}
+          <span className="font-semibold text-slate-900">contract terms, milestones, variations</span>,
+          and document/compliance linkage.
+        </p>
+      </SurfaceCard>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <SurfaceCard title="Contracts">
           <p className="text-2xl font-bold text-slate-900">{summary.totalContracts}</p>
         </SurfaceCard>
-        <SurfaceCard title="Contract Sum">
-          <p className="text-2xl font-bold text-slate-900">
-            {formatTzs(summary.totalContractSum)}
-          </p>
-        </SurfaceCard>
-        <SurfaceCard title="Labor Linked">
-          <p className="text-2xl font-bold text-slate-900">
-            {formatTzs(summary.totalLaborCost)}
-          </p>
-        </SurfaceCard>
-        <SurfaceCard title="Materials Linked">
-          <p className="text-2xl font-bold text-slate-900">
-            {formatTzs(summary.totalMaterialCost)}
-          </p>
-        </SurfaceCard>
         <SurfaceCard title="Open Variations">
+          <p className="text-2xl font-bold text-amber-700">{summary.openVariationOrders}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            across {contractsWithVariations} contract{contractsWithVariations === 1 ? "" : "s"}
+          </p>
+        </SurfaceCard>
+        <SurfaceCard title="Contracts at Risk">
+          <p className="text-2xl font-bold text-red-700">{summary.overBudgetContracts}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Pending Client Payments">
+          <p className="text-2xl font-bold text-slate-900">{formatTzs(summary.pendingClientPayments)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Missing Contract Docs">
           <p className="text-2xl font-bold text-amber-700">
-            {summary.openVariationOrders}
+            {contractsWithoutDocuments}
+          </p>
+        </SurfaceCard>
+        <SurfaceCard title="Avg Workers Linked">
+          <p className="text-2xl font-bold text-slate-900">
+            {averageWorkersLinked}
           </p>
         </SurfaceCard>
       </div>
@@ -233,7 +262,7 @@ export const TendersPage = () => {
         </div>
       </SurfaceCard>
 
-      <SurfaceCard title="Tender & Contract List">
+      <SurfaceCard title="Contract Governance Table">
         {loading ? (
           <SkeletonTable rows={4} />
         ) : filteredRows.length === 0 ? (
@@ -244,18 +273,17 @@ export const TendersPage = () => {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table min-w-[1220px]">
+              <table className="data-table min-w-[1380px]">
                 <thead>
                   <tr>
                     <th>S/N</th>
-                    <th>Project</th>
-                    <th>Tender / Contract No.</th>
-                    <th>Contract Sum</th>
-                    <th>Labor Linked</th>
-                    <th>Material Linked</th>
-                    <th>Variation Orders</th>
+                    <th>Project / Site</th>
+                    <th>Contract No.</th>
+                    <th>Payment Terms</th>
+                    <th>Milestones</th>
+                    <th>Variations</th>
+                    <th>Linkage</th>
                     <th>Status</th>
-                    <th>Documents</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -278,18 +306,40 @@ export const TendersPage = () => {
                         >
                           {item.projectName}
                         </button>
+                        <p className="mt-1 text-xs text-slate-500">{item.siteLocation}</p>
                       </td>
                       <td>{item.contractNo}</td>
-                      <td>{formatTzs(item.contractSum)}</td>
-                      <td>{formatTzs(item.laborCost)}</td>
-                      <td>{formatTzs(item.materialCost)}</td>
-                      <td>{item.variationOrders}</td>
+                      <td className="max-w-[240px] text-xs whitespace-normal break-words text-slate-600">
+                        {item.paymentTerms}
+                      </td>
+                      <td className="max-w-[280px] text-xs whitespace-normal break-words text-slate-600">
+                        {item.milestones}
+                      </td>
+                      <td>
+                        <span className="font-semibold text-amber-700">{item.variationOrders}</span>
+                      </td>
+                      <td>
+                        <div className="space-y-0.5 text-xs text-slate-600">
+                          <p>
+                            Workers: <span className="font-semibold">{item.workerCount}</span>
+                          </p>
+                          <p>
+                            Material Req/Purchase:{" "}
+                            <span className="font-semibold">
+                              {item.materialRequirementCount}/{item.materialPurchaseCount}
+                            </span>
+                          </p>
+                          <p>
+                            Docs:{" "}
+                            <span className="font-semibold">{item.documents}</span>
+                          </p>
+                        </div>
+                      </td>
                       <td>
                         <StatusBadge status={item.status} />
                       </td>
-                      <td>{item.documents} files</td>
                       <td>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Link
                             className="btn-secondary !px-2 !py-1 text-xs"
                             to={`/projects/${encodeURIComponent(item.projectId)}`}
@@ -304,9 +354,9 @@ export const TendersPage = () => {
                           </Link>
                           <Link
                             className="btn-secondary !px-2 !py-1 text-xs"
-                            to={`/materials?projectId=${encodeURIComponent(item.projectId)}`}
+                            to={`/documents#upload-document`}
                           >
-                            Materials
+                            Docs
                           </Link>
                         </div>
                       </td>
@@ -338,6 +388,24 @@ export const TendersPage = () => {
             </p>
           ) : (
             <div className="space-y-4 text-sm text-slate-700">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <p>
+                  Tender Amount:{" "}
+                  <span className="font-semibold">{formatTzs(selectedTender.tenderAmount)}</span>
+                </p>
+                <p>
+                  Contract Sum:{" "}
+                  <span className="font-semibold">{formatTzs(selectedTender.contractSum)}</span>
+                </p>
+                <p>
+                  Amount Received:{" "}
+                  <span className="font-semibold">{formatTzs(selectedTender.amountReceived)}</span>
+                </p>
+                <p>
+                  Total Spent:{" "}
+                  <span className="font-semibold">{formatTzs(selectedTender.totalSpent)}</span>
+                </p>
+              </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Scope of Work Summary
@@ -375,6 +443,10 @@ export const TendersPage = () => {
                   <span className="font-semibold">
                     {selectedTender.materialPurchaseCount}
                   </span>
+                </p>
+                <p>
+                  Open Variations:{" "}
+                  <span className="font-semibold text-amber-700">{selectedTender.variationOrders}</span>
                 </p>
                 <p>
                   Remaining Balance:{" "}

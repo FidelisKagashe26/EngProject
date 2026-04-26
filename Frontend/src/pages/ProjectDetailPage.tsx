@@ -4,8 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { StackedCostBar } from "../components/charts";
 import { ProgressBar, SectionTitle, StatusBadge, SurfaceCard } from "../components/ui";
 import { projects as fallbackProjects, recentActivities } from "../data/mockData";
-import { api, type ProjectApiRecord } from "../services/api";
-import { formatTzs } from "../utils/format";
+import { api, type ProjectApiRecord, type TenderApiRecord } from "../services/api";
+import { formatDate, formatTzs } from "../utils/format";
 
 const projectTabs = [
   "Overview",
@@ -27,6 +27,8 @@ type ViewProject = {
   site: string;
   client: string;
   contractNumber: string;
+  startDate: string;
+  endDate: string;
   contractValue: number;
   amountReceived: number;
   spent: number;
@@ -41,6 +43,8 @@ const toViewProject = (row: ProjectApiRecord): ViewProject => ({
   site: row.siteLocation,
   client: row.clientName,
   contractNumber: row.contractNumber,
+  startDate: row.startDate,
+  endDate: row.expectedCompletionDate,
   contractValue: row.contractValue,
   amountReceived: row.amountReceived,
   spent: row.totalSpent,
@@ -55,6 +59,8 @@ const fallbackRows: ViewProject[] = fallbackProjects.map((project) => ({
   site: project.site,
   client: project.client,
   contractNumber: project.contractNumber,
+  startDate: project.startDate,
+  endDate: project.endDate,
   contractValue: project.contractValue,
   amountReceived: project.amountReceived,
   spent: project.spent,
@@ -71,12 +77,45 @@ const getFallbackProject = (projectId?: string): ViewProject => {
   return fallbackRows[0];
 };
 
+const toProjectFallbackContract = (project: ViewProject): TenderApiRecord => ({
+  id: `local-contract-${project.id}`,
+  projectId: project.id,
+  projectName: project.name,
+  siteLocation: project.site,
+  clientName: project.client,
+  contractNo: project.contractNumber,
+  tenderAmount: project.contractValue,
+  contractSum: project.contractValue,
+  amountReceived: project.amountReceived,
+  totalSpent: project.spent,
+  remainingBalance: project.contractValue - project.spent,
+  pendingClientPayments: project.pendingPayments,
+  paymentTerms:
+    "Milestone-based client payments with retention release at practical completion.",
+  milestones:
+    "Mobilization, sub-structure completion, main works execution, inspection, and handover.",
+  variationOrders: 0,
+  status: project.status,
+  progress: project.progress,
+  documents: 0,
+  workerCount: 0,
+  materialRequirementCount: 0,
+  materialPurchaseCount: 0,
+  laborCost: 0,
+  materialCost: 0,
+  startDate: project.startDate,
+  expectedCompletionDate: project.endDate,
+});
+
 export const ProjectDetailPage = () => {
   const { projectId = "" } = useParams();
   const [activeTab, setActiveTab] = useState<ProjectTab>("Overview");
   const [project, setProject] = useState<ViewProject>(getFallbackProject(projectId));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [contract, setContract] = useState<TenderApiRecord | null>(null);
+  const [contractLoading, setContractLoading] = useState(true);
+  const [contractError, setContractError] = useState("");
 
   useEffect(() => {
     if (!projectId) {
@@ -112,6 +151,78 @@ export const ProjectDetailPage = () => {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadContract = async () => {
+      if (!project.id) {
+        if (mounted) {
+          setContract(null);
+          setContractLoading(false);
+          setContractError("");
+        }
+        return;
+      }
+
+      setContractLoading(true);
+      try {
+        const response = await api.getTenders({ projectId: project.id });
+        if (!mounted) {
+          return;
+        }
+
+        const matchedContract =
+          response.rows.find(
+            (row) =>
+              row.projectId === project.id &&
+              row.contractNo.trim().toLowerCase() ===
+                project.contractNumber.trim().toLowerCase(),
+          ) ?? response.rows[0] ?? null;
+
+        if (matchedContract) {
+          setContract(matchedContract);
+          setContractError("");
+        } else {
+          setContract(toProjectFallbackContract(project));
+          setContractError(
+            "No dedicated contract record found yet. Showing contract snapshot from project data.",
+          );
+        }
+      } catch {
+        if (!mounted) {
+          return;
+        }
+        setContract(toProjectFallbackContract(project));
+        setContractError(
+          "Contract registry not reachable. Showing contract snapshot from project data.",
+        );
+      } finally {
+        if (mounted) {
+          setContractLoading(false);
+        }
+      }
+    };
+
+    void loadContract();
+    return () => {
+      mounted = false;
+    };
+  }, [
+    project.amountReceived,
+    project.client,
+    project.contractNumber,
+    project.contractValue,
+    project.endDate,
+    project.id,
+    project.name,
+    project.pendingPayments,
+    project.progress,
+    project.site,
+    project.spent,
+    project.startDate,
+    project.status,
+  ]);
+
   const remainingBalance = project.contractValue - project.spent;
   const estimatedProfit = project.amountReceived - project.spent;
   const budgetUsed = project.contractValue > 0
@@ -123,12 +234,16 @@ export const ProjectDetailPage = () => {
     if (activeTab === "Overview") {
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
             <SurfaceCard title="Financial Summary">
               <p className="text-xs text-slate-500">Contract Value</p>
-              <p className="mt-1 text-lg font-bold text-slate-900">{formatTzs(project.contractValue)}</p>
+              <p className="mt-1 text-base font-bold leading-tight break-words text-slate-900 [overflow-wrap:anywhere] sm:text-lg">
+                {formatTzs(project.contractValue)}
+              </p>
               <p className="mt-3 text-xs text-slate-500">Amount Received</p>
-              <p className="mt-1 text-sm font-semibold text-slate-700">{formatTzs(project.amountReceived)}</p>
+              <p className="mt-1 text-sm font-semibold leading-tight break-words text-slate-700 [overflow-wrap:anywhere]">
+                {formatTzs(project.amountReceived)}
+              </p>
             </SurfaceCard>
             <SurfaceCard title="Spending Breakdown">
               <StackedCostBar labor={18_200_000} material={21_600_000} operations={8_700_000} />
@@ -149,7 +264,7 @@ export const ProjectDetailPage = () => {
           </div>
 
           <SurfaceCard title="Budget vs Actual Comparison">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
               <div className="metric-tile">
                 <p className="metric-label">Planned Budget</p>
                 <p className="metric-value">{formatTzs(50_000_000)}</p>
@@ -178,6 +293,149 @@ export const ProjectDetailPage = () => {
       );
     }
 
+    if (activeTab === "Contract") {
+      return (
+        <div className="space-y-4">
+          {contractError && (
+            <SurfaceCard>
+              <p className="text-sm text-amber-700">{contractError}</p>
+            </SurfaceCard>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <SurfaceCard className="xl:col-span-2" title="Contract Terms & Milestones">
+              {contractLoading ? (
+                <p className="text-sm text-slate-500">Loading contract governance data...</p>
+              ) : !contract ? (
+                <p className="text-sm text-slate-500">
+                  No contract detail available for this project.
+                </p>
+              ) : (
+                <div className="space-y-4 text-sm text-slate-700">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="metric-tile">
+                      <p className="metric-label">Contract No.</p>
+                      <p className="metric-value break-words [overflow-wrap:anywhere]">
+                        {contract.contractNo}
+                      </p>
+                    </div>
+                    <div className="metric-tile">
+                      <p className="metric-label">Contract Sum</p>
+                      <p className="metric-value break-words [overflow-wrap:anywhere]">
+                        {formatTzs(contract.contractSum)}
+                      </p>
+                    </div>
+                    <div className="metric-tile">
+                      <p className="metric-label">Status</p>
+                      <div className="mt-2">
+                        <StatusBadge status={contract.status} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Payment Terms
+                    </p>
+                    <p className="mt-1 whitespace-pre-line break-words [overflow-wrap:anywhere]">
+                      {contract.paymentTerms}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Milestones
+                    </p>
+                    <p className="mt-1 whitespace-pre-line break-words [overflow-wrap:anywhere]">
+                      {contract.milestones}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Contract Timeline
+                    </p>
+                    <p className="mt-1">
+                      {formatDate(contract.startDate)} -{" "}
+                      {formatDate(contract.expectedCompletionDate)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </SurfaceCard>
+
+            <SurfaceCard title="Governance Snapshot">
+              {contractLoading ? (
+                <p className="text-sm text-slate-500">Preparing snapshot...</p>
+              ) : !contract ? (
+                <p className="text-sm text-slate-500">
+                  Contract governance data unavailable.
+                </p>
+              ) : (
+                <div className="space-y-3 text-sm text-slate-700">
+                  <p className="flex items-center justify-between">
+                    <span>Variation Orders</span>
+                    <span className="font-semibold text-amber-700">
+                      {contract.variationOrders}
+                    </span>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    <span>Workers Linked</span>
+                    <span className="font-semibold">{contract.workerCount}</span>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    <span>Material Req/Purchase</span>
+                    <span className="font-semibold">
+                      {contract.materialRequirementCount}/{contract.materialPurchaseCount}
+                    </span>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    <span>Linked Documents</span>
+                    <span className="font-semibold">{contract.documents}</span>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    <span>Pending Client Payments</span>
+                    <span className="font-semibold text-amber-700">
+                      {formatTzs(contract.pendingClientPayments)}
+                    </span>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    <span>Remaining Balance</span>
+                    <span className="font-semibold text-emerald-700">
+                      {formatTzs(contract.remainingBalance)}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </SurfaceCard>
+          </div>
+
+          <SurfaceCard title="Linked Modules">
+            <div className="flex flex-wrap gap-2">
+              <Link
+                className="btn-secondary !px-3 !py-1.5 text-xs"
+                to={`/labor?projectId=${encodeURIComponent(project.id)}`}
+              >
+                Labor Linkage
+              </Link>
+              <Link
+                className="btn-secondary !px-3 !py-1.5 text-xs"
+                to={`/materials?projectId=${encodeURIComponent(project.id)}`}
+              >
+                Materials Linkage
+              </Link>
+              <Link
+                className="btn-secondary !px-3 !py-1.5 text-xs"
+                to="/documents#upload-document"
+              >
+                Contract Documents
+              </Link>
+            </div>
+          </SurfaceCard>
+        </div>
+      );
+    }
+
     return (
       <SurfaceCard title={`${activeTab} Workspace`}>
         <p className="text-sm text-slate-600">
@@ -186,7 +444,16 @@ export const ProjectDetailPage = () => {
         </p>
       </SurfaceCard>
     );
-  }, [activeTab, project.amountReceived, project.contractValue, project.spent]);
+  }, [
+    activeTab,
+    contract,
+    contractError,
+    contractLoading,
+    project.amountReceived,
+    project.contractValue,
+    project.id,
+    project.spent,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -215,11 +482,17 @@ export const ProjectDetailPage = () => {
               <Pencil className="h-4 w-4" />
               Edit Project
             </Link>
-            <Link className="btn-secondary" to="/expenses#add-expense-form">
+            <Link
+              className="btn-secondary"
+              to={`/expenses?projectId=${encodeURIComponent(project.id)}#add-expense-form`}
+            >
               <FilePlus2 className="h-4 w-4" />
               Add Expense
             </Link>
-            <Link className="btn-secondary" to="/payments#add-payment-form">
+            <Link
+              className="btn-secondary"
+              to={`/payments?projectId=${encodeURIComponent(project.id)}#add-payment-form`}
+            >
               <HandCoins className="h-4 w-4" />
               Add Payment
             </Link>
@@ -230,58 +503,89 @@ export const ProjectDetailPage = () => {
       />
 
       <SurfaceCard>
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-          <div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wider text-slate-500">Status</p>
             <div className="mt-2">
               <StatusBadge status={project.status} />
             </div>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wider text-slate-500">Progress</p>
             <div className="mt-2">
               <ProgressBar value={project.progress} />
             </div>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wider text-slate-500">Contract Value</p>
-            <p className="mt-2 text-lg font-bold text-slate-900">{formatTzs(project.contractValue)}</p>
+            <p className="mt-2 text-base font-bold leading-tight break-words text-slate-900 [overflow-wrap:anywhere] sm:text-lg">
+              {formatTzs(project.contractValue)}
+            </p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 md:col-span-2 2xl:col-span-1">
             <p className="text-xs uppercase tracking-wider text-slate-500">Quick Actions</p>
-            <div className="mt-2 flex gap-2 text-xs">
-              <Link className="btn-secondary !px-2 !py-1" to="/expenses#add-expense-form">Expense</Link>
-              <Link className="btn-secondary !px-2 !py-1" to="/payments#add-payment-form">Payment</Link>
-              <Link className="btn-secondary !px-2 !py-1" to="/materials#add-material-purchase-form">Material</Link>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <Link
+                className="btn-secondary !px-2 !py-1"
+                to={`/expenses?projectId=${encodeURIComponent(project.id)}#add-expense-form`}
+              >
+                Expense
+              </Link>
+              <Link
+                className="btn-secondary !px-2 !py-1"
+                to={`/payments?projectId=${encodeURIComponent(project.id)}#add-payment-form`}
+              >
+                Payment
+              </Link>
+              <Link
+                className="btn-secondary !px-2 !py-1"
+                to={`/materials?projectId=${encodeURIComponent(project.id)}#add-material-purchase-form`}
+              >
+                Material
+              </Link>
             </div>
           </div>
         </div>
       </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-7">
-        <SurfaceCard className="xl:col-span-1" title="Contract Value">
-          <p className="text-lg font-bold text-slate-900">{formatTzs(project.contractValue)}</p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Contract Value">
+          <p className="text-base font-bold leading-tight break-words text-slate-900 [overflow-wrap:anywhere] sm:text-lg">
+            {formatTzs(project.contractValue)}
+          </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Amount Received">
-          <p className="text-lg font-bold text-slate-900">{formatTzs(project.amountReceived)}</p>
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Amount Received">
+          <p className="text-base font-bold leading-tight break-words text-slate-900 [overflow-wrap:anywhere] sm:text-lg">
+            {formatTzs(project.amountReceived)}
+          </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Total Spent">
-          <p className="text-lg font-bold text-slate-900">{formatTzs(project.spent)}</p>
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Total Spent">
+          <p className="text-base font-bold leading-tight break-words text-slate-900 [overflow-wrap:anywhere] sm:text-lg">
+            {formatTzs(project.spent)}
+          </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Remaining Balance">
-          <p className="text-lg font-bold text-emerald-700">{formatTzs(remainingBalance)}</p>
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Remaining Balance">
+          <p className="text-base font-bold leading-tight break-words text-emerald-700 [overflow-wrap:anywhere] sm:text-lg">
+            {formatTzs(remainingBalance)}
+          </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Estimated Profit/Loss">
-          <p className={`text-lg font-bold ${estimatedProfit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Estimated Profit/Loss">
+          <p
+            className={`text-base font-bold leading-tight break-words [overflow-wrap:anywhere] sm:text-lg ${
+              estimatedProfit >= 0 ? "text-emerald-700" : "text-red-700"
+            }`}
+          >
             {formatTzs(estimatedProfit)}
           </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Pending Payments">
-          <p className="text-lg font-bold text-amber-700">{formatTzs(pendingPayments)}</p>
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Pending Payments">
+          <p className="text-base font-bold leading-tight break-words text-amber-700 [overflow-wrap:anywhere] sm:text-lg">
+            {formatTzs(pendingPayments)}
+          </p>
         </SurfaceCard>
-        <SurfaceCard className="xl:col-span-1" title="Budget Used %">
+        <SurfaceCard className="min-w-0 2xl:col-span-1" title="Budget Used %">
           <div className="space-y-2">
-            <p className="text-lg font-bold text-slate-900">{budgetUsed}%</p>
+            <p className="text-base font-bold text-slate-900 sm:text-lg">{budgetUsed}%</p>
             <ProgressBar value={budgetUsed} />
           </div>
         </SurfaceCard>

@@ -236,6 +236,68 @@ a {
     @apply bg-blue-50 text-[#0b2a53];
   }
 
+  .alert-callout {
+    @apply rounded-xl border p-4;
+  }
+
+  .alert-callout-title {
+    @apply mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .alert-callout-text {
+    @apply text-sm leading-relaxed;
+  }
+
+  .alert-callout-danger {
+    @apply border-red-200 bg-red-50 text-red-800;
+  }
+
+  .alert-callout-warning {
+    @apply border-amber-200 bg-amber-50 text-amber-800;
+  }
+
+  .alert-callout-info {
+    @apply border-blue-200 bg-blue-50 text-blue-800;
+  }
+
+  .app-toast {
+    @apply fixed right-4 top-4 z-[95] flex max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-lg;
+  }
+
+  .app-toast-icon {
+    @apply mt-0.5 h-5 w-5 shrink-0;
+  }
+
+  .app-toast-title {
+    @apply text-sm font-semibold;
+  }
+
+  .app-toast-message {
+    @apply text-xs;
+  }
+
+  .app-toast-close {
+    @apply transition hover:opacity-80;
+  }
+
+  .app-toast-success {
+    border-color: #86efac;
+    background-color: #ecfdf5;
+    color: #065f46;
+  }
+
+  .app-toast-error {
+    border-color: #fecaca;
+    background-color: #fef2f2;
+    color: #991b1b;
+  }
+
+  .app-toast-info {
+    border-color: #bfdbfe;
+    background-color: #eff6ff;
+    color: #1e40af;
+  }
+
   .dark .surface-card {
     @apply shadow-none;
   }
@@ -303,6 +365,42 @@ a {
 
   .dark .gui-select-option-selected {
     @apply bg-slate-700 text-slate-100;
+  }
+
+  .dark .alert-callout-danger {
+    border-color: #7f1d1d;
+    background-color: rgba(127, 29, 29, 0.28);
+    color: #fecaca;
+  }
+
+  .dark .alert-callout-warning {
+    border-color: #78350f;
+    background-color: rgba(120, 53, 15, 0.3);
+    color: #fde68a;
+  }
+
+  .dark .alert-callout-info {
+    border-color: #1e3a8a;
+    background-color: rgba(30, 58, 138, 0.28);
+    color: #bfdbfe;
+  }
+
+  .dark .app-toast-success {
+    border-color: #14532d;
+    background-color: rgba(6, 78, 59, 0.34);
+    color: #a7f3d0;
+  }
+
+  .dark .app-toast-error {
+    border-color: #7f1d1d;
+    background-color: rgba(127, 29, 29, 0.34);
+    color: #fecaca;
+  }
+
+  .dark .app-toast-info {
+    border-color: #1e3a8a;
+    background-color: rgba(30, 58, 138, 0.34);
+    color: #bfdbfe;
   }
 
   .dark .bg-white {

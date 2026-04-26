@@ -251,6 +251,218 @@ export interface MaterialsResponse {
   purchases: MaterialPurchaseApiRecord[];
 }
 
+export interface ExpenseApiRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  paidBy: string;
+  paymentMethod: string;
+  receiptRef: string;
+  status: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface ExpensesResponse {
+  rows: ExpenseApiRecord[];
+  charts: {
+    byCategory: Array<{ label: string; total: number }>;
+    byProject: Array<{ label: string; total: number }>;
+    monthlyTrend: Array<{ month: string; total: number }>;
+  };
+}
+
+export interface CreateExpensePayload {
+  projectId: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  paidBy: string;
+  paymentMethod: string;
+  receiptRef: string;
+  status: string;
+  notes: string;
+}
+
+export interface CreateExpenseResponse {
+  id: string;
+  projectId: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  paidBy: string;
+  paymentMethod: string;
+  receiptRef: string;
+  status: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface PaymentApiRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  client: string;
+  paymentType: string;
+  milestone: string;
+  amountExpected: number;
+  amountReceived: number;
+  balance: number;
+  paymentDate: string;
+  paymentMethod: string;
+  referenceNumber: string;
+  status: string;
+  notes: string;
+}
+
+export interface PaymentsResponse {
+  topCards: {
+    totalReceived: number;
+    pendingReceivables: number;
+    totalCashOutflow: number;
+    netCashPosition: number;
+    nextExpectedPayment: {
+      payment_date?: string;
+      amount_expected?: string;
+      amount_received?: string;
+      project_name?: string;
+      milestone?: string | null;
+    } | null;
+  };
+  rows: PaymentApiRecord[];
+  cashFlow: {
+    incomeVsOutflow: {
+      income: number;
+      outflow: number;
+    };
+    projectBalances: Array<{
+      projectName: string;
+      balance: number;
+    }>;
+  };
+}
+
+export interface CreatePaymentPayload {
+  projectId: string;
+  clientName: string;
+  paymentType: "Advance" | "Milestone" | "Stage" | "Final" | "Other";
+  milestone: string;
+  amountExpected: number;
+  amountReceived: number;
+  paymentDate: string;
+  paymentMethod: string;
+  referenceNumber: string;
+  status: string;
+  notes: string;
+}
+
+export interface CreatePaymentResponse {
+  id: string;
+  projectId: string;
+  clientName: string;
+  paymentType: string;
+  milestone: string;
+  amountExpected: number;
+  amountReceived: number;
+  paymentDate: string;
+  paymentMethod: string;
+  referenceNumber: string;
+  status: string;
+  notes: string;
+}
+
+export interface EquipmentApiRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  equipmentName: string;
+  equipmentType: string;
+  ownershipType: "Owned" | "Rented";
+  ownerName: string;
+  startDate: string;
+  endDate: string;
+  usageDays: number;
+  dailyRate: number;
+  rentalCost: number;
+  maintenanceCost: number;
+  totalCost: number;
+  status: string;
+  maintenanceNotes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EquipmentResponse {
+  summary: {
+    totalRecords: number;
+    totalRentalCost: number;
+    totalMaintenanceCost: number;
+    totalCost: number;
+    inUseCount: number;
+  };
+  rows: EquipmentApiRecord[];
+}
+
+export interface CreateEquipmentPayload {
+  projectId: string;
+  equipmentName: string;
+  equipmentType: string;
+  ownershipType: "Owned" | "Rented";
+  ownerName: string;
+  startDate: string;
+  endDate: string;
+  usageDays: number;
+  dailyRate: number;
+  maintenanceCost: number;
+  status: "In Use" | "Idle" | "Under Maintenance";
+  maintenanceNotes: string;
+}
+
+export interface SupplierApiRecord {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  location: string;
+  materialCategories: string;
+  totalPurchases: number;
+  outstandingBalance: number;
+  status: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SuppliersResponse {
+  summary: {
+    totalSuppliers: number;
+    totalPurchases: number;
+    totalOutstandingBalance: number;
+    activeSuppliers: number;
+  };
+  rows: SupplierApiRecord[];
+}
+
+export interface CreateSupplierPayload {
+  name: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  location: string;
+  materialCategories: string;
+  totalPurchases: number;
+  outstandingBalance: number;
+  status: string;
+  notes: string;
+}
+
 export interface CreateMaterialRequirementPayload {
   projectId: string;
   materialName: string;
@@ -306,6 +518,11 @@ export interface LoginResponse {
 
 export interface MeResponse {
   user: AuthUser;
+}
+
+export interface UpdateMyProfilePayload {
+  fullName: string;
+  email: string;
 }
 
 export interface ForgotPasswordRequestResponse {
@@ -458,6 +675,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   me: () => apiRequest<MeResponse>("/auth/me"),
+  updateMyProfile: (payload: UpdateMyProfilePayload) =>
+    apiRequest<MeResponse>("/auth/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   logout: () => apiRequest<{ message: string }>("/auth/logout", { method: "POST" }),
   changePassword: (payload: { oldPassword: string; newPassword: string }) =>
     apiRequest<{ message: string }>("/auth/change-password", {
@@ -511,6 +733,30 @@ export const api = {
     const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
     return apiRequest<TendersResponse>(`/tenders${suffix}`);
   },
+  getExpenses: () => apiRequest<ExpensesResponse>("/expenses"),
+  createExpense: (payload: CreateExpensePayload) =>
+    apiRequest<CreateExpenseResponse>("/expenses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getPayments: () => apiRequest<PaymentsResponse>("/payments"),
+  createPayment: (payload: CreatePaymentPayload) =>
+    apiRequest<CreatePaymentResponse>("/payments", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getEquipment: () => apiRequest<EquipmentResponse>("/equipment"),
+  createEquipment: (payload: CreateEquipmentPayload) =>
+    apiRequest<EquipmentApiRecord>("/equipment", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getSuppliers: () => apiRequest<SuppliersResponse>("/suppliers"),
+  createSupplier: (payload: CreateSupplierPayload) =>
+    apiRequest<SupplierApiRecord>("/suppliers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   getProjectById: (projectId: string) =>
     apiRequest<ProjectApiRecord>(`/projects/${encodeURIComponent(projectId)}`),
   createProject: (payload: CreateProjectPayload) =>

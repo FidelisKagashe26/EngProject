@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
+import { UnsavedChangesProvider } from "./guards/UnsavedChangesGuard";
 import { AppShell } from "./layout/AppShell";
 import {
   ActivityLogPage,
@@ -26,7 +27,6 @@ import {
   ResetPasswordPage,
   SettingsPage,
   SuppliersPage,
-  TendersPage,
   UsersRolesPage,
 } from "./pages";
 
@@ -81,13 +81,19 @@ function App() {
         />
 
         <Route element={<ProtectedRoute />}>
-          <Route element={<ProtectedAppLayout />}>
+          <Route
+            element={
+              <UnsavedChangesProvider>
+                <ProtectedAppLayout />
+              </UnsavedChangesProvider>
+            }
+          >
             <Route element={<DashboardPage />} path="/dashboard" />
             <Route element={<ProjectsPage />} path="/projects" />
             <Route element={<ProjectFormPage />} path="/projects/new" />
             <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
             <Route element={<ProjectFormPage />} path="/projects/:projectId/edit" />
-            <Route element={<TendersPage />} path="/tenders" />
+            <Route element={<Navigate replace to="/projects" />} path="/tenders" />
             <Route element={<LaborPage />} path="/labor" />
             <Route element={<MaterialsPage />} path="/materials" />
             <Route element={<ExpensesPage />} path="/expenses" />

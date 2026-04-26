@@ -594,6 +594,48 @@ export const GuiSelect = ({
   );
 };
 
+type AppToastTone = "success" | "error" | "info";
+
+export const AppToast = ({
+  open,
+  title,
+  message,
+  onClose,
+  tone = "success",
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+  tone?: AppToastTone;
+}) => {
+  if (!open) {
+    return null;
+  }
+
+  const icon =
+    tone === "error" ? (
+      <XCircle className="app-toast-icon" />
+    ) : tone === "info" ? (
+      <Info className="app-toast-icon" />
+    ) : (
+      <CheckCircle2 className="app-toast-icon" />
+    );
+
+  return (
+    <div className={`app-toast app-toast-${tone}`}>
+      {icon}
+      <div className="flex-1">
+        <p className="app-toast-title">{title}</p>
+        <p className="app-toast-message">{message}</p>
+      </div>
+      <button className="app-toast-close" onClick={onClose} type="button">
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+};
+
 export const SuccessToast = ({
   open,
   title,
@@ -609,18 +651,7 @@ export const SuccessToast = ({
     return null;
   }
 
-  return (
-    <div className="fixed right-4 top-4 z-[70] flex max-w-sm items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-lg">
-      <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />
-      <div className="flex-1">
-        <p className="text-sm font-semibold text-emerald-900">{title}</p>
-        <p className="text-xs text-emerald-800">{message}</p>
-      </div>
-      <button className="text-emerald-800" onClick={onClose} type="button">
-        <X className="h-4 w-4" />
-      </button>
-    </div>
-  );
+  return <AppToast message={message} onClose={onClose} open={open} title={title} tone="success" />;
 };
 
 export const ConfirmModal = ({
@@ -679,26 +710,26 @@ export const AlertCallout = ({
   const config =
     tone === "danger"
       ? {
-          icon: <XCircle className="h-4 w-4 text-red-700" />,
-          className: "border-red-200 bg-red-50 text-red-800",
+          icon: <XCircle className="h-4 w-4" />,
+          className: "alert-callout alert-callout-danger",
         }
       : tone === "warning"
       ? {
-          icon: <AlertTriangle className="h-4 w-4 text-amber-700" />,
-          className: "border-amber-200 bg-amber-50 text-amber-800",
+          icon: <AlertTriangle className="h-4 w-4" />,
+          className: "alert-callout alert-callout-warning",
         }
       : {
-          icon: <Info className="h-4 w-4 text-blue-700" />,
-          className: "border-blue-200 bg-blue-50 text-blue-800",
+          icon: <Info className="h-4 w-4" />,
+          className: "alert-callout alert-callout-info",
         };
 
   return (
-    <div className={`rounded-xl border p-3 ${config.className}`}>
-      <p className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+    <div className={config.className}>
+      <p className="alert-callout-title">
         {config.icon}
         {title}
       </p>
-      <p className="text-sm">{text}</p>
+      <p className="alert-callout-text">{text}</p>
     </div>
   );
 };

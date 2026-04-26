@@ -7,10 +7,31 @@ import { errorHandler } from "./middleware/errorHandler";
 import apiRouter from "./routes";
 
 const app = express();
+const configuredOrigins = env.corsOrigin
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
 
 app.use(
   cors({
-    origin: env.corsOrigin.split(",").map((origin) => origin.trim()),
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (configuredOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      if (env.nodeEnv !== "production") {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
     credentials: true,
   }),
 );

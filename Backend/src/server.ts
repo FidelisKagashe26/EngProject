@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import path from "path";
 import { env } from "./config/env";
 import { initializeDatabase } from "./db/init";
 import { db } from "./db/pool";
@@ -36,6 +37,9 @@ app.use(
   }),
 );
 app.use(express.json());
+
+// Serve uploaded files as static assets
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.get("/api/health", async (_req, res) => {
   try {

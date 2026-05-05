@@ -4,6 +4,13 @@ import { ProtectedRoute, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
 import { UnsavedChangesProvider } from "./guards/UnsavedChangesGuard";
+import { AboutPage } from "./landing/AboutPage";
+import { ContactPage } from "./landing/ContactPage";
+import { GalleryPage } from "./landing/GalleryPage";
+import { HomePage } from "./landing/HomePage";
+import { LandingLayout } from "./landing/LandingLayout";
+import { ServicesPage } from "./landing/ServicesPage";
+import { WebsiteSettingsProvider } from "./landing/WebsiteSettingsContext";
 import { AppShell } from "./layout/AppShell";
 import {
   ActivityLogPage,
@@ -28,6 +35,7 @@ import {
   SettingsPage,
   SuppliersPage,
   UsersRolesPage,
+  WorkOrdersPage,
 } from "./pages";
 
 const ProtectedAppLayout = () => {
@@ -55,15 +63,30 @@ const ProtectedAppLayout = () => {
 };
 
 function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+
+  // While checking stored token, show nothing to avoid flash of wrong page
+  if (loading) {
+    return <GlobalLoader />;
+  }
 
   return (
     <>
       <GlobalLoader />
       <Routes>
+        {/* ── Public landing routes ── */}
+        <Route element={<WebsiteSettingsProvider><LandingLayout /></WebsiteSettingsProvider>}>
+          <Route element={<HomePage />} path="/" />
+          <Route element={<ServicesPage />} path="/services" />
+          <Route element={<AboutPage />} path="/about" />
+          <Route element={<GalleryPage />} path="/gallery" />
+          <Route element={<ContactPage />} path="/contact" />
+        </Route>
+
+        {/* ── Auth routes ── */}
         <Route
           element={isAuthenticated ? <Navigate replace to="/dashboard" /> : <LoginPage />}
-          path="/"
+          path="/login"
         />
         <Route
           element={isAuthenticated ? <Navigate replace to="/dashboard" /> : <ForgotPasswordPage />}
@@ -94,6 +117,7 @@ function App() {
             <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
             <Route element={<ProjectFormPage />} path="/projects/:projectId/edit" />
             <Route element={<Navigate replace to="/projects" />} path="/tenders" />
+            <Route element={<WorkOrdersPage />} path="/work-orders" />
             <Route element={<LaborPage />} path="/labor" />
             <Route element={<MaterialsPage />} path="/materials" />
             <Route element={<ExpensesPage />} path="/expenses" />

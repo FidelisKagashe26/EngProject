@@ -109,7 +109,7 @@ export const AppShell = ({
       <UnsavedChangesRouteGuard />
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
         <Link className="mb-8 flex items-center justify-center" to="/dashboard">
-          <img alt={companyLogoAlt} className="h-14 w-auto object-contain" src="/EngLogo.png" />
+          <img alt={companyLogoAlt} className="h-20 w-auto object-contain" src="/EngLogo.png" />
         </Link>
 
         <nav className="space-y-1">
@@ -147,7 +147,7 @@ export const AppShell = ({
       </aside>
 
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur lg:ml-72">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6 sm:py-3">
           <div className="flex items-center gap-2 sm:gap-3">
             <button
               className="rounded-lg border border-slate-200 p-2 lg:hidden"
@@ -156,6 +156,10 @@ export const AppShell = ({
             >
               <Menu className="h-4 w-4 text-slate-700" />
             </button>
+            {/* Mobile logo — visible only on mobile */}
+            <Link className="flex items-center lg:hidden" to="/dashboard">
+              <img alt={companyLogoAlt} className="h-10 w-auto object-contain" src="/EngLogo.png" />
+            </Link>
             <div className="relative hidden sm:block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input

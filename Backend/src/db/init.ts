@@ -101,6 +101,16 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
+  // Add reminder tracking columns to notifications
+  await db.query(`
+    ALTER TABLE engicost.notifications
+    ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.notifications
+    ADD COLUMN IF NOT EXISTS last_reminded_at TIMESTAMP
+  `);
+
   await db.query(`
     ALTER TABLE engicost.users
     ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)
@@ -350,6 +360,32 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
+  // Work Orders table
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.work_orders (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      project_id VARCHAR(40) NOT NULL REFERENCES engicost.projects(id) ON DELETE CASCADE,
+      order_number VARCHAR(80) NOT NULL,
+      client_name VARCHAR(200) NOT NULL,
+      order_date DATE NOT NULL,
+      description TEXT NOT NULL,
+      materials_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      materials_profit_pct NUMERIC(6, 2) NOT NULL DEFAULT 0,
+      materials_profit_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      labour_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      labour_profit_pct NUMERIC(6, 2) NOT NULL DEFAULT 0,
+      labour_profit_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      total_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      total_profit NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      grand_total NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      status VARCHAR(40) NOT NULL DEFAULT 'Draft',
+      notes TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.password_reset_otps (
       id VARCHAR(40) PRIMARY KEY,
@@ -361,6 +397,49 @@ export const initializeDatabase = async (): Promise<void> => {
       consumed_at TIMESTAMP,
       attempts INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  // Quote requests from landing page contact form
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.quote_requests (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      full_name VARCHAR(160) NOT NULL,
+      email VARCHAR(180) NOT NULL,
+      phone VARCHAR(60),
+      service VARCHAR(120),
+      message TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'New',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  // Website settings (contact info, social links, etc.)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.website_settings (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      key VARCHAR(80) NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE (company_id, key)
+    );
+  `);
+
+  // Gallery items for the public website
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.gallery_items (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      title VARCHAR(220) NOT NULL,
+      subtitle VARCHAR(220) NOT NULL DEFAULT '',
+      category VARCHAR(80) NOT NULL DEFAULT 'General',
+      image_url TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
 

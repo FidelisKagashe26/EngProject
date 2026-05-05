@@ -136,7 +136,46 @@ export interface NotificationApiRecord {
   description: string;
   priority: string;
   status: string;
+  reminderCount: number;
+  lastRemindedAt: string | null;
   createdAt: string;
+}
+
+export interface WorkOrderApiRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  orderNumber: string;
+  clientName: string;
+  orderDate: string;
+  description: string;
+  materialsCost: number;
+  materialsProfitPct: number;
+  materialsProfitAmount: number;
+  labourCost: number;
+  labourProfitPct: number;
+  labourProfitAmount: number;
+  totalCost: number;
+  totalProfit: number;
+  grandTotal: number;
+  status: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkOrderPayload {
+  projectId: string;
+  orderNumber: string;
+  clientName: string;
+  orderDate: string;
+  description: string;
+  materialsCost: number;
+  materialsProfitPct: number;
+  labourCost: number;
+  labourProfitPct: number;
+  status: string;
+  notes: string;
 }
 
 export interface ActivityApiRecord {
@@ -156,7 +195,7 @@ export interface WorkerApiRecord {
   fullName: string;
   phone: string;
   skillRole: string;
-  paymentType: "Daily" | "Weekly" | "Monthly" | "Contract";
+  paymentType: "Hourly" | "Daily" | "Weekly" | "Monthly" | "Contract";
   rateAmount: number;
   assignedProjectId: string | null;
   assignedProjectName: string;
@@ -178,7 +217,7 @@ export interface CreateWorkerPayload {
   fullName: string;
   phone: string;
   skillRole: string;
-  paymentType: "Daily" | "Weekly" | "Monthly" | "Contract";
+  paymentType: "Hourly" | "Daily" | "Weekly" | "Monthly" | "Contract";
   rateAmount: number;
   assignedProjectId: string;
   notes: string;
@@ -190,6 +229,7 @@ export interface LaborPaymentPayload {
   workStart: string;
   workEnd: string;
   daysWorked: number;
+  hoursWorked: number;
   rateAmount: number;
   amountPaid: number;
   paymentMethod: string;
@@ -572,6 +612,183 @@ export type UpdateCompanyProfilePayload = Pick<
   "name" | "email" | "phone" | "location" | "currency"
 >;
 
+export interface CreateDocumentPayload {
+  projectId: string;
+  category: string;
+  documentName: string;
+  fileType: string;
+  fileSize: string;
+  fileReference: string;
+  uploadedBy: string;
+  notes: string;
+}
+
+export interface ReportProjectCostRow {
+  id: string;
+  projectName: string;
+  contractValue: number;
+  amountReceived: number;
+  laborCost: number;
+  materialCost: number;
+  otherExpenses: number;
+  totalSpent: number;
+  remainingBalance: number;
+  estimatedProfitLoss: number;
+  pendingClientPayments: number;
+  status: string;
+  progress: number;
+}
+
+export interface ReportsResponse {
+  totals: {
+    contractValue: number;
+    amountReceived: number;
+    laborCost: number;
+    materialCost: number;
+    otherExpenses: number;
+    totalSpent: number;
+    remainingBalance: number;
+    estimatedProfitLoss: number;
+  };
+  projectCostSummary: ReportProjectCostRow[];
+  laborByProject: Array<{ projectName: string; totalPaid: number; outstanding: number; workerCount: number }>;
+  materialByProject: Array<{ projectName: string; totalCost: number; purchaseCount: number }>;
+  expenseByProject: Array<{ projectName: string; totalAmount: number; expenseCount: number }>;
+  paymentByProject: Array<{ projectName: string; totalExpected: number; totalReceived: number; totalBalance: number }>;
+  expenseByCategory: Array<{ category: string; total: number; count: number }>;
+  monthlyExpenseTrend: Array<{ month: string; total: number }>;
+  budgetVariance: Array<{ projectName: string; contractValue: number; totalSpent: number; variance: number; variancePct: number }>;
+}
+
+export interface UserApiRecord {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string;
+  role: string;
+  status: string;
+  assignedProjects: string;
+  lastLogin: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsersResponse {
+  rows: UserApiRecord[];
+}
+
+export interface CreateUserPayload {
+  fullName: string;
+  email: string;
+  phone: string;
+  role: string;
+  assignedProjects: string;
+  status: string;
+  password?: string;
+}
+
+export interface UpdateUserPayload {
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  assignedProjects?: string;
+  status?: string;
+  password?: string;
+}
+
+export interface PettyCashApiRecord {
+  id: string;
+  projectId: string | null;
+  projectName: string;
+  transactionDate: string;
+  transactionType: "Cash In" | "Cash Out";
+  description: string;
+  amount: number;
+  recordedBy: string;
+  receiptRef: string;
+  status: "Pending" | "Reconciled";
+  notes: string;
+  createdAt: string;
+}
+
+export interface PettyCashResponse {
+  summary: {
+    totalCashIn: number;
+    totalCashOut: number;
+    pendingCount: number;
+  };
+  rows: PettyCashApiRecord[];
+}
+
+export interface CreatePettyCashPayload {
+  projectId: string;
+  transactionDate: string;
+  transactionType: "Cash In" | "Cash Out";
+  description: string;
+  amount: number;
+  recordedBy: string;
+  receiptRef: string;
+  status: "Pending" | "Reconciled";
+  notes: string;
+}
+
+export interface QuoteRequestApiRecord {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  service: string;
+  message: string;
+  status: "New" | "Read" | "Replied";
+  createdAt: string;
+}
+
+export interface SubmitQuoteRequestPayload {
+  fullName: string;
+  email: string;
+  phone: string;
+  service: string;
+  message: string;
+}
+
+export interface WebsiteSettings {
+  phone_main: string;
+  phone_whatsapp: string;
+  email_main: string;
+  location: string;
+  hours: string;
+  social_facebook: string;
+  social_instagram: string;
+  social_linkedin: string;
+  social_twitter: string;
+}
+
+export interface GalleryItemRecord {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  imageUrl: string;
+  sortOrder?: number;
+  isVisible?: boolean;
+  createdAt?: string;
+}
+
+export interface GalleryResponse {
+  items: GalleryItemRecord[];
+  categories: string[];
+}
+
+export interface CreateGalleryItemPayload {
+  title: string;
+  subtitle: string;
+  category: string;
+  imageUrl: string;
+  sortOrder?: number;
+  isVisible?: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   details: unknown;
@@ -775,6 +992,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  deleteWorker: (workerId: string) =>
+    apiRequest<{ message: string }>(`/workers/${encodeURIComponent(workerId)}`, {
+      method: "DELETE",
+    }),
   recordLaborPayment: (payload: LaborPaymentPayload) =>
     apiRequest<LaborPaymentApiRecord>("/workers/payments", {
       method: "POST",
@@ -792,6 +1013,141 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getDocuments: () => apiRequest<DocumentApiRecord[]>("/documents"),
+  createDocument: (payload: CreateDocumentPayload) =>
+    apiRequest<DocumentApiRecord>("/documents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteDocument: (id: string) =>
+    apiRequest<{ message: string }>(`/documents/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   getNotifications: () => apiRequest<NotificationApiRecord[]>("/notifications"),
+  remindNotification: (id: string) =>
+    apiRequest<{ id: string; reminderCount: number; lastRemindedAt: string; message: string }>(
+      `/notifications/${encodeURIComponent(id)}/remind`,
+      { method: "POST" },
+    ),
+  resolveNotification: (id: string) =>
+    apiRequest<{ message: string }>(`/notifications/${encodeURIComponent(id)}/resolve`, {
+      method: "PATCH",
+    }),
   getActivityLog: () => apiRequest<ActivityApiRecord[]>("/notifications/activity-log"),
+  getReports: () => apiRequest<ReportsResponse>("/reports"),
+  getPettyCash: () => apiRequest<PettyCashResponse>("/petty-cash"),
+  createPettyCash: (payload: CreatePettyCashPayload) =>
+    apiRequest<PettyCashApiRecord>("/petty-cash", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deletePettyCash: (id: string) =>
+    apiRequest<{ message: string }>(`/petty-cash/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  getUsers: () => apiRequest<UsersResponse>("/users"),
+  createUser: (payload: CreateUserPayload) =>
+    apiRequest<UserApiRecord>("/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (id: number, payload: UpdateUserPayload) =>
+    apiRequest<UserApiRecord>(`/users/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  suspendUser: (id: number) =>
+    apiRequest<{ message: string }>(`/users/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  getWorkOrders: (params?: { projectId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.projectId && params.projectId !== "All") query.set("projectId", params.projectId);
+    const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
+    return apiRequest<WorkOrderApiRecord[]>(`/work-orders${suffix}`);
+  },
+  getWorkOrderById: (id: string) =>
+    apiRequest<WorkOrderApiRecord>(`/work-orders/${encodeURIComponent(id)}`),
+  createWorkOrder: (payload: CreateWorkOrderPayload) =>
+    apiRequest<WorkOrderApiRecord>("/work-orders", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateWorkOrder: (id: string, payload: Partial<CreateWorkOrderPayload>) =>
+    apiRequest<WorkOrderApiRecord>(`/work-orders/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteWorkOrder: (id: string) =>
+    apiRequest<{ message: string }>(`/work-orders/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  // Public — no auth required
+  submitQuoteRequest: (payload: SubmitQuoteRequestPayload) =>
+    apiRequest<{ message: string; id: string }>("/public/quote-requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  // Admin — quote requests management
+  getQuoteRequests: () => apiRequest<QuoteRequestApiRecord[]>("/quote-requests"),
+  updateQuoteRequestStatus: (id: string, status: "New" | "Read" | "Replied") =>
+    apiRequest<{ message: string; id: string }>(`/quote-requests/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  deleteQuoteRequest: (id: string) =>
+    apiRequest<{ message: string }>(`/quote-requests/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  // Public — website settings (no auth)
+  getPublicWebsiteSettings: () =>
+    apiRequest<Partial<WebsiteSettings>>("/public/website-settings"),
+  // Admin — website settings
+  getWebsiteSettings: () =>
+    apiRequest<Partial<WebsiteSettings>>("/website-settings"),
+  saveWebsiteSettings: (payload: Partial<WebsiteSettings>) =>
+    apiRequest<Partial<WebsiteSettings>>("/website-settings", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  // Public — gallery (no auth)
+  getPublicGallery: () =>
+    apiRequest<GalleryResponse>("/public/gallery"),
+  // Admin — gallery management
+  getGallery: () =>
+    apiRequest<GalleryResponse>("/gallery"),
+  createGalleryItem: (payload: CreateGalleryItemPayload) =>
+    apiRequest<GalleryItemRecord>("/gallery", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateGalleryItem: (id: string, payload: Partial<CreateGalleryItemPayload>) =>
+    apiRequest<GalleryItemRecord>(`/gallery/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteGalleryItem: (id: string) =>
+    apiRequest<{ message: string }>(`/gallery/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  // Upload image file
+  uploadGalleryImage: async (file: File): Promise<{ url: string }> => {
+    const formData = new FormData();
+    formData.append("image", file);
+    // Use fetch directly (no Content-Type header — browser sets multipart boundary)
+    const headers = new Headers();
+    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+    const response = await fetch(`${API_BASE_URL}/upload/gallery`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    const payload = await response.json() as { url?: string; message?: string };
+    if (!response.ok) {
+      throw new ApiError(
+        (payload as { message?: string }).message ?? "Upload failed",
+        response.status,
+      );
+    }
+    return { url: (payload as { url: string }).url };
+  },
 };

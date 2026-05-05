@@ -6,7 +6,6 @@ import {
   ProgressBar,
   SectionTitle,
   SkeletonTable,
-  StatusBadge,
   SurfaceCard,
   TablePagination,
   GuiSelect,
@@ -55,14 +54,15 @@ export const MaterialsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
-  const [requirements, setRequirements] = useState<MaterialRequirementApiRecord[]>(
-    [],
-  );
+  const [requirements, setRequirements] = useState<MaterialRequirementApiRecord[]>([]);
   const [purchases, setPurchases] = useState<MaterialPurchaseApiRecord[]>([]);
-  const [listProjectFilter, setListProjectFilter] = useState(
-    projectFromQuery || "All",
-  );
+  const [listProjectFilter, setListProjectFilter] = useState(projectFromQuery || "All");
 
+  // Modal states
+  const [showRequirementModal, setShowRequirementModal] = useState(false);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+
+  // Requirement form
   const [requirementProjectId, setRequirementProjectId] = useState(projectFromQuery);
   const [requirementMaterialName, setRequirementMaterialName] = useState("");
   const [requiredQuantity, setRequiredQuantity] = useState("");
@@ -73,6 +73,7 @@ export const MaterialsPage = () => {
   const [requirementNotes, setRequirementNotes] = useState("");
   const [savingRequirement, setSavingRequirement] = useState(false);
 
+  // Purchase form
   const [purchaseProjectId, setPurchaseProjectId] = useState(projectFromQuery);
   const [purchaseRequirementId, setPurchaseRequirementId] = useState("");
   const [purchaseMaterialName, setPurchaseMaterialName] = useState("");
@@ -88,66 +89,40 @@ export const MaterialsPage = () => {
 
   useEffect(() => {
     let mounted = true;
-
     const load = async () => {
       try {
         const [projectRows, materialsResponse] = await Promise.all([
           api.getProjects(),
           api.getMaterials(),
         ]);
-
-        if (!mounted) {
-          return;
-        }
-
+        if (!mounted) return;
         setProjects(projectRows);
         setRequirements(materialsResponse.requirements);
         setPurchases(materialsResponse.purchases);
         setError("");
       } catch (loadError) {
-        if (!mounted) {
-          return;
-        }
-        const message =
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load materials data.";
-        setError(message);
+        if (!mounted) return;
+        setError(loadError instanceof Error ? loadError.message : "Failed to load materials data.");
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
     };
-
     void load();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
-    if (projectFromQuery.length === 0) {
-      return;
-    }
-
+    if (projectFromQuery.length === 0) return;
     setListProjectFilter(projectFromQuery);
     setRequirementProjectId(projectFromQuery);
     setPurchaseProjectId(projectFromQuery);
   }, [projectFromQuery]);
 
   useEffect(() => {
-    if (projects.length === 0) {
-      return;
-    }
-
-    const defaultProjectId = projects[0]?.id ?? "";
-    if (requirementProjectId.length === 0) {
-      setRequirementProjectId(projectFromQuery || defaultProjectId);
-    }
-    if (purchaseProjectId.length === 0) {
-      setPurchaseProjectId(projectFromQuery || defaultProjectId);
-    }
+    if (projects.length === 0) return;
+    const defaultId = projects[0]?.id ?? "";
+    if (requirementProjectId.length === 0) setRequirementProjectId(projectFromQuery || defaultId);
+    if (purchaseProjectId.length === 0) setPurchaseProjectId(projectFromQuery || defaultId);
   }, [projectFromQuery, projects, purchaseProjectId, requirementProjectId]);
 
   const refreshMaterials = async () => {
@@ -157,110 +132,70 @@ export const MaterialsPage = () => {
   };
 
   const requirementOptions = useMemo(
-    () =>
-      requirements.filter(
-        (requirement) =>
-          purchaseProjectId.length === 0 ||
-          requirement.projectId === purchaseProjectId,
-      ),
+    () => requirements.filter((r) => purchaseProjectId.length === 0 || r.projectId === purchaseProjectId),
     [purchaseProjectId, requirements],
   );
 
   useEffect(() => {
-    if (requirementOptions.length === 0) {
-      setPurchaseRequirementId("");
-      return;
-    }
-
-    if (
-      purchaseRequirementId.length > 0 &&
-      !requirementOptions.some((requirement) => requirement.id === purchaseRequirementId)
-    ) {
+    if (requirementOptions.length === 0) { setPurchaseRequirementId(""); return; }
+    if (purchaseRequirementId.length > 0 && !requirementOptions.some((r) => r.id === purchaseRequirementId)) {
       setPurchaseRequirementId("");
     }
   }, [purchaseRequirementId, requirementOptions]);
 
   const selectedRequirement = useMemo(
-    () =>
-      requirementOptions.find(
-        (requirement) => requirement.id === purchaseRequirementId,
-      ) ?? null,
+    () => requirementOptions.find((r) => r.id === purchaseRequirementId) ?? null,
     [purchaseRequirementId, requirementOptions],
   );
 
   useEffect(() => {
-    if (!selectedRequirement) {
-      return;
-    }
-
+    if (!selectedRequirement) return;
     setPurchaseMaterialName(selectedRequirement.materialName);
-    if (!unitCost || Number(unitCost) === 0) {
-      setUnitCost(String(selectedRequirement.estimatedUnitCost));
-    }
+    if (!unitCost || Number(unitCost) === 0) setUnitCost(String(selectedRequirement.estimatedUnitCost));
   }, [selectedRequirement, unitCost]);
 
   const tableRows = useMemo<MaterialTableRow[]>(() => {
-    return requirements.map((requirement) => {
-      const relatedPurchases = purchases.filter((purchase) => {
-        if (purchase.requirementId) {
-          return purchase.requirementId === requirement.id;
-        }
-        return (
-          purchase.projectId === requirement.projectId &&
-          normalizeMaterialName(purchase.materialName) ===
-            normalizeMaterialName(requirement.materialName)
-        );
+    return requirements.map((req) => {
+      const related = purchases.filter((p) => {
+        if (p.requirementId) return p.requirementId === req.id;
+        return p.projectId === req.projectId && normalizeMaterialName(p.materialName) === normalizeMaterialName(req.materialName);
       });
-
-      const latestPurchase = relatedPurchases.reduce<MaterialPurchaseApiRecord | null>(
-        (latest, current) => {
-          if (!latest) {
-            return current;
-          }
-          return current.purchaseDate > latest.purchaseDate ? current : latest;
-        },
-        null,
-      );
-
+      const latest = related.reduce<MaterialPurchaseApiRecord | null>((acc, cur) => {
+        if (!acc) return cur;
+        return cur.purchaseDate > acc.purchaseDate ? cur : acc;
+      }, null);
       return {
-        id: requirement.id,
-        projectId: requirement.projectId,
-        projectName: requirement.projectName,
-        materialName: requirement.materialName,
-        needed: requirement.requiredQuantity,
-        purchased: requirement.purchasedQuantity,
-        remaining: requirement.remainingQuantity,
-        unit: requirement.unit,
-        supplier: latestPurchase?.supplierName ?? "-",
-        unitCost: latestPurchase?.unitCost ?? requirement.estimatedUnitCost,
-        totalCost: latestPurchase?.totalCost ?? 0,
-        purchaseDate: latestPurchase?.purchaseDate ?? "",
-        deliveryStatus: latestPurchase?.deliveryStatus ?? "Pending Delivery",
+        id: req.id,
+        projectId: req.projectId,
+        projectName: req.projectName,
+        materialName: req.materialName,
+        needed: req.requiredQuantity,
+        purchased: req.purchasedQuantity,
+        remaining: req.remainingQuantity,
+        unit: req.unit,
+        supplier: latest?.supplierName ?? "-",
+        unitCost: latest?.unitCost ?? req.estimatedUnitCost,
+        totalCost: latest?.totalCost ?? 0,
+        purchaseDate: latest?.purchaseDate ?? "",
+        deliveryStatus: latest?.deliveryStatus ?? "Pending Delivery",
       };
     });
   }, [purchases, requirements]);
 
   const filteredRows = useMemo(() => {
-    if (listProjectFilter === "All") {
-      return tableRows;
-    }
-    return tableRows.filter((row) => row.projectId === listProjectFilter);
+    if (listProjectFilter === "All") return tableRows;
+    return tableRows.filter((r) => r.projectId === listProjectFilter);
   }, [listProjectFilter, tableRows]);
 
   const materialsPagination = useTablePagination(filteredRows);
 
-  const purchaseTotal = useMemo(() => {
-    return (Number(qtyPurchased) || 0) * (Number(unitCost) || 0);
-  }, [qtyPurchased, unitCost]);
+  const purchaseTotal = useMemo(() => (Number(qtyPurchased) || 0) * (Number(unitCost) || 0), [qtyPurchased, unitCost]);
 
   const purchaseProgress = useMemo(() => {
-    if (!selectedRequirement) {
-      return 0;
-    }
-
+    if (!selectedRequirement) return 0;
     const target = selectedRequirement.requiredQuantity || 1;
-    const expectedTotal = selectedRequirement.purchasedQuantity + (Number(qtyPurchased) || 0);
-    return Math.min(100, Math.max(0, Math.round((expectedTotal / target) * 100)));
+    const expected = selectedRequirement.purchasedQuantity + (Number(qtyPurchased) || 0);
+    return Math.min(100, Math.max(0, Math.round((expected / target) * 100)));
   }, [qtyPurchased, selectedRequirement]);
 
   const resetRequirementForm = () => {
@@ -285,18 +220,12 @@ export const MaterialsPage = () => {
   };
 
   const handleSaveRequirement = async () => {
-    if (
-      requirementProjectId.trim().length === 0 ||
-      requirementMaterialName.trim().length < 2 ||
-      (Number(requiredQuantity) || 0) <= 0
-    ) {
+    if (requirementProjectId.trim().length === 0 || requirementMaterialName.trim().length < 2 || (Number(requiredQuantity) || 0) <= 0) {
       setError("Please provide project, material name and valid required quantity.");
       return;
     }
-
     setSavingRequirement(true);
     setError("");
-
     try {
       await api.createMaterialRequirement({
         projectId: requirementProjectId,
@@ -310,33 +239,22 @@ export const MaterialsPage = () => {
       });
       await refreshMaterials();
       markSaved();
+      setShowRequirementModal(false);
       resetRequirementForm();
     } catch (saveError) {
-      const message =
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save material requirement.";
-      setError(message);
+      setError(saveError instanceof Error ? saveError.message : "Failed to save material requirement.");
     } finally {
       setSavingRequirement(false);
     }
   };
 
   const handleSavePurchase = async () => {
-    if (
-      purchaseProjectId.trim().length === 0 ||
-      purchaseMaterialName.trim().length < 2 ||
-      supplierName.trim().length < 2 ||
-      (Number(qtyPurchased) || 0) <= 0 ||
-      purchaseDate.trim().length === 0
-    ) {
+    if (purchaseProjectId.trim().length === 0 || purchaseMaterialName.trim().length < 2 || supplierName.trim().length < 2 || (Number(qtyPurchased) || 0) <= 0 || purchaseDate.trim().length === 0) {
       setError("Please provide project, material, supplier, quantity and purchase date.");
       return;
     }
-
     setSavingPurchase(true);
     setError("");
-
     try {
       await api.createMaterialPurchase({
         projectId: purchaseProjectId,
@@ -353,13 +271,10 @@ export const MaterialsPage = () => {
       });
       await refreshMaterials();
       markSaved();
+      setShowPurchaseModal(false);
       resetPurchaseForm();
     } catch (saveError) {
-      const message =
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save material purchase.";
-      setError(message);
+      setError(saveError instanceof Error ? saveError.message : "Failed to save material purchase.");
     } finally {
       setSavingPurchase(false);
     }
@@ -372,38 +287,33 @@ export const MaterialsPage = () => {
         title="Materials & Requirements Management"
       />
 
-      {error && (
-        <SurfaceCard>
-          <p className="text-sm text-red-700">{error}</p>
-        </SurfaceCard>
-      )}
-
-      <SurfaceCard title="Material Requirements & Purchases">
-        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {/* Filter and Add buttons - outside card, right aligned */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <div className="w-full sm:w-56">
           <label className="form-field">
-            <span>Filter by Project</span>
-            <GuiSelect
-              className="input-field"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
+            <span className="text-sm">Filter by Project</span>
+            <GuiSelect className="input-field" onChange={(e) => setListProjectFilter(e.target.value)} value={listProjectFilter}>
               <option value="All">All Projects</option>
-              {projects.map((project) => (
-                <option key={`mat-list-${project.id}`} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
+              {projects.map((p) => <option key={`mat-list-${p.id}`} value={p.id}>{p.name}</option>)}
             </GuiSelect>
           </label>
         </div>
+        <button className="btn-primary whitespace-nowrap" onClick={() => { resetRequirementForm(); setShowRequirementModal(true); }} type="button">
+          + Add Requirement
+        </button>
+        <button className="btn-primary whitespace-nowrap" onClick={() => { resetPurchaseForm(); setShowPurchaseModal(true); }} type="button">
+          + Add Purchase
+        </button>
+      </div>
+
+      {/* Materials Table */}
+      <SurfaceCard title="Material Requirements & Purchases">
+        {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
         {loading ? (
           <SkeletonTable rows={5} />
         ) : filteredRows.length === 0 ? (
-          <EmptyState
-            description="No material requirements found for the selected project."
-            title="No materials"
-          />
+          <EmptyState description="No material requirements found for the selected project." title="No materials" />
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -413,9 +323,9 @@ export const MaterialsPage = () => {
                     <th>S/N</th>
                     <th>Material Name</th>
                     <th>Project/Site</th>
-                    <th>Quantity Needed</th>
-                    <th>Quantity Purchased</th>
-                    <th>Remaining Quantity</th>
+                    <th>Qty Needed</th>
+                    <th>Qty Purchased</th>
+                    <th>Remaining</th>
                     <th>Unit</th>
                     <th>Supplier</th>
                     <th>Unit Cost</th>
@@ -433,11 +343,7 @@ export const MaterialsPage = () => {
                       <td>{row.projectName}</td>
                       <td>{formatNumber(row.needed)}</td>
                       <td>{formatNumber(row.purchased)}</td>
-                      <td
-                        className={
-                          row.remaining > 0 ? "text-amber-700" : "text-emerald-700"
-                        }
-                      >
+                      <td className={row.remaining > 0 ? "text-amber-700" : "text-emerald-700"}>
                         {formatNumber(row.remaining)}
                       </td>
                       <td>{row.unit}</td>
@@ -446,7 +352,15 @@ export const MaterialsPage = () => {
                       <td>{formatTzs(row.totalCost)}</td>
                       <td>{row.purchaseDate ? formatDate(row.purchaseDate) : "-"}</td>
                       <td>
-                        <StatusBadge status={row.deliveryStatus} />
+                        <span className={
+                          row.deliveryStatus === "Delivered"
+                            ? "text-sm font-medium text-emerald-700"
+                            : row.deliveryStatus === "Partially Delivered"
+                              ? "text-sm font-medium text-amber-700"
+                              : "text-sm font-medium text-slate-500"
+                        }>
+                          {row.deliveryStatus}
+                        </span>
                       </td>
                       <td>
                         <span className="text-xs font-semibold text-slate-700">
@@ -473,247 +387,132 @@ export const MaterialsPage = () => {
         )}
       </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Add Material Requirement">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" id="add-material-requirement-form">
-            <label className="form-field">
-              <span>Project</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setRequirementProjectId(event.target.value)}
-                value={requirementProjectId}
-              >
-                {projects.map((project) => (
-                  <option key={`req-${project.id}`} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Material Name</span>
-              <input
-                className="input-field"
-                onChange={(event) => setRequirementMaterialName(event.target.value)}
-                placeholder="Cement / Steel bars..."
-                value={requirementMaterialName}
-              />
-            </label>
-            <label className="form-field">
-              <span>Required Quantity</span>
-              <input
-                className="input-field"
-                onChange={(event) => setRequiredQuantity(event.target.value)}
-                type="number"
-                value={requiredQuantity}
-              />
-            </label>
-            <label className="form-field">
-              <span>Unit</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setRequirementUnit(event.target.value)}
-                value={requirementUnit}
-              >
-                {[
-                  "Bags",
-                  "Pieces",
-                  "Tonnes",
-                  "Litres",
-                  "Lengths",
-                  "Cubic Meter",
-                ].map((unit) => (
-                  <option key={unit} value={unit}>
-                    {unit}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <FinancialInput
-              label="Estimated Unit Cost"
-              onChange={setEstimatedUnitCost}
-              placeholder="17500"
-              value={estimatedUnitCost}
-            />
-            <label className="form-field">
-              <span>Priority</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPriority(event.target.value)}
-                value={priority}
-              >
-                <option value="High">High</option>
-                <option value="Medium">Medium</option>
-                <option value="Low">Low</option>
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Needed By Date</span>
-              <input
-                className="input-field"
-                onChange={(event) => setNeededByDate(event.target.value)}
-                type="date"
-                value={neededByDate}
-              />
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Notes</span>
-              <textarea
-                className="input-field min-h-20"
-                onChange={(event) => setRequirementNotes(event.target.value)}
-                value={requirementNotes}
-              />
-            </label>
-            <div className="sm:col-span-2 flex justify-end gap-2">
-              <button className="btn-secondary" type="button">
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={savingRequirement}
-                onClick={() => void handleSaveRequirement()}
-                type="button"
-              >
-                Save Requirement
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-
-        <SurfaceCard title="Add Material Purchase">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" id="add-material-purchase-form">
-            <label className="form-field">
-              <span>Project</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPurchaseProjectId(event.target.value)}
-                value={purchaseProjectId}
-              >
-                {projects.map((project) => (
-                  <option key={`buy-${project.id}`} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Requirement (Optional)</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPurchaseRequirementId(event.target.value)}
-                value={purchaseRequirementId}
-              >
-                <option value="">No linked requirement</option>
-                {requirementOptions.map((requirement) => (
-                  <option key={`buy-req-${requirement.id}`} value={requirement.id}>
-                    {requirement.materialName} ({formatNumber(requirement.remainingQuantity)} remaining)
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Material Name</span>
-              <input
-                className="input-field"
-                onChange={(event) => setPurchaseMaterialName(event.target.value)}
-                placeholder="Material purchased..."
-                value={purchaseMaterialName}
-              />
-            </label>
-            <label className="form-field">
-              <span>Quantity Purchased</span>
-              <input
-                className="input-field"
-                onChange={(event) => setQtyPurchased(event.target.value)}
-                type="number"
-                value={qtyPurchased}
-              />
-            </label>
-            <label className="form-field">
-              <span>Supplier</span>
-              <input
-                className="input-field"
-                onChange={(event) => setSupplierName(event.target.value)}
-                placeholder="Supplier name"
-                value={supplierName}
-              />
-            </label>
-            <FinancialInput label="Unit Cost" onChange={setUnitCost} placeholder="17500" value={unitCost} />
-            <label className="form-field">
-              <span>Total Cost (Auto Calculated)</span>
-              <input className="input-field bg-slate-50" readOnly value={formatTzs(purchaseTotal)} />
-            </label>
-            <label className="form-field">
-              <span>Date of Purchase</span>
-              <input
-                className="input-field"
-                onChange={(event) => setPurchaseDate(event.target.value)}
-                type="date"
-                value={purchaseDate}
-              />
-            </label>
-            <label className="form-field">
-              <span>Delivery Note Number</span>
-              <input
-                className="input-field"
-                onChange={(event) => setDeliveryNoteNumber(event.target.value)}
-                placeholder="DN-..."
-                value={deliveryNoteNumber}
-              />
-            </label>
-            <label className="form-field">
-              <span>Delivery Status</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setDeliveryStatus(event.target.value)}
-                value={deliveryStatus}
-              >
-                <option value="Pending Delivery">Pending Delivery</option>
-                <option value="Partially Delivered">Partially Delivered</option>
-                <option value="Delivered">Delivered</option>
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Receipt / Delivery Ref</span>
-              <input
-                className="input-field"
-                onChange={(event) => setReceiptRef(event.target.value)}
-                placeholder="MAT-RCP-001"
-                value={receiptRef}
-              />
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Notes</span>
-              <textarea
-                className="input-field min-h-20"
-                onChange={(event) => setPurchaseNotes(event.target.value)}
-                value={purchaseNotes}
-              />
-            </label>
-            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Purchase Completion Indicator</p>
-              <div className="mt-2">
-                <ProgressBar value={purchaseProgress} />
+      {/* Add Requirement Modal */}
+      {showRequirementModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Material Requirement">
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Project</span>
+                <GuiSelect className="input-field" onChange={(e) => setRequirementProjectId(e.target.value)} value={requirementProjectId}>
+                  {projects.map((p) => <option key={`req-${p.id}`} value={p.id}>{p.name}</option>)}
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Material Name</span>
+                <input className="input-field" onChange={(e) => setRequirementMaterialName(e.target.value)} placeholder="Cement / Steel bars..." value={requirementMaterialName} />
+              </label>
+              <label className="form-field">
+                <span>Required Quantity</span>
+                <input className="input-field" onChange={(e) => setRequiredQuantity(e.target.value)} type="number" value={requiredQuantity} />
+              </label>
+              <label className="form-field">
+                <span>Unit</span>
+                <GuiSelect className="input-field" onChange={(e) => setRequirementUnit(e.target.value)} value={requirementUnit}>
+                  {["Bags", "Pieces", "Tonnes", "Litres", "Lengths", "Cubic Meter"].map((u) => <option key={u} value={u}>{u}</option>)}
+                </GuiSelect>
+              </label>
+              <FinancialInput label="Estimated Unit Cost" onChange={setEstimatedUnitCost} placeholder="17500" value={estimatedUnitCost} />
+              <label className="form-field">
+                <span>Priority</span>
+                <GuiSelect className="input-field" onChange={(e) => setPriority(e.target.value)} value={priority}>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Needed By Date</span>
+                <input className="input-field" onChange={(e) => setNeededByDate(e.target.value)} type="date" value={neededByDate} />
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea className="input-field min-h-20" onChange={(e) => setRequirementNotes(e.target.value)} value={requirementNotes} />
+              </label>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button className="btn-secondary" onClick={() => { setShowRequirementModal(false); resetRequirementForm(); }} type="button">Cancel</button>
+                <button className="btn-primary" disabled={savingRequirement} onClick={() => void handleSaveRequirement()} type="button">
+                  Save Requirement
+                </button>
               </div>
-            </div>
-            <div className="sm:col-span-2 flex justify-end gap-2">
-              <button className="btn-secondary" type="button">
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={savingPurchase}
-                onClick={() => void handleSavePurchase()}
-                type="button"
-              >
-                Save Purchase
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-      </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
+
+      {/* Add Purchase Modal */}
+      {showPurchaseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Material Purchase">
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Project</span>
+                <GuiSelect className="input-field" onChange={(e) => setPurchaseProjectId(e.target.value)} value={purchaseProjectId}>
+                  {projects.map((p) => <option key={`buy-${p.id}`} value={p.id}>{p.name}</option>)}
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Requirement (Optional)</span>
+                <GuiSelect className="input-field" onChange={(e) => setPurchaseRequirementId(e.target.value)} value={purchaseRequirementId}>
+                  <option value="">No linked requirement</option>
+                  {requirementOptions.map((r) => <option key={`buy-req-${r.id}`} value={r.id}>{r.materialName} ({formatNumber(r.remainingQuantity)} remaining)</option>)}
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Material Name</span>
+                <input className="input-field" onChange={(e) => setPurchaseMaterialName(e.target.value)} placeholder="Material purchased..." value={purchaseMaterialName} />
+              </label>
+              <label className="form-field">
+                <span>Quantity Purchased</span>
+                <input className="input-field" onChange={(e) => setQtyPurchased(e.target.value)} type="number" value={qtyPurchased} />
+              </label>
+              <label className="form-field">
+                <span>Supplier</span>
+                <input className="input-field" onChange={(e) => setSupplierName(e.target.value)} placeholder="Supplier name" value={supplierName} />
+              </label>
+              <FinancialInput label="Unit Cost" onChange={setUnitCost} placeholder="17500" value={unitCost} />
+              <label className="form-field">
+                <span>Total Cost (Auto)</span>
+                <input className="input-field bg-slate-50" readOnly value={formatTzs(purchaseTotal)} />
+              </label>
+              <label className="form-field">
+                <span>Date of Purchase</span>
+                <input className="input-field" onChange={(e) => setPurchaseDate(e.target.value)} type="date" value={purchaseDate} />
+              </label>
+              <label className="form-field">
+                <span>Delivery Note Number</span>
+                <input className="input-field" onChange={(e) => setDeliveryNoteNumber(e.target.value)} placeholder="DN-..." value={deliveryNoteNumber} />
+              </label>
+              <label className="form-field">
+                <span>Delivery Status</span>
+                <GuiSelect className="input-field" onChange={(e) => setDeliveryStatus(e.target.value)} value={deliveryStatus}>
+                  <option value="Pending Delivery">Pending Delivery</option>
+                  <option value="Partially Delivered">Partially Delivered</option>
+                  <option value="Delivered">Delivered</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Receipt / Delivery Ref</span>
+                <input className="input-field" onChange={(e) => setReceiptRef(e.target.value)} placeholder="MAT-RCP-001" value={receiptRef} />
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea className="input-field min-h-20" onChange={(e) => setPurchaseNotes(e.target.value)} value={purchaseNotes} />
+              </label>
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Purchase Completion Indicator</p>
+                <div className="mt-2"><ProgressBar value={purchaseProgress} /></div>
+              </div>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button className="btn-secondary" onClick={() => { setShowPurchaseModal(false); resetPurchaseForm(); }} type="button">Cancel</button>
+                <button className="btn-primary" disabled={savingPurchase} onClick={() => void handleSavePurchase()} type="button">
+                  Save Purchase
+                </button>
+              </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
     </div>
   );
 };
-
-

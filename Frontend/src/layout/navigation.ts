@@ -2,6 +2,7 @@ import {
   Activity,
   Bell,
   BriefcaseBusiness,
+  ClipboardList,
   Cog,
   CreditCard,
   DollarSign,
@@ -26,6 +27,7 @@ export interface NavItem {
 export const mainNavItems: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: Gauge },
   { label: "Projects / Sites", path: "/projects", icon: BriefcaseBusiness },
+  { label: "Work Orders", path: "/work-orders", icon: ClipboardList },
   { label: "Labor / Workforce", path: "/labor", icon: HardHat },
   { label: "Materials", path: "/materials", icon: Package },
   { label: "Expenses", path: "/expenses", icon: Receipt },
@@ -47,6 +49,7 @@ export const utilityNavItems: NavItem[] = [
 
 export const quickAddActions = [
   { label: "New Project", path: "/projects/new" },
+  { label: "New Work Order", path: "/work-orders" },
   { label: "New Expense", path: "/expenses#add-expense-form" },
   { label: "New Payment", path: "/payments#add-payment-form" },
   { label: "New Material Purchase", path: "/materials#add-material-purchase-form" },

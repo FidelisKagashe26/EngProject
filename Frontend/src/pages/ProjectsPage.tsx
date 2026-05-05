@@ -1,7 +1,7 @@
 import { Calendar, Filter, MapPin, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { EmptyState, ProgressBar, SectionTitle, SkeletonTable, StatusBadge, SurfaceCard, GuiSelect } from "../components/ui";
+import { EmptyState, ProgressBar, SectionTitle, SkeletonTable, SurfaceCard, GuiSelect } from "../components/ui";
 import { projects as fallbackProjects } from "../data/mockData";
 import { api, type ProjectApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
@@ -107,14 +107,15 @@ export const ProjectsPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        action={
-          <Link className="btn-primary" to="/projects/new">
-            Add New Project
-          </Link>
-        }
         subtitle="Track contract value, costs, payment progress, and project health."
         title="Projects / Sites"
       />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <Link className="btn-primary whitespace-nowrap" to="/projects/new">
+          Add New Project
+        </Link>
+      </div>
 
       {error && (
         <SurfaceCard>
@@ -207,7 +208,21 @@ export const ProjectsPage = () => {
                     <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-700">
                       #{index + 1}
                     </span>
-                    <StatusBadge status={project.status} />
+                    <span
+                      className={
+                        project.status === "Active"
+                          ? "text-sm font-medium text-emerald-700"
+                          : project.status === "Completed"
+                            ? "text-sm font-medium text-blue-700"
+                            : project.status === "On Hold"
+                              ? "text-sm font-medium text-amber-700"
+                              : project.status === "Over Budget"
+                                ? "text-sm font-medium text-red-600"
+                                : "text-sm font-medium text-slate-500"
+                      }
+                    >
+                      {project.status}
+                    </span>
                     <span className="text-xs text-slate-400">{project.contractNumber}</span>
                   </div>
                   <h3 className="text-lg font-semibold text-slate-900">{project.name}</h3>

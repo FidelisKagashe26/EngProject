@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ConfirmModal,
   EmptyState,
   FinancialInput,
   SectionTitle,
   SkeletonTable,
-  StatusBadge,
   SurfaceCard,
   TablePagination,
   GuiSelect,
@@ -28,18 +28,23 @@ export const LaborPage = () => {
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [workers, setWorkers] = useState<WorkerApiRecord[]>([]);
-  const [totalLaborPaidThisMonth, setTotalLaborPaidThisMonth] = useState(0);
-  const [outstandingLaborPayments, setOutstandingLaborPayments] = useState(0);
 
   const [listProjectFilter, setListProjectFilter] = useState(
     projectFromQuery || "All",
   );
 
+  // Modal states
+  const [showAddWorkerModal, setShowAddWorkerModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedWorkerForPayment, setSelectedWorkerForPayment] = useState<WorkerApiRecord | null>(null);
+  const [workerToDelete, setWorkerToDelete] = useState<WorkerApiRecord | null>(null);
+  const [deletingWorker, setDeletingWorker] = useState(false);
+
   const [workerFullName, setWorkerFullName] = useState("");
   const [workerPhone, setWorkerPhone] = useState("");
   const [workerSkillRole, setWorkerSkillRole] = useState("");
   const [workerPaymentType, setWorkerPaymentType] = useState<
-    "Daily" | "Weekly" | "Monthly" | "Contract"
+    "Hourly" | "Daily" | "Weekly" | "Monthly" | "Contract"
   >("Daily");
   const [workerRateAmount, setWorkerRateAmount] = useState("");
   const [workerAssignedProjectId, setWorkerAssignedProjectId] = useState(
@@ -53,6 +58,7 @@ export const LaborPage = () => {
   const [workStart, setWorkStart] = useState("");
   const [workEnd, setWorkEnd] = useState("");
   const [daysWorked, setDaysWorked] = useState("6");
+  const [hoursWorked, setHoursWorked] = useState("8");
   const [rate, setRate] = useState("45000");
   const [amountPaid, setAmountPaid] = useState("180000");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
@@ -74,8 +80,6 @@ export const LaborPage = () => {
 
         setProjects(projectRows);
         setWorkers(workerResponse.rows);
-        setTotalLaborPaidThisMonth(workerResponse.summary.totalLaborPaidThisMonth);
-        setOutstandingLaborPayments(workerResponse.summary.outstandingLaborPayments);
         setError("");
       } catch (loadError) {
         if (!mounted) {
@@ -135,10 +139,12 @@ export const LaborPage = () => {
   const workersPagination = useTablePagination(filteredWorkers);
 
   const totalPayable = useMemo(() => {
-    const days = Number(daysWorked) || 0;
     const workerRate = Number(rate) || 0;
-    return days * workerRate;
-  }, [daysWorked, rate]);
+    if (selectedWorkerForPayment?.paymentType === "Hourly") {
+      return (Number(hoursWorked) || 0) * workerRate;
+    }
+    return (Number(daysWorked) || 0) * workerRate;
+  }, [daysWorked, hoursWorked, rate, selectedWorkerForPayment]);
 
   const balance = Math.max(totalPayable - (Number(amountPaid) || 0), 0);
 
@@ -154,6 +160,27 @@ export const LaborPage = () => {
       .sort((a, b) => b.total - a.total)
       .slice(0, 4);
   }, [workers]);
+
+  // Filtered stats based on selected site
+  const filteredTotalLaborPaid = useMemo(() => {
+    return filteredWorkers.reduce((total, worker) => total + worker.totalPaid, 0);
+  }, [filteredWorkers]);
+
+  const filteredOutstandingPayments = useMemo(() => {
+    return filteredWorkers.reduce((total, worker) => total + worker.outstandingAmount, 0);
+  }, [filteredWorkers]);
+
+  const filteredLaborCostPerProject = useMemo(() => {
+    if (listProjectFilter === "All") {
+      return laborCostPerProject;
+    }
+    
+    // Show only the selected project's workers cost
+    const selectedProject = projects.find(p => p.id === listProjectFilter);
+    const projectCost = filteredWorkers.reduce((total, worker) => total + worker.totalPaid, 0);
+    
+    return selectedProject ? [{ projectName: selectedProject.name, total: projectCost }] : [];
+  }, [filteredWorkers, listProjectFilter, projects, laborCostPerProject]);
 
   const paymentWorkers = useMemo(() => {
     if (paymentProjectId.length === 0) {
@@ -182,8 +209,6 @@ export const LaborPage = () => {
   const refreshWorkers = async () => {
     const workerResponse = await api.getWorkers();
     setWorkers(workerResponse.rows);
-    setTotalLaborPaidThisMonth(workerResponse.summary.totalLaborPaidThisMonth);
-    setOutstandingLaborPayments(workerResponse.summary.outstandingLaborPayments);
   };
 
   const resetWorkerForm = () => {
@@ -193,6 +218,34 @@ export const LaborPage = () => {
     setWorkerPaymentType("Daily");
     setWorkerRateAmount("");
     setWorkerNotes("");
+  };
+
+  const openAddWorkerModal = () => {
+    resetWorkerForm();
+    setShowAddWorkerModal(true);
+  };
+
+  const closeAddWorkerModal = () => {
+    setShowAddWorkerModal(false);
+    resetWorkerForm();
+  };
+
+  const openPaymentModal = (worker: WorkerApiRecord) => {
+    setSelectedWorkerForPayment(worker);
+    setPaymentWorkerId(worker.id);
+    setRate(String(worker.rateAmount));
+    setWorkStart("");
+    setWorkEnd("");
+    setDaysWorked("6");
+    setHoursWorked("8");
+    setAmountPaid("");
+    setPaymentNotes("");
+    setShowPaymentModal(true);
+  };
+
+  const closePaymentModal = () => {
+    setShowPaymentModal(false);
+    setSelectedWorkerForPayment(null);
   };
 
   const handleSaveWorker = async () => {
@@ -220,7 +273,7 @@ export const LaborPage = () => {
       });
       await refreshWorkers();
       markSaved();
-      resetWorkerForm();
+      closeAddWorkerModal();
     } catch (saveError) {
       const message =
         saveError instanceof Error ? saveError.message : "Failed to save worker.";
@@ -230,22 +283,13 @@ export const LaborPage = () => {
     }
   };
 
-  const handlePaymentWorkerChange = (workerId: string) => {
-    setPaymentWorkerId(workerId);
-    const selectedWorker = workers.find((worker) => worker.id === workerId);
-    if (selectedWorker) {
-      setRate(String(selectedWorker.rateAmount));
-    }
-  };
-
   const handleRecordPayment = async () => {
     if (
-      paymentProjectId.trim().length === 0 ||
-      paymentWorkerId.trim().length === 0 ||
+      !selectedWorkerForPayment ||
       workStart.trim().length === 0 ||
       workEnd.trim().length === 0
     ) {
-      setError("Please fill project, worker, and work date range.");
+      setError("Please fill work date range.");
       return;
     }
 
@@ -253,12 +297,14 @@ export const LaborPage = () => {
     setError("");
 
     try {
+      const projectId = selectedWorkerForPayment.assignedProjectId || paymentProjectId;
       await api.recordLaborPayment({
-        projectId: paymentProjectId,
-        workerId: paymentWorkerId,
+        projectId,
+        workerId: selectedWorkerForPayment.id,
         workStart,
         workEnd,
         daysWorked: Number(daysWorked) || 0,
+        hoursWorked: Number(hoursWorked) || 0,
         rateAmount: Number(rate) || 0,
         amountPaid: Number(amountPaid) || 0,
         paymentMethod,
@@ -266,8 +312,7 @@ export const LaborPage = () => {
       });
       await refreshWorkers();
       markSaved();
-      setAmountPaid("");
-      setPaymentNotes("");
+      closePaymentModal();
     } catch (saveError) {
       const message =
         saveError instanceof Error
@@ -279,27 +324,79 @@ export const LaborPage = () => {
     }
   };
 
+  const handleDeleteWorker = async () => {
+    if (!workerToDelete) return;
+
+    setDeletingWorker(true);
+    setError("");
+
+    try {
+      await api.deleteWorker(workerToDelete.id);
+      await refreshWorkers();
+      markSaved();
+      setWorkerToDelete(null);
+    } catch (deleteError) {
+      const message =
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to deactivate worker.";
+      setError(message);
+      setWorkerToDelete(null);
+    } finally {
+      setDeletingWorker(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Title and Subtitle - Normal stacking */}
       <SectionTitle
         subtitle="Track workers, assignments, wages, and outstanding labor payments."
         title="Labor / Workforce Management"
       />
 
+      {/* Filter and Add Worker Button - Right aligned */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <div className="w-full sm:w-48">
+          <label className="form-field">
+            <span className="text-sm">Filter by Site</span>
+            <GuiSelect
+              className="input-field"
+              onChange={(event) => setListProjectFilter(event.target.value)}
+              value={listProjectFilter}
+            >
+              <option value="All">All Sites</option>
+              {projects.map((project) => (
+                <option key={`wk-list-${project.id}`} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </GuiSelect>
+          </label>
+        </div>
+        <button
+          className="btn-primary whitespace-nowrap"
+          onClick={openAddWorkerModal}
+        >
+          + Add Worker
+        </button>
+      </div>
+
+      {/* Stats cards - Dynamic based on filter */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <SurfaceCard title="Total labor paid this month">
+        <SurfaceCard title="Total labor paid">
           <p className="text-2xl font-bold text-slate-900">
-            {formatTzs(totalLaborPaidThisMonth)}
+            {formatTzs(filteredTotalLaborPaid)}
           </p>
         </SurfaceCard>
         <SurfaceCard title="Outstanding labor payments">
           <p className="text-2xl font-bold text-amber-700">
-            {formatTzs(outstandingLaborPayments)}
+            {formatTzs(filteredOutstandingPayments)}
           </p>
         </SurfaceCard>
-        <SurfaceCard title="Labor cost per project">
+        <SurfaceCard title="Labor cost">
           <ul className="space-y-2 text-sm text-slate-700">
-            {laborCostPerProject.map((row) => (
+            {filteredLaborCostPerProject.map((row) => (
               <li className="flex justify-between" key={row.projectName}>
                 <span>{row.projectName}</span>
                 <span>{formatTzs(row.total)}</span>
@@ -309,50 +406,34 @@ export const LaborPage = () => {
         </SurfaceCard>
       </div>
 
+      {/* Workers List Table */}
       <SurfaceCard title="Workers List">
-        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <label className="form-field">
-            <span>Filter by Project</span>
-            <GuiSelect
-              className="input-field"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
-              <option value="All">All Projects</option>
-              {projects.map((project) => (
-                <option key={`wk-list-${project.id}`} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </GuiSelect>
-          </label>
-        </div>
-
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
         {loading ? (
           <SkeletonTable rows={5} />
         ) : filteredWorkers.length === 0 ? (
           <EmptyState
-            description="No workers found for the selected project."
+            description="No workers found for the selected site."
             title="No workers"
           />
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table min-w-[960px]">
+              <table className="data-table min-w-full">
                 <thead>
                   <tr>
                     <th>S/N</th>
                     <th>Worker Name</th>
-                    <th>Phone Number</th>
+                    <th>Phone</th>
                     <th>Skill/Role</th>
-                    <th>Assigned Project</th>
+                    <th>Site</th>
                     <th>Wage Type</th>
                     <th>Rate</th>
                     <th>Total Paid</th>
                     <th>Outstanding</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,7 +457,33 @@ export const LaborPage = () => {
                         {formatTzs(worker.outstandingAmount)}
                       </td>
                       <td>
-                        <StatusBadge status={worker.status} />
+                        <span
+                          className={
+                            worker.status === "Active"
+                              ? "text-sm font-medium text-emerald-700"
+                              : worker.status === "Pending"
+                                ? "text-sm font-medium text-amber-700"
+                                : "text-sm font-medium text-slate-500"
+                          }
+                        >
+                          {worker.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex gap-2">
+                          <button
+                            className="btn-primary py-1 px-3 text-xs"
+                            onClick={() => openPaymentModal(worker)}
+                          >
+                            Pay
+                          </button>
+                          <button
+                            className="btn-danger py-1 px-3 text-xs"
+                            onClick={() => setWorkerToDelete(worker)}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -398,211 +505,230 @@ export const LaborPage = () => {
         )}
       </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Add Worker">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" id="add-worker-form">
-            <label className="form-field">
-              <span>Full Name</span>
-              <input
-                className="input-field"
-                onChange={(event) => setWorkerFullName(event.target.value)}
-                placeholder="Worker full name"
-                required
-                value={workerFullName}
+      {/* Add Worker Modal */}
+      {showAddWorkerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <SurfaceCard className="w-full max-w-2xl m-4" title="Add Worker">
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Full Name</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkerFullName(event.target.value)}
+                  placeholder="Worker full name"
+                  required
+                  value={workerFullName}
+                />
+              </label>
+              <label className="form-field">
+                <span>Phone</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkerPhone(event.target.value)}
+                  placeholder="+255 ..."
+                  required
+                  value={workerPhone}
+                />
+              </label>
+              <label className="form-field">
+                <span>Role/Skill</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkerSkillRole(event.target.value)}
+                  placeholder="Mason / Electrician..."
+                  value={workerSkillRole}
+                />
+              </label>
+              <label className="form-field">
+                <span>Payment Type</span>
+                <GuiSelect
+                  className="input-field"
+                  onChange={(event) =>
+                    setWorkerPaymentType(
+                      event.target.value as "Hourly" | "Daily" | "Weekly" | "Monthly" | "Contract",
+                    )
+                  }
+                  value={workerPaymentType}
+                >
+                  <option value="Hourly">Hourly</option>
+                  <option value="Daily">Daily</option>
+                  <option value="Weekly">Weekly</option>
+                  <option value="Monthly">Monthly</option>
+                  <option value="Contract">Contract</option>
+                </GuiSelect>
+              </label>
+              <FinancialInput
+                label="Rate Amount"
+                onChange={setWorkerRateAmount}
+                placeholder="45000"
+                value={workerRateAmount}
               />
-            </label>
-            <label className="form-field">
-              <span>Phone</span>
-              <input
-                className="input-field"
-                onChange={(event) => setWorkerPhone(event.target.value)}
-                placeholder="+255 ..."
-                required
-                value={workerPhone}
-              />
-            </label>
-            <label className="form-field">
-              <span>Role/Skill</span>
-              <input
-                className="input-field"
-                onChange={(event) => setWorkerSkillRole(event.target.value)}
-                placeholder="Mason / Electrician..."
-                value={workerSkillRole}
-              />
-            </label>
-            <label className="form-field">
-              <span>Payment Type</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) =>
-                  setWorkerPaymentType(
-                    event.target.value as "Daily" | "Weekly" | "Monthly" | "Contract",
-                  )
-                }
-                value={workerPaymentType}
-              >
-                <option value="Daily">Daily</option>
-                <option value="Weekly">Weekly</option>
-                <option value="Monthly">Monthly</option>
-                <option value="Contract">Contract</option>
-              </GuiSelect>
-            </label>
-            <FinancialInput
-              label="Rate Amount"
-              onChange={setWorkerRateAmount}
-              placeholder="45000"
-              value={workerRateAmount}
-            />
-            <label className="form-field">
-              <span>Assigned Project/Site</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setWorkerAssignedProjectId(event.target.value)}
-                value={workerAssignedProjectId}
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Notes</span>
-              <textarea
-                className="input-field min-h-20"
-                onChange={(event) => setWorkerNotes(event.target.value)}
-                placeholder="Extra notes..."
-                value={workerNotes}
-              />
-            </label>
-            <div className="sm:col-span-2 flex justify-end gap-2">
-              <button className="btn-secondary" type="button">
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={savingWorker}
-                onClick={() => void handleSaveWorker()}
-                type="button"
-              >
-                Save Worker
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-
-        <SurfaceCard title="Labor Payment Form">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" id="add-worker-payment-form">
-            <label className="form-field">
-              <span>Select Project</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPaymentProjectId(event.target.value)}
-                value={paymentProjectId}
-              >
-                {projects.map((project) => (
-                  <option key={`lp-${project.id}`} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Select Worker</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => handlePaymentWorkerChange(event.target.value)}
-                value={paymentWorkerId}
-              >
-                {paymentWorkers.map((worker) => (
-                  <option key={`lp-worker-${worker.id}`} value={worker.id}>
-                    {worker.fullName}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Work Start Date</span>
-              <input
-                className="input-field"
-                onChange={(event) => setWorkStart(event.target.value)}
-                type="date"
-                value={workStart}
-              />
-            </label>
-            <label className="form-field">
-              <span>Work End Date</span>
-              <input
-                className="input-field"
-                onChange={(event) => setWorkEnd(event.target.value)}
-                type="date"
-                value={workEnd}
-              />
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Days Worked</span>
-              <input
-                className="input-field"
-                onChange={(event) => setDaysWorked(event.target.value)}
-                type="number"
-                value={daysWorked}
-              />
-            </label>
-            <FinancialInput label="Rate" onChange={setRate} placeholder="45000" value={rate} />
-            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Auto Calculated</p>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <p className="text-sm text-slate-700">
-                  Total Payable: <span className="font-semibold">{formatTzs(totalPayable)}</span>
-                </p>
-                <p className="text-sm text-slate-700">
-                  Amount Paid: <span className="font-semibold">{formatTzs(Number(amountPaid) || 0)}</span>
-                </p>
-                <p className="text-sm text-amber-700">
-                  Balance: <span className="font-semibold">{formatTzs(balance)}</span>
-                </p>
+              <label className="form-field">
+                <span>Assigned Site</span>
+                <GuiSelect
+                  className="input-field"
+                  onChange={(event) => setWorkerAssignedProjectId(event.target.value)}
+                  value={workerAssignedProjectId}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </GuiSelect>
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea
+                  className="input-field min-h-20"
+                  onChange={(event) => setWorkerNotes(event.target.value)}
+                  placeholder="Extra notes..."
+                  value={workerNotes}
+                />
+              </label>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={closeAddWorkerModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  disabled={savingWorker}
+                  onClick={() => void handleSaveWorker()}
+                  type="button"
+                >
+                  Save Worker
+                </button>
               </div>
-            </div>
-            <FinancialInput label="Amount Paid" onChange={setAmountPaid} placeholder="180000" value={amountPaid} />
-            <label className="form-field">
-              <span>Payment Method</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPaymentMethod(event.target.value)}
-                value={paymentMethod}
-              >
-                <option value="Cash">Cash</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="Mobile Money">Mobile Money</option>
-                <option value="Cheque">Cheque</option>
-              </GuiSelect>
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Notes</span>
-              <textarea
-                className="input-field min-h-20"
-                onChange={(event) => setPaymentNotes(event.target.value)}
-                placeholder="Labor payment remarks..."
-                value={paymentNotes}
-              />
-            </label>
-            <div className="sm:col-span-2 flex justify-end gap-2">
-              <button className="btn-secondary" type="button">
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={savingPayment}
-                onClick={() => void handleRecordPayment()}
-                type="button"
-              >
-                Record Payment
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-      </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
+
+      {/* Labor Payment Modal */}
+      {showPaymentModal && selectedWorkerForPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <SurfaceCard className="w-full max-w-2xl m-4" title={`Record Payment - ${selectedWorkerForPayment.fullName}`}>
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Work Start Date</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkStart(event.target.value)}
+                  type="date"
+                  value={workStart}
+                />
+              </label>
+              <label className="form-field">
+                <span>Work End Date</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkEnd(event.target.value)}
+                  type="date"
+                  value={workEnd}
+                />
+              </label>
+              {selectedWorkerForPayment.paymentType === "Hourly" ? (
+                <label className="form-field sm:col-span-2">
+                  <span>Hours Worked</span>
+                  <input
+                    className="input-field"
+                    onChange={(event) => setHoursWorked(event.target.value)}
+                    type="number"
+                    value={hoursWorked}
+                  />
+                </label>
+              ) : (
+                <label className="form-field sm:col-span-2">
+                  <span>Days Worked</span>
+                  <input
+                    className="input-field"
+                    onChange={(event) => setDaysWorked(event.target.value)}
+                    type="number"
+                    value={daysWorked}
+                  />
+                </label>
+              )}
+              <FinancialInput label="Rate" onChange={setRate} placeholder="45000" value={rate} />
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Auto Calculated</p>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <p className="text-sm text-slate-700">
+                    {selectedWorkerForPayment.paymentType === "Hourly"
+                      ? `${hoursWorked} hrs × ${formatTzs(Number(rate))}`
+                      : `${daysWorked} days × ${formatTzs(Number(rate))}`}
+                    {" → "}Total Payable: <span className="font-semibold">{formatTzs(totalPayable)}</span>
+                  </p>
+                  <p className="text-sm text-slate-700">
+                    Amount Paid: <span className="font-semibold">{formatTzs(Number(amountPaid) || 0)}</span>
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    Balance: <span className="font-semibold">{formatTzs(balance)}</span>
+                  </p>
+                </div>
+              </div>
+              <FinancialInput label="Amount Paid" onChange={setAmountPaid} placeholder="180000" value={amountPaid} />
+              <label className="form-field">
+                <span>Payment Method</span>
+                <GuiSelect
+                  className="input-field"
+                  onChange={(event) => setPaymentMethod(event.target.value)}
+                  value={paymentMethod}
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Mobile Money">Mobile Money</option>
+                  <option value="Cheque">Cheque</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea
+                  className="input-field min-h-20"
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  placeholder="Labor payment remarks..."
+                  value={paymentNotes}
+                />
+              </label>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={closePaymentModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  disabled={savingPayment}
+                  onClick={() => void handleRecordPayment()}
+                  type="button"
+                >
+                  Record Payment
+                </button>
+              </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
+      {/* Confirm Delete Modal */}
+      <ConfirmModal
+        cancelLabel="Cancel"
+        confirmClassName="btn-danger"
+        confirmLabel={deletingWorker ? "Deactivating..." : "Deactivate"}
+        description={
+          workerToDelete
+            ? `Are you sure you want to deactivate "${workerToDelete.fullName}"? Their payment history will be preserved. You can identify them by their Inactive status.`
+            : ""
+        }
+        onCancel={() => setWorkerToDelete(null)}
+        onConfirm={() => void handleDeleteWorker()}
+        open={workerToDelete !== null}
+        title="Deactivate Worker"
+      />
     </div>
   );
 };

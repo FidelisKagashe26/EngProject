@@ -7,7 +7,6 @@ import {
   GuiSelect,
   SectionTitle,
   SkeletonTable,
-  StatusBadge,
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
@@ -46,6 +45,10 @@ export const ExpensesPage = () => {
     monthlyTrend: [],
   });
 
+  // Modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  // Form state
   const [projectId, setProjectId] = useState(projectFromQuery);
   const [category, setCategory] = useState(defaultExpenseCategories[0]);
   const [description, setDescription] = useState("");
@@ -59,55 +62,35 @@ export const ExpensesPage = () => {
 
   useEffect(() => {
     let mounted = true;
-
     const load = async () => {
       try {
         const [projectRows, expensesResponse] = await Promise.all([
           api.getProjects(),
           api.getExpenses(),
         ]);
-
-        if (!mounted) {
-          return;
-        }
-
+        if (!mounted) return;
         setProjects(projectRows);
         setExpenseRows(expensesResponse.rows);
         setCharts(expensesResponse.charts);
         setError("");
       } catch (loadError) {
-        if (!mounted) {
-          return;
-        }
-        const message =
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load expenses data.";
-        setError(message);
+        if (!mounted) return;
+        setError(loadError instanceof Error ? loadError.message : "Failed to load expenses data.");
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
     };
-
     void load();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
-    if (projectFromQuery.length === 0) {
-      return;
-    }
+    if (projectFromQuery.length === 0) return;
     setProjectId(projectFromQuery);
   }, [projectFromQuery]);
 
   useEffect(() => {
-    if (projects.length === 0 || projectId.length > 0) {
-      return;
-    }
+    if (projects.length === 0 || projectId.length > 0) return;
     setProjectId(projects[0].id);
   }, [projectId, projects]);
 
@@ -118,24 +101,13 @@ export const ExpensesPage = () => {
   };
 
   const expenseCategories = useMemo(() => {
-    const categoriesFromRows = expenseRows.map((row) => row.category);
-    const categoriesFromCharts = charts.byCategory.map((item) => item.label);
-    return Array.from(
-      new Set([
-        ...defaultExpenseCategories,
-        ...categoriesFromRows,
-        ...categoriesFromCharts,
-      ]),
-    );
+    const fromRows = expenseRows.map((r) => r.category);
+    const fromCharts = charts.byCategory.map((i) => i.label);
+    return Array.from(new Set([...defaultExpenseCategories, ...fromRows, ...fromCharts]));
   }, [charts.byCategory, expenseRows]);
 
   useEffect(() => {
-    if (
-      category.length === 0 ||
-      expenseCategories.some((item) => item === category)
-    ) {
-      return;
-    }
+    if (category.length === 0 || expenseCategories.some((i) => i === category)) return;
     setCategory(expenseCategories[0] ?? defaultExpenseCategories[0]);
   }, [category, expenseCategories]);
 
@@ -143,22 +115,14 @@ export const ExpensesPage = () => {
 
   const monthTrendSummary = useMemo(() => {
     const trend = charts.monthlyTrend;
-    if (trend.length < 2) {
-      return "Monthly trend will appear after at least two months of expense records.";
-    }
-
+    if (trend.length < 2) return "Monthly trend will appear after at least two months of expense records.";
     const current = trend[trend.length - 1];
     const previous = trend[trend.length - 2];
     const previousTotal = previous?.total ?? 0;
-    if (previousTotal <= 0) {
-      return `${current.month} has ${formatTzs(current.total)} in total expenses.`;
-    }
-
+    if (previousTotal <= 0) return `${current.month} has ${formatTzs(current.total)} in total expenses.`;
     const delta = ((current.total - previousTotal) / previousTotal) * 100;
     const direction = delta >= 0 ? "higher" : "lower";
-    return `${current.month} expenses are ${Math.abs(delta).toFixed(
-      1,
-    )}% ${direction} than ${previous.month}.`;
+    return `${current.month} expenses are ${Math.abs(delta).toFixed(1)}% ${direction} than ${previous.month}.`;
   }, [charts.monthlyTrend]);
 
   const resetForm = () => {
@@ -171,6 +135,16 @@ export const ExpensesPage = () => {
     setNotes("");
   };
 
+  const openAddModal = () => {
+    resetForm();
+    setShowAddModal(true);
+  };
+
+  const closeAddModal = () => {
+    setShowAddModal(false);
+    resetForm();
+  };
+
   const handleSaveExpense = async () => {
     if (
       projectId.trim().length === 0 ||
@@ -180,15 +154,11 @@ export const ExpensesPage = () => {
       date.trim().length === 0 ||
       paidBy.trim().length < 2
     ) {
-      setError(
-        "Please fill project, category, description, amount, date and paid by.",
-      );
+      setError("Please fill project, category, description, amount, date and paid by.");
       return;
     }
-
     setSaving(true);
     setError("");
-
     try {
       await api.createExpense({
         projectId,
@@ -204,13 +174,9 @@ export const ExpensesPage = () => {
       });
       await refreshExpenses();
       markSaved();
-      resetForm();
+      closeAddModal();
     } catch (saveError) {
-      const message =
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save expense.";
-      setError(message);
+      setError(saveError instanceof Error ? saveError.message : "Failed to save expense.");
     } finally {
       setSaving(false);
     }
@@ -223,12 +189,7 @@ export const ExpensesPage = () => {
         title="Expense Management"
       />
 
-      {error && (
-        <SurfaceCard>
-          <p className="text-sm text-red-700">{error}</p>
-        </SurfaceCard>
-      )}
-
+      {/* Expense Categories */}
       <SurfaceCard title="Expense Categories">
         <div className="flex flex-wrap gap-2">
           {expenseCategories.map((item) => (
@@ -242,12 +203,22 @@ export const ExpensesPage = () => {
         </div>
       </SurfaceCard>
 
+      {/* Add Expense button - outside card, right aligned */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
+          + Add Expense
+        </button>
+      </div>
+
+      {/* Expense List Table */}
       <SurfaceCard title="Expense List">
+        {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
+
         {loading ? (
           <SkeletonTable rows={5} />
         ) : expenseRows.length === 0 ? (
           <EmptyState
-            description="No expenses are available yet. Save the first expense record below."
+            description="No expenses yet. Click Add Expense to record the first one."
             title="No expenses"
           />
         ) : (
@@ -281,7 +252,17 @@ export const ExpensesPage = () => {
                       <td>{item.paymentMethod}</td>
                       <td>{item.receiptRef || "-"}</td>
                       <td>
-                        <StatusBadge status={item.status} />
+                        <span
+                          className={
+                            item.status === "Approved"
+                              ? "text-sm font-medium text-emerald-700"
+                              : item.status === "Pending"
+                                ? "text-sm font-medium text-amber-700"
+                                : "text-sm font-medium text-red-600"
+                          }
+                        >
+                          {item.status}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -303,166 +284,106 @@ export const ExpensesPage = () => {
         )}
       </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Add Expense">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" id="add-expense-form">
-            <label className="form-field">
-              <span>Project/Site</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setProjectId(event.target.value)}
-                value={projectId}
-              >
-                {projects.map((project) => (
-                  <option key={`ex-${project.id}`} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Expense Category</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setCategory(event.target.value)}
-                value={category}
-              >
-                {expenseCategories.map((item) => (
-                  <option key={`ex-cat-${item}`} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </GuiSelect>
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Description</span>
-              <input
-                className="input-field"
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Expense details..."
-                value={description}
-              />
-            </label>
-            <FinancialInput
-              label="Amount"
-              onChange={setAmount}
-              placeholder="500000"
-              value={amount}
-            />
-            <label className="form-field">
-              <span>Date</span>
-              <input
-                className="input-field"
-                onChange={(event) => setDate(event.target.value)}
-                type="date"
-                value={date}
-              />
-            </label>
-            <label className="form-field">
-              <span>Paid By</span>
-              <input
-                className="input-field"
-                onChange={(event) => setPaidBy(event.target.value)}
-                placeholder="Name or role"
-                value={paidBy}
-              />
-            </label>
-            <label className="form-field">
-              <span>Payment Method</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setPaymentMethod(event.target.value)}
-                value={paymentMethod}
-              >
-                <option value="Cash">Cash</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="Mobile Money">Mobile Money</option>
-                <option value="Cheque">Cheque</option>
-              </GuiSelect>
-            </label>
-            <label className="form-field">
-              <span>Receipt Reference</span>
-              <input
-                className="input-field"
-                onChange={(event) => setReceiptRef(event.target.value)}
-                placeholder="EXP-REC-001"
-                value={receiptRef}
-              />
-            </label>
-            <label className="form-field">
-              <span>Status</span>
-              <GuiSelect
-                className="input-field"
-                onChange={(event) => setStatus(event.target.value)}
-                value={status}
-              >
-                <option value="Approved">Approved</option>
-                <option value="Pending">Pending</option>
-                <option value="Rejected">Rejected</option>
-              </GuiSelect>
-            </label>
-            <label className="form-field sm:col-span-2">
-              <span>Notes</span>
-              <textarea
-                className="input-field min-h-20"
-                onChange={(event) => setNotes(event.target.value)}
-                value={notes}
-              />
-            </label>
-            <div className="sm:col-span-2 flex justify-end gap-2">
-              <button className="btn-secondary" onClick={resetForm} type="button">
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={saving}
-                onClick={() => void handleSaveExpense()}
-                type="button"
-              >
-                Save Expense
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
-
-        <SurfaceCard title="Expense Insights">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <PieChart className="h-4 w-4 text-[#0b2a53]" />
-                By Category
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                {charts.byCategory.slice(0, 3).map((item) => (
-                  <li key={`by-cat-${item.label}`}>
-                    {item.label} - {formatTzs(item.total)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <BarChart2 className="h-4 w-4 text-[#0b2a53]" />
-                By Project
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                {charts.byProject.slice(0, 3).map((item) => (
-                  <li key={`by-project-${item.label}`}>
-                    {item.label} - {formatTzs(item.total)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <TrendingUp className="h-4 w-4 text-[#0b2a53]" />
-                Monthly Trend
-              </p>
-              <p className="mt-2 text-sm text-slate-700">{monthTrendSummary}</p>
-            </div>
+      {/* Expense Insights */}
+      <SurfaceCard title="Expense Insights">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <PieChart className="h-4 w-4 text-[#0b2a53]" />
+              By Category
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              {charts.byCategory.slice(0, 3).map((item) => (
+                <li key={`by-cat-${item.label}`}>{item.label} - {formatTzs(item.total)}</li>
+              ))}
+            </ul>
           </div>
-        </SurfaceCard>
-      </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <BarChart2 className="h-4 w-4 text-[#0b2a53]" />
+              By Project
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              {charts.byProject.slice(0, 3).map((item) => (
+                <li key={`by-project-${item.label}`}>{item.label} - {formatTzs(item.total)}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <TrendingUp className="h-4 w-4 text-[#0b2a53]" />
+              Monthly Trend
+            </p>
+            <p className="mt-2 text-sm text-slate-700">{monthTrendSummary}</p>
+          </div>
+        </div>
+      </SurfaceCard>
+
+      {/* Add Expense Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Expense">
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Project/Site</span>
+                <GuiSelect className="input-field" onChange={(e) => setProjectId(e.target.value)} value={projectId}>
+                  {projects.map((p) => <option key={`ex-${p.id}`} value={p.id}>{p.name}</option>)}
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Expense Category</span>
+                <GuiSelect className="input-field" onChange={(e) => setCategory(e.target.value)} value={category}>
+                  {expenseCategories.map((item) => <option key={`ex-cat-${item}`} value={item}>{item}</option>)}
+                </GuiSelect>
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Description</span>
+                <input className="input-field" onChange={(e) => setDescription(e.target.value)} placeholder="Expense details..." value={description} />
+              </label>
+              <FinancialInput label="Amount" onChange={setAmount} placeholder="500000" value={amount} />
+              <label className="form-field">
+                <span>Date</span>
+                <input className="input-field" onChange={(e) => setDate(e.target.value)} type="date" value={date} />
+              </label>
+              <label className="form-field">
+                <span>Paid By</span>
+                <input className="input-field" onChange={(e) => setPaidBy(e.target.value)} placeholder="Name or role" value={paidBy} />
+              </label>
+              <label className="form-field">
+                <span>Payment Method</span>
+                <GuiSelect className="input-field" onChange={(e) => setPaymentMethod(e.target.value)} value={paymentMethod}>
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Mobile Money">Mobile Money</option>
+                  <option value="Cheque">Cheque</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Receipt Reference</span>
+                <input className="input-field" onChange={(e) => setReceiptRef(e.target.value)} placeholder="EXP-REC-001" value={receiptRef} />
+              </label>
+              <label className="form-field">
+                <span>Status</span>
+                <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value)} value={status}>
+                  <option value="Approved">Approved</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Rejected">Rejected</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea className="input-field min-h-20" onChange={(e) => setNotes(e.target.value)} value={notes} />
+              </label>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button className="btn-secondary" onClick={closeAddModal} type="button">Cancel</button>
+                <button className="btn-primary" disabled={saving} onClick={() => void handleSaveExpense()} type="button">
+                  Save Expense
+                </button>
+              </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
     </div>
   );
 };

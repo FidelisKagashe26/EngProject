@@ -57,7 +57,6 @@ export const GlobalLoader = () => {
       <div className="global-loader-shell">
         <span className="global-loader-ring global-loader-ring-a" />
         <span className="global-loader-ring global-loader-ring-b" />
-        <span className="global-loader-core" />
       </div>
     </div>
   );

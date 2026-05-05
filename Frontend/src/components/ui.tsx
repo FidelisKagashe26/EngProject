@@ -206,8 +206,8 @@ export const SectionTitle = ({
   subtitle?: string;
   action?: ReactNode;
 }) => (
-  <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-    <div>
+  <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
+    <div className="text-center">
       <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
       {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
     </div>
@@ -248,10 +248,10 @@ export const TablePagination = ({
         Showing {safeStart}-{safeEnd} of {totalCount} {itemLabel}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="form-field !gap-0 !text-[10px]">
-          <span className="!text-slate-500">Rows per page</span>
+        <label className="form-field gap-0! text-[10px]!">
+          <span className="text-slate-500!">Rows per page</span>
           <GuiSelect
-            className="h-9 min-w-[84px]"
+            className="h-9 min-w-21"
             fullWidth={false}
             onChange={(event) => onPageSizeChange(Number(event.target.value) || pageSizeOptions[0] || 5)}
             value={String(pageSize)}
@@ -678,7 +678,7 @@ export const ConfirmModal = ({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-80 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className="mb-3 flex items-center gap-2">
           <AlertTriangle className="h-5 w-5 text-red-600" />

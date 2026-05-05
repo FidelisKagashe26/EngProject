@@ -5,7 +5,6 @@ import {
   EmptyState,
   SectionTitle,
   SkeletonTable,
-  StatusBadge,
   SurfaceCard,
   TablePagination,
   GuiSelect,
@@ -161,15 +160,16 @@ export const TendersPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        action={
-          <Link className="btn-primary" to="/projects/new">
-            <Plus className="h-4 w-4" />
-            Register Contract
-          </Link>
-        }
-        subtitle="Contract governance view: terms, milestones, variation orders, and compliance linkage."
+        subtitle="Review contract terms, milestones, variations and linkage with workers."
         title="Contracts Governance"
       />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <Link className="btn-primary whitespace-nowrap" to="/projects/new">
+          <Plus className="h-4 w-4" />
+          Register Contract
+        </Link>
+      </div>
 
       {error && (
         <SurfaceCard>
@@ -336,24 +336,38 @@ export const TendersPage = () => {
                         </div>
                       </td>
                       <td>
-                        <StatusBadge status={item.status} />
+                        <span
+                          className={
+                            item.status === "Active"
+                              ? "text-sm font-medium text-emerald-700"
+                              : item.status === "Completed"
+                                ? "text-sm font-medium text-blue-700"
+                                : item.status === "On Hold"
+                                  ? "text-sm font-medium text-amber-700"
+                                  : item.status === "Over Budget"
+                                    ? "text-sm font-medium text-red-600"
+                                    : "text-sm font-medium text-slate-500"
+                          }
+                        >
+                          {item.status}
+                        </span>
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-2">
                           <Link
-                            className="btn-secondary !px-2 !py-1 text-xs"
+                            className="btn-primary py-1 px-3 text-xs"
                             to={`/projects/${encodeURIComponent(item.projectId)}`}
                           >
                             Project
                           </Link>
                           <Link
-                            className="btn-secondary !px-2 !py-1 text-xs"
+                            className="btn-primary py-1 px-3 text-xs"
                             to={`/labor?projectId=${encodeURIComponent(item.projectId)}`}
                           >
                             Labor
                           </Link>
                           <Link
-                            className="btn-secondary !px-2 !py-1 text-xs"
+                            className="btn-primary py-1 px-3 text-xs"
                             to={`/documents#upload-document`}
                           >
                             Docs

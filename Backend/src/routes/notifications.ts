@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getSingleTenantCompanyId } from "../db/init";
+import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { handleAsync } from "./utils";
 
@@ -18,6 +19,8 @@ router.get(
       description: string;
       priority: string;
       status: string;
+      reminder_count: number;
+      last_reminded_at: string | null;
       created_at: string;
     }>(
       `
@@ -30,6 +33,8 @@ router.get(
         n.description,
         n.priority,
         n.status,
+        COALESCE(n.reminder_count, 0) AS reminder_count,
+        n.last_reminded_at::text,
         n.created_at::text
       FROM engicost.notifications n
       LEFT JOIN engicost.projects p ON p.id = n.project_id
@@ -49,9 +54,113 @@ router.get(
         description: row.description,
         priority: row.priority,
         status: row.status,
+        reminderCount: row.reminder_count,
+        lastRemindedAt: row.last_reminded_at,
         createdAt: row.created_at,
       })),
     );
+  }),
+);
+
+// POST /notifications/:id/remind - Send a reminder (max 3 times)
+router.post(
+  "/:id/remind",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const notificationId = String(req.params.id);
+
+    const existing = await db.query<{
+      id: string;
+      title: string;
+      reminder_count: number;
+      status: string;
+    }>(
+      `
+      SELECT id, title, COALESCE(reminder_count, 0) AS reminder_count, status
+      FROM engicost.notifications
+      WHERE company_id = $1 AND id = $2
+      LIMIT 1
+      `,
+      [companyId, notificationId],
+    );
+
+    if (existing.rowCount === 0) {
+      res.status(404).json({ message: "Notification not found." });
+      return;
+    }
+
+    const notification = existing.rows[0];
+
+    if (notification.reminder_count >= 3) {
+      res.status(400).json({
+        message: "Maximum reminders (3) already sent for this notification.",
+        reminderCount: notification.reminder_count,
+      });
+      return;
+    }
+
+    const updated = await db.query<{
+      id: string;
+      reminder_count: number;
+      last_reminded_at: string;
+    }>(
+      `
+      UPDATE engicost.notifications
+      SET
+        reminder_count = COALESCE(reminder_count, 0) + 1,
+        last_reminded_at = NOW()
+      WHERE company_id = $1 AND id = $2
+      RETURNING id, reminder_count, last_reminded_at::text
+      `,
+      [companyId, notificationId],
+    );
+
+    const row = updated.rows[0];
+
+    await db.query(
+      `
+      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+      VALUES ($1, $2, 'System', 'Sent Reminder', 'Notifications', NULL, $3, '127.0.0.1 / System')
+      `,
+      [
+        makeId("ACT"),
+        companyId,
+        `Reminder ${row.reminder_count}/3 sent for: ${notification.title}`,
+      ],
+    );
+
+    res.json({
+      id: row.id,
+      reminderCount: row.reminder_count,
+      lastRemindedAt: row.last_reminded_at,
+      message: `Reminder ${row.reminder_count}/3 sent successfully.`,
+    });
+  }),
+);
+
+// PATCH /notifications/:id/resolve
+router.patch(
+  "/:id/resolve",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const notificationId = String(req.params.id);
+
+    const updated = await db.query<{ id: string }>(
+      `
+      UPDATE engicost.notifications
+      SET status = 'Resolved'
+      WHERE company_id = $1 AND id = $2
+      RETURNING id
+      `,
+      [companyId, notificationId],
+    );
+
+    if (updated.rowCount === 0) {
+      res.status(404).json({ message: "Notification not found." });
+      return;
+    }
+
+    res.json({ message: "Notification resolved." });
   }),
 );
 

@@ -130,14 +130,13 @@ export const DashboardPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        action={
-          <div className="flex gap-2">
-            <button className="btn-accent">Export Snapshot</button>
-          </div>
-        }
         subtitle="Cross-project financial visibility for active engineering sites."
         title="Main Dashboard"
       />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+        <button className="btn-accent whitespace-nowrap">Export Snapshot</button>
+      </div>
 
       {error && (
         <SurfaceCard>

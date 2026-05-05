@@ -19,7 +19,7 @@ export const AuthShell = ({
         <div className="mb-6">
           <div className="mb-2 flex justify-center">
             <img
-              alt="EngiCost logo"
+              alt="DREGGAM logo"
               className="h-24 w-auto object-contain"
               src="/EngLogo.png"
             />

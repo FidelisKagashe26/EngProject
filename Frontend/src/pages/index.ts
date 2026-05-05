@@ -21,3 +21,4 @@ export { SettingsPage } from "./SettingsPage";
 export { SuppliersPage } from "./SuppliersPage";
 export { TendersPage } from "./TendersPage";
 export { UsersRolesPage } from "./UsersRolesPage";
+export { WorkOrdersPage } from "./WorkOrdersPage";

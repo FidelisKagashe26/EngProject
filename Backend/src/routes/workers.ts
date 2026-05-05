@@ -11,7 +11,7 @@ const workerSchema = z.object({
   fullName: z.string().min(2),
   phone: z.string().min(7),
   skillRole: z.string().min(2),
-  paymentType: z.enum(["Daily", "Weekly", "Monthly", "Contract"]),
+  paymentType: z.enum(["Hourly", "Daily", "Weekly", "Monthly", "Contract"]),
   rateAmount: z.number().nonnegative(),
   assignedProjectId: z.string().optional().default(""),
   notes: z.string().optional().default(""),
@@ -23,6 +23,7 @@ const laborPaymentSchema = z.object({
   workStart: z.string().date(),
   workEnd: z.string().date(),
   daysWorked: z.number().int().min(0),
+  hoursWorked: z.number().min(0).optional().default(0),
   rateAmount: z.number().nonnegative(),
   amountPaid: z.number().nonnegative(),
   paymentMethod: z.string().min(2),
@@ -257,6 +258,7 @@ router.post(
     const parsed = laborPaymentSchema.parse({
       ...req.body,
       daysWorked: toInteger(req.body.daysWorked),
+      hoursWorked: Number(req.body.hoursWorked) || 0,
       rateAmount: toMoney(req.body.rateAmount),
       amountPaid: toMoney(req.body.amountPaid),
     });
@@ -268,14 +270,26 @@ router.post(
       return;
     }
 
-    if (parsed.daysWorked <= 0) {
-      res
-        .status(400)
-        .json({ message: "Days worked must be greater than zero." });
+    // For hourly workers, use hoursWorked; otherwise use daysWorked
+    const worker = await getWorkerById(companyId, parsed.workerId);
+    if (!worker) {
+      res.status(400).json({ message: "Selected worker does not exist." });
       return;
     }
 
-    const totalPayable = parsed.daysWorked * parsed.rateAmount;
+    const isHourly = worker.payment_type === "Hourly";
+    const effectiveUnits = isHourly ? (parsed.hoursWorked ?? 0) : parsed.daysWorked;
+
+    if (effectiveUnits <= 0) {
+      res.status(400).json({
+        message: isHourly
+          ? "Hours worked must be greater than zero."
+          : "Days worked must be greater than zero.",
+      });
+      return;
+    }
+
+    const totalPayable = effectiveUnits * parsed.rateAmount;
     if (parsed.amountPaid > totalPayable) {
       res.status(400).json({
         message: "Amount paid cannot exceed total payable for this record.",
@@ -288,12 +302,6 @@ router.post(
     const project = await getProjectById(companyId, parsed.projectId);
     if (!project) {
       res.status(400).json({ message: "Selected project/site does not exist." });
-      return;
-    }
-
-    const worker = await getWorkerById(companyId, parsed.workerId);
-    if (!worker) {
-      res.status(400).json({ message: "Selected worker does not exist." });
       return;
     }
 
@@ -462,6 +470,38 @@ router.post(
       projectName: project.name,
       workerName: worker.full_name,
     });
+  }),
+);
+
+router.delete(
+  "/:workerId",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const { workerId } = req.params;
+
+    const worker = await getWorkerById(companyId, workerId);
+    if (!worker) {
+      res.status(404).json({ message: "Worker not found." });
+      return;
+    }
+
+    await db.query(
+      `
+      UPDATE engicost.workers
+      SET status = 'Inactive'
+      WHERE company_id = $1 AND id = $2
+      `,
+      [companyId, workerId],
+    );
+
+    await logLaborActivity(
+      companyId,
+      "Deactivated Worker",
+      worker.assigned_project_id,
+      `Deactivated worker ${worker.full_name}.`,
+    );
+
+    res.json({ message: "Worker deactivated successfully." });
   }),
 );
 

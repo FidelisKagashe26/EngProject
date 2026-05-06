@@ -544,8 +544,7 @@ export const ReportsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {paymentPagination.paginatedRows.map((row, index) => {
-                      return (
+                    {paymentPagination.paginatedRows.map((row, index) => (
                         <tr key={`pay-${index}`}>
                           <td>{paymentPagination.startIndex + index + 1}</td>
                           <td className="font-medium text-slate-900">{row.projectName}</td>
@@ -558,8 +557,7 @@ export const ReportsPage = () => {
                             <BudgetBar spent={row.totalReceived} total={row.totalExpected} />
                           </td>
                         </tr>
-                      );
-                    })}
+                    ))}
                   </tbody>
                 </table>
               </div>

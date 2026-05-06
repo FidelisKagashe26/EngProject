@@ -545,9 +545,6 @@ export const ReportsPage = () => {
                   </thead>
                   <tbody>
                     {paymentPagination.paginatedRows.map((row, index) => {
-                      const rate = row.totalExpected > 0
-                        ? Math.round((row.totalReceived / row.totalExpected) * 100)
-                        : 0;
                       return (
                         <tr key={`pay-${index}`}>
                           <td>{paymentPagination.startIndex + index + 1}</td>

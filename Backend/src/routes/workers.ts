@@ -39,6 +39,7 @@ type WorkerLookup = {
   id: string;
   full_name: string;
   assigned_project_id: string | null;
+  payment_type: string;
 };
 
 const getProjectById = async (
@@ -63,7 +64,7 @@ const getWorkerById = async (
 ): Promise<WorkerLookup | null> => {
   const result = await db.query<WorkerLookup>(
     `
-    SELECT id, full_name, assigned_project_id
+    SELECT id, full_name, assigned_project_id, payment_type
     FROM engicost.workers
     WHERE company_id = $1 AND id = $2
     LIMIT 1
@@ -477,7 +478,7 @@ router.delete(
   "/:workerId",
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
-    const { workerId } = req.params;
+    const workerId = req.params.workerId as string;
 
     const worker = await getWorkerById(companyId, workerId);
     if (!worker) {

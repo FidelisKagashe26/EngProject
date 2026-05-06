@@ -17,16 +17,27 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            set -euo pipefail
+
+            echo "🚀 Starting deployment..."
+
             cd /var/www/engicost
-            git pull origin main
 
+            # HARD SYNC (avoid git conflicts like .env issues)
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "📦 Backend build..."
             cd Backend
-            npm install
+            npm ci
             npm run build
-            pm2 restart engicost-backend
 
+            echo "♻️ Restarting backend..."
+            pm2 restart engicost-backend --update-env
+
+            echo "🌐 Frontend build..."
             cd ../Frontend
-            npm install
+            npm ci
             npm run build
 
-            echo "Deployment complete"
+            echo "✅ Deployment successful"

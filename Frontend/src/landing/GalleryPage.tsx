@@ -97,28 +97,17 @@ export const GalleryPage = () => {
             </div>
           )}
 
-          {/* 3-column zigzag grid */}
+          {/* 3-column grid — all columns start at same level */}
           {!loading && filtered.length > 0 && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {/* Column 1 — starts at normal height */}
-              <div className="flex flex-col gap-4">
-                {col1.map((item) => (
-                  <GalleryCard item={item} key={item.id} />
-                ))}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="flex flex-col gap-2">
+                {col1.map((item) => <GalleryCard item={item} key={item.id} />)}
               </div>
-
-              {/* Column 2 — offset down for zigzag effect */}
-              <div className="flex flex-col gap-4 sm:mt-10">
-                {col2.map((item) => (
-                  <GalleryCard item={item} key={item.id} />
-                ))}
+              <div className="flex flex-col gap-2">
+                {col2.map((item) => <GalleryCard item={item} key={item.id} />)}
               </div>
-
-              {/* Column 3 — offset down more */}
-              <div className="flex flex-col gap-4 sm:mt-20">
-                {col3.map((item) => (
-                  <GalleryCard item={item} key={item.id} />
-                ))}
+              <div className="flex flex-col gap-2">
+                {col3.map((item) => <GalleryCard item={item} key={item.id} />)}
               </div>
             </div>
           )}
@@ -156,26 +145,26 @@ const GalleryCard = ({ item }: { item: GalleryItemRecord }) => {
     : item.imageUrl;
 
   return (
-    <div className="group relative w-full overflow-hidden rounded-2xl bg-slate-100 shadow-sm">
-      <div className="relative w-full">
-        <img
-          alt={item.title}
-          className="w-full object-cover transition-transform duration-700 group-hover:scale-105"
-          loading="lazy"
-          src={imgSrc}
-          style={{ display: "block" }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#001534]/80 via-[#001534]/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      </div>
-      <div className="p-4">
-        <span className="mb-1.5 inline-block rounded-full bg-[#f28c28]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[#f28c28]">
+    <div className="group relative overflow-hidden rounded-2xl">
+      {/* Real img — takes its natural height, never cropped */}
+      <img
+        alt={item.title}
+        className="block w-full transition-transform duration-700 group-hover:scale-105"
+        loading="lazy"
+        src={imgSrc}
+      />
+      {/* Gradient overlay always visible at bottom */}
+      <div className="absolute inset-0 bg-gradient-to-t from-[#001534]/90 via-[#001534]/20 to-transparent" />
+      {/* Text at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 p-4 lg:p-5">
+        <span className="mb-1.5 inline-block rounded bg-[#f28c28] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white sm:text-[10px]">
           {item.category}
         </span>
-        <h3 className="font-[Manrope,sans-serif] text-sm font-bold text-[#0b2a53] sm:text-base">
+        <h3 className="font-[Manrope,sans-serif] text-sm font-bold text-white sm:text-base">
           {item.title}
         </h3>
         {item.subtitle && (
-          <p className="mt-0.5 text-xs text-slate-500">{item.subtitle}</p>
+          <p className="mt-0.5 text-[11px] text-[#adc7f9] sm:text-xs">{item.subtitle}</p>
         )}
       </div>
     </div>

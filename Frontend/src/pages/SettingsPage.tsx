@@ -56,7 +56,6 @@ const GalleryImageUploader = ({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
     setError("");
@@ -99,56 +98,33 @@ const GalleryImageUploader = ({
 
       {/* Upload buttons */}
       {!value && (
-        <div className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 transition ${
-          uploading ? "border-[#f28c28] bg-orange-50" : "border-slate-300 bg-slate-50 hover:border-slate-400"
-        }`}>
+        <div
+          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 transition cursor-pointer ${
+            uploading ? "border-[#f28c28] bg-orange-50" : "border-slate-300 bg-slate-50 hover:border-slate-400"
+          }`}
+          onClick={() => !uploading && fileRef.current?.click()}
+        >
           {uploading ? (
             <div className="flex items-center gap-2 text-sm text-[#f28c28]">
               <Loader2 className="h-5 w-5 animate-spin" />
-              Inapakia...
+              Uploading...
             </div>
           ) : (
             <>
-              <p className="text-sm font-medium text-slate-600">Chagua picha au piga picha</p>
-              <div className="flex gap-2">
-                {/* File picker */}
-                <button
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#f28c28] hover:text-[#f28c28]"
-                  onClick={() => fileRef.current?.click()}
-                  type="button"
-                >
-                  <Image className="h-4 w-4" />
-                  Chagua Picha
-                </button>
-                {/* Camera */}
-                <button
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#f28c28] hover:text-[#f28c28]"
-                  onClick={() => cameraRef.current?.click()}
-                  type="button"
-                >
-                  📷 Camera
-                </button>
-              </div>
+              <Image className="h-8 w-8 text-slate-400" />
+              <p className="text-sm font-medium text-slate-600">Click here to select an image</p>
               <p className="text-[10px] text-slate-400">JPEG, PNG, WebP — max 10 MB</p>
             </>
           )}
         </div>
       )}
 
-      {/* Hidden inputs */}
+      {/* Single hidden input — browser/OS shows native picker with all options */}
       <input
         accept="image/*"
         className="hidden"
         onChange={onFileChange}
         ref={fileRef}
-        type="file"
-      />
-      <input
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={onFileChange}
-        ref={cameraRef}
         type="file"
       />
 
@@ -232,15 +208,15 @@ const WebsiteManagementSection = ({
   const handleGalleryAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setGalleryFormError("");
-    if (!galleryForm.title.trim()) { setGalleryFormError("Title inahitajika."); return; }
-    if (!galleryForm.imageUrl.trim()) { setGalleryFormError("Image URL inahitajika."); return; }
+    if (!galleryForm.title.trim()) { setGalleryFormError("Title is required."); return; }
+    if (!galleryForm.imageUrl.trim()) { setGalleryFormError("Image is required."); return; }
     setGalleryFormSaving(true);
     try {
       const created = await api.createGalleryItem(galleryForm);
       setGalleryItems((prev) => [created, ...prev]);
       setGalleryForm({ title: "", subtitle: "", category: "", imageUrl: "", sortOrder: 0, isVisible: true });
     } catch (err) {
-      setGalleryFormError(err instanceof ApiError ? err.message : "Imeshindwa kuongeza.");
+      setGalleryFormError(err instanceof ApiError ? err.message : "Failed to add item.");
     } finally {
       setGalleryFormSaving(false);
     }
@@ -681,7 +657,7 @@ const WebsiteManagementSection = ({
           <div className="space-y-5">
             {/* Add form */}
             <form className="rounded-xl border border-slate-200 bg-slate-50 p-4" onSubmit={(e) => void handleGalleryAdd(e)}>
-              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Ongeza Picha Mpya</p>
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Add New Image</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="form-field">
                   <span>Title *</span>
@@ -741,7 +717,7 @@ const WebsiteManagementSection = ({
               <div className="mt-3 flex items-center gap-3">
                 <button className="btn-primary flex items-center gap-2" disabled={galleryFormSaving} type="submit">
                   {galleryFormSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  Ongeza
+                  Add
                 </button>
                 <label className="flex items-center gap-2 text-sm text-slate-600">
                   <input
@@ -1169,9 +1145,9 @@ export const SettingsPage = () => {
               const isActive = option.id === activeSection;
               return (
                 <button
-                  className={`relative w-full rounded-xl border px-3 py-2 text-left transition ${
+                  className={`w-full rounded-xl border px-3 py-2 text-left transition ${
                     isActive
-                      ? "text-white shadow-sm"
+                      ? "border-transparent text-white shadow-sm"
                       : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50"
                   }`}
                   key={option.id}
@@ -1180,18 +1156,11 @@ export const SettingsPage = () => {
                     isActive
                       ? {
                           backgroundColor: "var(--primary)",
-                          borderColor: "var(--accent)",
                         }
                       : undefined
                   }
                   type="button"
                 >
-                  {isActive && (
-                    <span
-                      className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
-                      style={{ backgroundColor: "var(--accent)" }}
-                    />
-                  )}
                   <p className="text-sm font-semibold">{option.label}</p>
                 </button>
               );

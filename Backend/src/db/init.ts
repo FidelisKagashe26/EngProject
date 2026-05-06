@@ -20,6 +20,7 @@ const seedProjects = [
     pending_client_payments: 28_000_000,
     description: "Drainage and culvert construction works.",
   },
+  
   {
     id: "PRJ-002",
     name: "Arusha Office Renovation",

@@ -189,4 +189,3 @@ export const AboutPage = () => (
     </section>
   </>
 );
-

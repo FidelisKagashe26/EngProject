@@ -19,8 +19,13 @@ const parsedEmailSecure =
     ? toBoolean(process.env.EMAIL_SECURE, false)
     : parsedEmailPort === 465;
 
+// NODE_ENV: read from .env file first, then process.env, fallback to "development"
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const isProduction = nodeEnv === "production";
+
 export const env = {
-  nodeEnv: process.env.NODE_ENV ?? "development",
+  nodeEnv,
+  isProduction,
   appPort: toNumber(process.env.PORT ?? process.env.APP_PORT, 5050),
   dbHost: process.env.DB_HOST ?? "127.0.0.1",
   dbPort: toNumber(process.env.DB_PORT, 5432),

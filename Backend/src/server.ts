@@ -26,7 +26,8 @@ app.use(
         return;
       }
 
-      if (env.nodeEnv !== "production") {
+      if (!env.isProduction) {
+        // development mode — allow all origins
         callback(null, true);
         return;
       }
@@ -66,6 +67,7 @@ const bootstrap = async (): Promise<void> => {
   await initializeDatabase();
   app.listen(env.appPort, () => {
     console.log(`Server running at http://localhost:${env.appPort}`);
+    console.log(`Mode: ${env.nodeEnv} | CORS origins: ${env.corsOrigin}`);
     console.log(
       `Configured database: ${env.dbHost}:${env.dbPort}/${env.dbName} (single-tenant mode)`,
     );

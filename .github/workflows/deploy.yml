@@ -38,6 +38,6 @@ jobs:
             echo "🌐 Frontend build..."
             cd ../Frontend
             npm ci
-            npm run build
+            VITE_API_BASE_URL=https://www.dreggam.com/api npm run build
 
             echo "✅ Deployment successful"

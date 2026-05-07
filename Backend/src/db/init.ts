@@ -102,16 +102,6 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
-  // Add reminder tracking columns to notifications
-  await db.query(`
-    ALTER TABLE engicost.notifications
-    ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0
-  `);
-  await db.query(`
-    ALTER TABLE engicost.notifications
-    ADD COLUMN IF NOT EXISTS last_reminded_at TIMESTAMP
-  `);
-
   await db.query(`
     ALTER TABLE engicost.users
     ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)
@@ -286,6 +276,16 @@ export const initializeDatabase = async (): Promise<void> => {
       status VARCHAR(20) NOT NULL DEFAULT 'Unread',
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+
+  // Add reminder tracking columns to notifications (safe to run multiple times)
+  await db.query(`
+    ALTER TABLE engicost.notifications
+    ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.notifications
+    ADD COLUMN IF NOT EXISTS last_reminded_at TIMESTAMP
   `);
 
   await db.query(`

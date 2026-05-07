@@ -40,7 +40,7 @@ export const LoginPage = () => {
   };
 
   return (
-    <AuthShell title="Sign in">
+    <AuthShell subtitle="Sign in to your account" title="Login">
       <form className="space-y-5" onSubmit={handleSubmit}>
         {errorMessage && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -54,7 +54,7 @@ export const LoginPage = () => {
             <input
               className="input-field pl-10"
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="manager@nexivo.co.tz"
+              placeholder="manager@dreggam.com"
               required
               type="email"
               value={email}

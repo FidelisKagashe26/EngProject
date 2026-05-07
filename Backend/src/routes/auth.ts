@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import jwt, { TokenExpiredError, type SignOptions } from "jsonwebtoken";
 import { z } from "zod";
 import { env } from "../config/env";
@@ -16,6 +17,18 @@ import {
 } from "../services/mailer";
 import type { AuthTokenPayload } from "../types/auth";
 import { handleAsync } from "./utils";
+
+const router = Router();
+
+// ── Login rate limiter: max 5 failed attempts per 15 min per IP ──────────────
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { message: "Too many failed login attempts. Please try again in 15 minutes." },
+});
 
 const router = Router();
 
@@ -145,6 +158,7 @@ const verifyPasswordResetToken = (
 
 router.post(
   "/login",
+  loginLimiter,
   handleAsync(async (req, res) => {
     const parsed = loginSchema.parse(req.body);
     const normalizedEmail = normalizeEmail(parsed.email);
@@ -166,7 +180,7 @@ router.post(
 
     const user = result.rows[0];
     if (user.status !== "Active") {
-      res.status(403).json({ message: "Account is not active." });
+      res.status(403).json({ message: "Account is suspended or inactive. Contact your administrator." });
       return;
     }
 

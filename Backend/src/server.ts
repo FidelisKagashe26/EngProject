@@ -1,5 +1,7 @@
 import cors from "cors";
 import express from "express";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import path from "path";
 import { env } from "./config/env";
 import { initializeDatabase } from "./db/init";
@@ -8,6 +10,35 @@ import { errorHandler } from "./middleware/errorHandler";
 import apiRouter from "./routes";
 
 const app = express();
+
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // allow /uploads images
+}));
+
+// ── Trust proxy (needed for correct IP behind nginx/reverse proxy) ────────────
+app.set("trust proxy", 1);
+
+// ── Global rate limit: 200 requests per 15 min per IP ────────────────────────
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please try again later." },
+});
+app.use(globalLimiter);
+
+// ── Login rate limit: max 5 attempts per 15 min per IP ───────────────────────
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // only count failed attempts
+  message: { message: "Too many failed login attempts. Please try again in 15 minutes." },
+});
+
 const configuredOrigins = env.corsOrigin
   .split(",")
   .map((origin) => origin.trim())
@@ -37,7 +68,7 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "2mb" })); // limit request body size
 
 // Serve uploaded files as static assets
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));

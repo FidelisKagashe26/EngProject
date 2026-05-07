@@ -1,4 +1,4 @@
-import { LogIn, Menu, MessageSquare, X } from "lucide-react";
+import { LogIn, Menu, MessageSquare, X, Home, Image, Info, Mail, Wrench, Zap, Droplet, Camera, Building2 } from "lucide-react";
 import { useState } from "react";
 import {
   FaEnvelope,
@@ -11,7 +11,6 @@ import {
   FaXTwitter,
 } from "react-icons/fa6";
 import { MdAccessTime } from "react-icons/md";
-import { Home, Image, Info, Mail, Wrench } from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { useWebsiteSettings } from "./WebsiteSettingsContext";
@@ -41,11 +40,11 @@ export const LandingLayout = () => {
 
       {/* ── Navbar ── */}
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:h-[92px] sm:px-6 lg:px-8">
+        <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:h-24 sm:px-6 lg:px-8">
 
-          {/* Logo */}
+          {/* Logo — kushoto mobile, kushoto desktop */}
           <Link className="inline-flex items-center no-underline" to="/">
-            <img alt="DREGGAM" className="h-9 w-auto object-contain sm:h-20" src="/EngLogo.png" />
+            <img alt="DREGGAM" className="h-14 w-auto object-contain sm:h-20" src="/EngLogo.png" />
           </Link>
 
           {/* Desktop links */}
@@ -143,13 +142,7 @@ export const LandingLayout = () => {
       <main><Outlet /></main>
 
       {/* ── Footer ── */}
-      <footer className="relative text-[#c8d8f0]">
-        {/* Background image with lighter overlay so photo shows through */}
-        <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: "url('/photo3.jpeg')" }}
-        />
-        <div className="absolute inset-0 bg-[#001534]/72" />
+      <footer className="relative bg-[#001534] text-[#c8d8f0]">
 
         {/* Content */}
         <div className="relative mx-auto max-w-7xl px-4 pb-10 pt-14 sm:px-6 lg:px-8">
@@ -173,13 +166,16 @@ export const LandingLayout = () => {
             <div>
               <h4 className="mb-5 text-sm font-bold uppercase tracking-widest text-[#f28c28]">Company</h4>
               <ul className="flex flex-col gap-3">
-                {[["About", "/about"], ["Gallery", "/gallery"], ["Services", "/services"], ["Contact", "/contact"]].map(([label, href]) => (
+                {[["About", "/about"], ["Gallery", "/gallery"], ["Services", "/services"], ["Contact", "/contact"]].map(([label, href], idx) => (
                   <li key={label}>
                     <Link
                       className="inline-flex items-center gap-2 text-sm text-[#adc7f9] no-underline transition hover:text-white"
                       to={href}
                     >
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-[#f28c28]" />
+                      {idx === 0 && <Info size={14} className="shrink-0 text-[#f28c28]" />}
+                      {idx === 1 && <Image size={14} className="shrink-0 text-[#f28c28]" />}
+                      {idx === 2 && <Wrench size={14} className="shrink-0 text-[#f28c28]" />}
+                      {idx === 3 && <Mail size={14} className="shrink-0 text-[#f28c28]" />}
                       {label}
                     </Link>
                   </li>
@@ -191,87 +187,96 @@ export const LandingLayout = () => {
             <div>
               <h4 className="mb-5 text-sm font-bold uppercase tracking-widest text-[#f28c28]">Services</h4>
               <ul className="flex flex-col gap-3">
-                {["Electrical", "Plumbing", "CCTV & Security", "Electric Fence", "Construction"].map((s) => (
-                  <li key={s}>
+                {[
+                  { name: "Electrical", Icon: Zap },
+                  { name: "Plumbing", Icon: Droplet },
+                  { name: "CCTV & Security", Icon: Camera },
+                  { name: "Electric Fence", Icon: Wrench },
+                  { name: "Construction", Icon: Building2 },
+                ].map(({ name, Icon }) => (
+                  <li key={name}>
                     <Link
                       className="inline-flex items-center gap-2 text-sm text-[#adc7f9] no-underline transition hover:text-white"
                       to="/services"
                     >
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-[#f28c28]" />
-                      {s}
+                      <Icon size={14} className="shrink-0 text-[#f28c28]" />
+                      {name}
                     </Link>
                   </li>
                 ))}
               </ul>
             </div>
 
-            {/* Col 4: Mawasiliano + social icons */}
-            <div>
-              <h4 className="mb-5 text-sm font-bold uppercase tracking-widest text-[#f28c28]">Mawasiliano</h4>
-              <ul className="flex flex-col gap-3">
-                {settings.phone_main && (
-                  <li>
-                    <a
-                      className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
-                      href={`tel:${settings.phone_main}`}
-                    >
-                      <FaPhone className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
-                      {settings.phone_main}
-                    </a>
-                  </li>
-                )}
-                {settings.phone_whatsapp && (
-                  <li>
-                    <a
-                      className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
-                      href={`https://wa.me/${settings.phone_whatsapp.replace(/\D/g, "")}`}
-                      rel="noopener noreferrer"
-                      target="_blank"
-                    >
-                      <FaWhatsapp className="h-3.5 w-3.5 shrink-0 text-green-400" />
-                      {settings.phone_whatsapp}
-                    </a>
-                  </li>
-                )}
-                {settings.email_main && (
-                  <li>
-                    <a
-                      className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
-                      href={`mailto:${settings.email_main}`}
-                    >
-                      <FaEnvelope className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
-                      {settings.email_main}
-                    </a>
-                  </li>
-                )}
-                {settings.location && (
-                  <li className="flex items-start gap-2.5 text-sm text-[#adc7f9]">
-                    <FaLocationDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
-                    {settings.location}
-                  </li>
-                )}
-                {settings.hours && (
-                  <li className="flex items-center gap-2.5 text-sm text-[#adc7f9]">
-                    <MdAccessTime className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
-                    {settings.hours}
-                  </li>
-                )}
-              </ul>
+            {/* Col 4: Contact + social icons */}
+            <div className="col-span-2 lg:col-span-1">
+              <h4 className="mb-5 text-sm font-bold uppercase tracking-widest text-[#f28c28]">Contact</h4>
+              <div className="flex justify-between gap-8 lg:flex-col">
+                {/* Contact info - left */}
+                <ul className="flex flex-col gap-3 flex-1">
+                  {settings.phone_main && (
+                    <li>
+                      <a
+                        className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
+                        href={`tel:${settings.phone_main}`}
+                      >
+                        <FaPhone className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                        {settings.phone_main}
+                      </a>
+                    </li>
+                  )}
+                  {settings.phone_whatsapp && (
+                    <li>
+                      <a
+                        className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
+                        href={`https://wa.me/${settings.phone_whatsapp.replace(/\D/g, "")}`}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        <FaWhatsapp className="h-3.5 w-3.5 shrink-0 text-green-400" />
+                        {settings.phone_whatsapp}
+                      </a>
+                    </li>
+                  )}
+                  {settings.email_main && (
+                    <li>
+                      <a
+                        className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
+                        href={`mailto:${settings.email_main}`}
+                      >
+                        <FaEnvelope className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                        {settings.email_main}
+                      </a>
+                    </li>
+                  )}
+                  {settings.location && (
+                    <li className="flex items-start gap-2.5 text-sm text-[#adc7f9]">
+                      <FaLocationDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                      {settings.location}
+                    </li>
+                  )}
+                  {settings.hours && (
+                    <li className="flex items-center gap-2.5 text-sm text-[#adc7f9]">
+                      <MdAccessTime className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                      {settings.hours}
+                    </li>
+                  )}
+                </ul>
 
-              {/* Social icons below contact */}
-              <div className="mt-6 flex gap-2">
-                {socials.map(({ Icon, href, label }) => (
-                  <a
-                    aria-label={label}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-[#adc7f9] no-underline transition hover:border-[#f28c28] hover:bg-[#f28c28] hover:text-white"
-                    href={href}
-                    key={label}
-                    rel="noopener noreferrer"
-                    target={href !== "#" ? "_blank" : undefined}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </a>
-                ))}
+                {/* Social icons - right */}
+                <div className="flex flex-col items-start gap-3 lg:mt-6 lg:flex-row lg:items-center">
+                  {socials.map(({ Icon, href, label }) => (
+                    <a
+                      aria-label={label}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-[#adc7f9] no-underline transition hover:border-[#f28c28] hover:bg-[#f28c28] hover:text-white"
+                      href={href}
+                      key={label}
+                      rel="noopener noreferrer"
+                      target={href !== "#" ? "_blank" : undefined}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </a>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

@@ -46,20 +46,32 @@ export const ServicesPage = () => (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-8 lg:grid-cols-3">
           {SERVICES.map((s) => (
             <div
-              className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[#f28c28] hover:shadow-xl hover:shadow-orange-100 sm:p-8"
+              className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[#f28c28] hover:shadow-xl hover:shadow-orange-100"
               key={s.title}
             >
-              <div className="mb-5 flex h-13 w-13 items-center justify-center rounded-2xl bg-slate-50 text-[#0b2a53] transition group-hover:bg-orange-50 group-hover:text-[#f28c28] sm:h-16 sm:w-16">
-                <Icon name={s.iconName} size={28} />
+              {/* Image */}
+              {"image" in s && s.image ? (
+                <div className="relative h-64 overflow-hidden">
+                  <img
+                    alt={s.title}
+                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    loading="lazy"
+                    src={s.image}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#001534]/40 to-transparent" />
+                </div>
+              ) : (
+                <div className="flex h-64 items-center justify-center bg-slate-50 transition group-hover:bg-orange-50">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-[#0b2a53] shadow-sm transition group-hover:text-[#f28c28]">
+                    <Icon name={s.iconName} size={32} />
+                  </div>
+                </div>
+              )}
+              {/* Text */}
+              <div className="flex flex-1 flex-col p-6 sm:p-8">
+                <h3 className="mb-2 font-[Manrope,sans-serif] text-base font-bold text-[#0b2a53] sm:mb-3 sm:text-xl">{s.title}</h3>
+                <p className="flex-1 text-xs leading-relaxed text-slate-500 sm:text-sm">{s.desc}</p>
               </div>
-              <h3 className="mb-2 font-[Manrope,sans-serif] text-base font-bold text-[#0b2a53] sm:mb-3 sm:text-xl">{s.title}</h3>
-              <p className="flex-1 text-xs leading-relaxed text-slate-500 sm:text-sm">{s.desc}</p>
-              <Link
-                className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[#f28c28] no-underline transition hover:gap-2.5 sm:mt-6"
-                to="/contact"
-              >
-                Get a Quote <ArrowRight size={14} />
-              </Link>
             </div>
           ))}
         </div>
@@ -100,16 +112,23 @@ export const ServicesPage = () => (
     </section>
 
     {/* CTA */}
-    <section className="bg-[#faf9fd] py-12 sm:py-16">
-      <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
-        <h2 className="font-[Manrope,sans-serif] text-xl font-bold text-[#0b2a53] sm:text-3xl">
+    <section className="relative overflow-hidden py-24 sm:py-32">
+      {/* Parallax background */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-fixed"
+        style={{ backgroundImage: "url('/photo10.jpeg')" }}
+      />
+      <div className="absolute inset-0 bg-[#001534]/40" />
+
+      <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
+        <h2 className="font-[Manrope,sans-serif] text-2xl font-bold text-white sm:text-4xl">
           Need a Custom Solution?
         </h2>
-        <p className="mx-auto mt-3 max-w-lg text-sm text-slate-500 sm:mt-4 sm:text-base">
+        <p className="mx-auto mt-3 max-w-lg text-sm text-white/90 sm:mt-4 sm:text-base">
           Every project is unique. Contact us for a tailored engineering solution that fits your exact needs.
         </p>
         <Link
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#f28c28] px-8 py-3.5 text-sm font-bold text-slate-900 shadow-lg shadow-orange-200 no-underline transition hover:bg-orange-500 sm:mt-8 sm:py-4"
+          className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#f28c28] px-8 py-4 text-sm font-bold text-slate-900 shadow-lg shadow-orange-500/30 no-underline transition hover:bg-orange-500 sm:py-4"
           to="/contact"
         >
           Contact Our Team <ArrowRight size={16} />

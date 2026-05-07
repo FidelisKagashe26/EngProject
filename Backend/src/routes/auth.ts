@@ -6,6 +6,7 @@ import { env } from "../config/env";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { authenticateToken, signAuthToken } from "../middleware/auth";
+
 import {
   getSmtpStatus,
   sendOtpTestEmail,

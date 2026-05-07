@@ -94,13 +94,13 @@ a {
     display: flex;
     width: 200%;
     height: 100%;
-    animation: home-hero-scroll 40s linear infinite;
+    animation: home-hero-scroll 50s linear infinite;
     will-change: transform;
   }
 
   @media (max-width: 767px) {
     .home-hero-slider-track {
-      animation-duration: 50s;
+      animation-duration: 20s;
     }
   }
 

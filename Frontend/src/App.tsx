@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ProtectedRoute, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
@@ -39,6 +39,14 @@ import {
   WorkOrdersPage,
 } from "./pages";
 
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [pathname]);
+  return null;
+};
+
 const ProtectedAppLayout = () => {
   const { user, logout } = useAuth();
   const { company } = useCompanySettings();
@@ -74,6 +82,7 @@ function App() {
   return (
     <>
       <GlobalLoader />
+      <ScrollToTop />
       <Routes>
         {/* ── Public landing routes ── */}
         <Route element={<WebsiteSettingsProvider><LandingLayout /></WebsiteSettingsProvider>}>

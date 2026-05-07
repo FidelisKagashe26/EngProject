@@ -30,8 +30,6 @@ const loginLimiter = rateLimit({
   message: { message: "Too many failed login attempts. Please try again in 15 minutes." },
 });
 
-const router = Router();
-
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),

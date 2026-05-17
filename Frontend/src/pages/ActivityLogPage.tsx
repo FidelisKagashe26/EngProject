@@ -1,26 +1,15 @@
 import { Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SectionTitle, SurfaceCard, TablePagination, GuiSelect } from "../components/ui";
-import { activityLog as fallbackActivity } from "../data/mockData";
 import { useTablePagination } from "../hooks/useTablePagination";
 import { api, type ActivityApiRecord } from "../services/api";
 
-const fallbackRows: ActivityApiRecord[] = fallbackActivity.map((row) => ({
-  id: row.id,
-  actorName: row.user,
-  action: row.action,
-  module: row.module,
-  projectId: null,
-  projectName: row.project,
-  description: row.description,
-  ipDevice: row.ipDevice,
-  createdAt: row.dateTime,
-}));
-
 export const ActivityLogPage = () => {
-  const [rows, setRows] = useState<ActivityApiRecord[]>(fallbackRows);
+  const [rows, setRows] = useState<ActivityApiRecord[]>([]);
   const [error, setError] = useState("");
-  const activityPagination = useTablePagination(rows);
+  const [search, setSearch] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("All Modules");
+  const [dateFilter, setDateFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -33,8 +22,8 @@ export const ActivityLogPage = () => {
         }
       } catch {
         if (mounted) {
-          setRows(fallbackRows);
-          setError("Using local activity preview data. Backend API is not reachable yet.");
+          setRows([]);
+          setError("Failed to load activity log from backend.");
         }
       }
     };
@@ -44,6 +33,31 @@ export const ActivityLogPage = () => {
       mounted = false;
     };
   }, []);
+
+  const moduleOptions = useMemo(() => {
+    const options = Array.from(
+      new Set(rows.map((row) => row.module.trim()).filter((moduleName) => moduleName.length > 0)),
+    );
+    options.sort((a, b) => a.localeCompare(b));
+    return options;
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      const searchMatch =
+        search.trim().length === 0 ||
+        `${row.actorName} ${row.action} ${row.module} ${row.projectName} ${row.description}`
+          .toLowerCase()
+          .includes(search.toLowerCase());
+      const moduleMatch =
+        moduleFilter === "All Modules" || row.module === moduleFilter;
+      const dateMatch =
+        dateFilter.length === 0 || row.createdAt.startsWith(dateFilter);
+      return searchMatch && moduleMatch && dateMatch;
+    });
+  }, [dateFilter, moduleFilter, rows, search]);
+
+  const activityPagination = useTablePagination(filteredRows);
 
   return (
     <div className="space-y-6">
@@ -64,22 +78,37 @@ export const ActivityLogPage = () => {
             <span>Search</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input className="input-field pl-9" placeholder="User, action, module or project..." />
+              <input
+                className="input-field pl-9"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="User, action, module or project..."
+                value={search}
+              />
             </div>
           </label>
           <label className="form-field">
             <span>Module</span>
-            <GuiSelect className="input-field">
-              <option>All Modules</option>
-              <option>Projects</option>
-              <option>Payments</option>
-              <option>Materials</option>
-              <option>Documents</option>
+            <GuiSelect
+              className="input-field"
+              onChange={(event) => setModuleFilter(event.target.value)}
+              value={moduleFilter}
+            >
+              <option value="All Modules">All Modules</option>
+              {moduleOptions.map((moduleName) => (
+                <option key={`activity-module-${moduleName}`} value={moduleName}>
+                  {moduleName}
+                </option>
+              ))}
             </GuiSelect>
           </label>
           <label className="form-field">
             <span>Date</span>
-            <input className="input-field" type="date" />
+            <input
+              className="input-field"
+              onChange={(event) => setDateFilter(event.target.value)}
+              type="date"
+              value={dateFilter}
+            />
           </label>
         </div>
       </SurfaceCard>

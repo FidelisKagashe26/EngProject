@@ -483,7 +483,7 @@ export const initializeDatabase = async (): Promise<void> => {
   );
 
   const existingProjects = await db.query("SELECT id FROM engicost.projects LIMIT 1");
-  if (existingProjects.rowCount === 0) {
+  if (existingProjects.rowCount === 0 && env.seedDemoData) {
     for (const project of seedProjects) {
       await db.query(
         `
@@ -787,4 +787,3 @@ export const getSingleTenantCompanyId = async (): Promise<number> => {
 
   return result.rows[0].id;
 };
-

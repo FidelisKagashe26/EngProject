@@ -14,7 +14,6 @@ import {
   type ProjectApiRecord,
   type UserApiRecord,
 } from "../services/api";
-import { permissionGroups, rolePermissions } from "../data/mockData";
 import { formatDate } from "../utils/format";
 
 const ROLES = [
@@ -26,6 +25,46 @@ const ROLES = [
 ] as const;
 
 type Role = (typeof ROLES)[number];
+
+const PERMISSION_GROUPS = [
+  "View dashboard",
+  "Manage projects",
+  "Manage contracts",
+  "Manage labor",
+  "Manage materials",
+  "Manage expenses",
+  "Manage payments",
+  "Upload documents",
+  "View reports",
+  "Manage users",
+  "Export reports",
+] as const;
+
+const ROLE_PERMISSIONS: Record<Role, readonly string[]> = {
+  Admin: PERMISSION_GROUPS,
+  "Engineer / Project Manager": [
+    "View dashboard",
+    "Manage projects",
+    "Manage contracts",
+    "Manage labor",
+    "Manage materials",
+    "Manage expenses",
+    "Manage payments",
+    "Upload documents",
+    "View reports",
+    "Export reports",
+  ],
+  Accountant: [
+    "View dashboard",
+    "Manage expenses",
+    "Manage payments",
+    "Upload documents",
+    "View reports",
+    "Export reports",
+  ],
+  "Store Keeper": ["View dashboard", "Manage materials", "Upload documents"],
+  "Site Supervisor": ["View dashboard", "Manage labor", "Manage expenses", "Upload documents"],
+};
 
 export const UsersRolesPage = () => {
   const [loading, setLoading] = useState(true);
@@ -79,7 +118,7 @@ export const UsersRolesPage = () => {
   };
 
   const usersPagination = useTablePagination(users);
-  const permissionsPagination = useTablePagination(permissionGroups);
+  const permissionsPagination = useTablePagination([...PERMISSION_GROUPS]);
 
   const resetForm = () => {
     setFullName("");
@@ -334,7 +373,7 @@ export const UsersRolesPage = () => {
                   <td className="font-medium text-slate-700">{group}</td>
                   {ROLES.map((r) => (
                     <td className="text-center" key={`perm-${r}-${group}`}>
-                      {(rolePermissions[r] ?? []).includes(group) ? (
+                      {(ROLE_PERMISSIONS[r] ?? []).includes(group) ? (
                         <span className="text-emerald-600 font-bold">✓</span>
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -451,7 +490,7 @@ export const UsersRolesPage = () => {
                   Permissions for: {role}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {(rolePermissions[role] ?? []).map((perm) => (
+                  {(ROLE_PERMISSIONS[role] ?? []).map((perm) => (
                     <span
                       className="rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-xs font-medium text-blue-800"
                       key={perm}

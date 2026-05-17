@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SectionTitle, SurfaceCard } from "../components/ui";
-import { notifications as fallbackNotifications } from "../data/mockData";
 import { api, type NotificationApiRecord } from "../services/api";
 
 const iconByType = {
@@ -28,22 +27,8 @@ const priorityClass = {
   Low: "text-blue-700 bg-blue-50 border-blue-200",
 };
 
-const fallbackRows: NotificationApiRecord[] = fallbackNotifications.map((item) => ({
-  id: item.id,
-  projectId: null,
-  projectName: item.project,
-  type: item.type,
-  title: item.title,
-  description: item.description,
-  priority: item.priority,
-  status: "Unread",
-  reminderCount: 0,
-  lastRemindedAt: null,
-  createdAt: item.dateTime,
-}));
-
 export const NotificationsPage = () => {
-  const [rows, setRows] = useState<NotificationApiRecord[]>(fallbackRows);
+  const [rows, setRows] = useState<NotificationApiRecord[]>([]);
   const [error, setError] = useState("");
   const [remindingId, setRemindingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -54,8 +39,8 @@ export const NotificationsPage = () => {
       setRows(response);
       setError("");
     } catch {
-      setRows(fallbackRows);
-      setError("Using local alert preview data. Backend API is not reachable yet.");
+      setRows([]);
+      setError("Failed to load alerts from backend.");
     }
   };
 
@@ -70,8 +55,8 @@ export const NotificationsPage = () => {
         }
       } catch {
         if (mounted) {
-          setRows(fallbackRows);
-          setError("Using local alert preview data. Backend API is not reachable yet.");
+          setRows([]);
+          setError("Failed to load alerts from backend.");
         }
       }
     };

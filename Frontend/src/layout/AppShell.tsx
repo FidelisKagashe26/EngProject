@@ -28,7 +28,7 @@ const routeTitles: Record<string, string> = {
   "/expenses": "Expenses",
   "/payments": "Payments & Cash Flow",
   "/documents": "Documents",
-  "/reports": "Reports & Analytics",
+  "/reports": "Reports",
   "/suppliers": "Suppliers",
   "/equipment": "Equipment",
   "/petty-cash": "Petty Cash",
@@ -106,7 +106,7 @@ export const AppShell = ({
   };
 
   return (
-    <div className="min-h-screen bg-(--app-bg)">
+    <div className="min-h-screen bg-[var(--app-bg)]">
       <UnsavedChangesRouteGuard />
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
         <Link className="mb-8 flex items-center justify-center" to="/dashboard">

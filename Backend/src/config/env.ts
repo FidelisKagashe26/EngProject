@@ -40,6 +40,7 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "12h",
   adminSeedEmail: process.env.ADMIN_EMAIL ?? "faraja.n@engicost.co.tz",
   adminSeedPassword: process.env.ADMIN_SEED_PASSWORD ?? "Admin@12345",
+  seedDemoData: toBoolean(process.env.SEED_DEMO_DATA, false),
   emailHost: process.env.EMAIL_HOST ?? "",
   emailPort: parsedEmailPort,
   emailSecure: parsedEmailSecure,

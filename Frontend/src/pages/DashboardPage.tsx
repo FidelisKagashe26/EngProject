@@ -23,13 +23,6 @@ import {
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
-import {
-  budgetAlerts,
-  monthlyFinance,
-  projectStatusBreakdown,
-  projects,
-  recentActivities,
-} from "../data/mockData";
 import { useTablePagination } from "../hooks/useTablePagination";
 import { api, type DashboardResponse } from "../services/api";
 import { formatDateTime, formatTzs } from "../utils/format";
@@ -42,51 +35,26 @@ const statusColorMap: Record<string, string> = {
   Pending: "#f59e0b",
 };
 
-const fallbackDashboard: DashboardResponse = {
+const emptyDashboard: DashboardResponse = {
   summary: {
-    totalProjects: 24,
-    activeSites: 8,
-    totalContractValue: 485_000_000,
-    totalAmountReceived: 210_000_000,
-    totalExpenses: 156_400_000,
-    estimatedProfit: 53_600_000,
-    pendingClientPayments: 139_000_000,
-    overBudgetProjects: 2,
+    totalProjects: 0,
+    activeSites: 0,
+    totalContractValue: 0,
+    totalAmountReceived: 0,
+    totalExpenses: 0,
+    estimatedProfit: 0,
+    pendingClientPayments: 0,
+    overBudgetProjects: 0,
   },
-  monthlyFinance,
-  statusBreakdown: projectStatusBreakdown.map((item) => ({
-    label: item.label,
-    value: item.value,
-  })),
-  recentProjects: projects.map((project) => ({
-    id: project.id,
-    name: project.name,
-    site: project.site,
-    client: project.client,
-    contractValue: project.contractValue,
-    spent: project.spent,
-    balance: project.contractValue - project.spent,
-    status: project.status,
-    progress: project.progress,
-  })),
-  alerts: budgetAlerts.map((item) => ({
-    id: item.id,
-    title: item.title,
-    subtitle: item.subtitle,
-    priority: item.priority,
-    createdAt: "",
-  })),
-  recentActivities: recentActivities.map((item, index) => ({
-    id: String(index),
-    title: "Recent Activity",
-    module: "General",
-    description: item,
-    createdAt: new Date(Date.now() - index * 30 * 60 * 1000).toISOString(),
-  })),
+  monthlyFinance: [],
+  statusBreakdown: [],
+  recentProjects: [],
+  alerts: [],
+  recentActivities: [],
 };
 
 export const DashboardPage = () => {
-  const [dashboard, setDashboard] = useState<DashboardResponse>(fallbackDashboard);
+  const [dashboard, setDashboard] = useState<DashboardResponse>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -101,8 +69,8 @@ export const DashboardPage = () => {
         }
       } catch (requestError) {
         if (mounted) {
-          setDashboard(fallbackDashboard);
-          setError("Using local preview data. Backend API is not reachable yet.");
+          setDashboard(emptyDashboard);
+          setError("Failed to load dashboard data from backend.");
         }
       } finally {
         if (mounted) {

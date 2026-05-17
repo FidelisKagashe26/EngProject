@@ -1,8 +1,7 @@
-import { Calendar, Filter, MapPin, Search } from "lucide-react";
+import { Calendar, MapPin, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { EmptyState, ProgressBar, SectionTitle, SkeletonTable, SurfaceCard, GuiSelect } from "../components/ui";
-import { projects as fallbackProjects } from "../data/mockData";
 import { api, type ProjectApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
 
@@ -40,31 +39,13 @@ const toViewProject = (row: ProjectApiRecord): ViewProject => ({
   pendingPayments: row.pendingClientPayments,
 });
 
-const fallbackRows: ViewProject[] = fallbackProjects.map((project) => ({
-  id: project.id,
-  name: project.name,
-  site: project.site,
-  client: project.client,
-  contractNumber: project.contractNumber,
-  startDate: project.startDate,
-  endDate: project.endDate,
-  contractValue: project.contractValue,
-  spent: project.spent,
-  balance: project.contractValue - project.spent,
-  profitEstimate: project.amountReceived - project.spent,
-  status: project.status,
-  progress: project.progress,
-  pendingPayments: project.pendingPayments,
-}));
-
 export const ProjectsPage = () => {
-  const [rows, setRows] = useState<ViewProject[]>(fallbackRows);
+  const [rows, setRows] = useState<ViewProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [locationFilter, setLocationFilter] = useState("All");
-  const [showEmptyPreview, setShowEmptyPreview] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -77,8 +58,8 @@ export const ProjectsPage = () => {
         }
       } catch {
         if (mounted) {
-          setRows(fallbackRows);
-          setError("Using local project preview data. Backend API is not reachable yet.");
+          setRows([]);
+          setError("Failed to load projects from backend.");
         }
       } finally {
         if (mounted) setLoading(false);
@@ -103,6 +84,18 @@ export const ProjectsPage = () => {
       return searchMatch && statusMatch && locationMatch;
     });
   }, [rows, search, statusFilter, locationFilter]);
+
+  const locationOptions = useMemo(() => {
+    const uniqueLocations = Array.from(
+      new Set(
+        rows
+          .map((project) => project.site.trim())
+          .filter((site) => site.length > 0),
+      ),
+    );
+    uniqueLocations.sort((a, b) => a.localeCompare(b));
+    return uniqueLocations;
+  }, [rows]);
 
   return (
     <div className="space-y-6">
@@ -162,10 +155,11 @@ export const ProjectsPage = () => {
               value={locationFilter}
             >
               <option value="All">All</option>
-              <option value="Dodoma">Dodoma</option>
-              <option value="Arusha">Arusha</option>
-              <option value="Mwanza">Mwanza</option>
-              <option value="Mbeya">Mbeya</option>
+              {locationOptions.map((location) => (
+                <option key={`location-${location}`} value={location}>
+                  {location}
+                </option>
+              ))}
             </GuiSelect>
           </label>
 
@@ -174,25 +168,12 @@ export const ProjectsPage = () => {
             <input className="input-field" type="date" />
           </label>
 
-          <div className="flex items-end gap-2">
-            <button className="btn-secondary w-full">
-              <Filter className="h-4 w-4" />
-              Filter
-            </button>
-            <button
-              className="btn-secondary w-full"
-              onClick={() => setShowEmptyPreview((current) => !current)}
-              type="button"
-            >
-              {showEmptyPreview ? "Show Data" : "Empty State"}
-            </button>
-          </div>
         </div>
       </SurfaceCard>
 
       {loading ? (
         <SkeletonTable rows={4} />
-      ) : showEmptyPreview ? (
+      ) : filteredProjects.length === 0 ? (
         <EmptyState
           actionLabel="Create First Project"
           description="No projects found. Start by registering your first engineering site."
@@ -309,5 +290,4 @@ export const ProjectsPage = () => {
     </div>
   );
 };
-
 

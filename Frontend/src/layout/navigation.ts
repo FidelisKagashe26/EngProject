@@ -20,7 +20,7 @@ export const mainNavItems: NavItem[] = [
   { label: "Work Orders", path: "/work-orders", icon: ClipboardList },
   { label: "Site Operations", path: "/site-operations", icon: Wrench },
   { label: "Payments & Cash Flow", path: "/payments", icon: CreditCard },
-  { label: "Reports & Analytics", path: "/reports", icon: PieChart },
+  { label: "Reports", path: "/reports", icon: PieChart },
   { label: "Settings", path: "/settings", icon: Cog },
 ];
 

@@ -651,13 +651,36 @@ export interface ReportsResponse {
     estimatedProfitLoss: number;
   };
   projectCostSummary: ReportProjectCostRow[];
-  laborByProject: Array<{ projectName: string; totalPaid: number; outstanding: number; workerCount: number }>;
-  materialByProject: Array<{ projectName: string; totalCost: number; purchaseCount: number }>;
-  expenseByProject: Array<{ projectName: string; totalAmount: number; expenseCount: number }>;
-  paymentByProject: Array<{ projectName: string; totalExpected: number; totalReceived: number; totalBalance: number }>;
+  laborByProject: Array<{ projectId: string | null; projectName: string; totalPaid: number; outstanding: number; workerCount: number }>;
+  materialByProject: Array<{ projectId: string | null; projectName: string; totalCost: number; purchaseCount: number }>;
+  expenseByProject: Array<{ projectId: string | null; projectName: string; totalAmount: number; expenseCount: number }>;
+  paymentByProject: Array<{ projectId: string | null; projectName: string; totalExpected: number; totalReceived: number; totalBalance: number }>;
   expenseByCategory: Array<{ category: string; total: number; count: number }>;
   monthlyExpenseTrend: Array<{ month: string; total: number }>;
   budgetVariance: Array<{ projectName: string; contractValue: number; totalSpent: number; variance: number; variancePct: number }>;
+}
+
+export type PdfReportType =
+  | "comprehensive"
+  | "project-cost-summary"
+  | "income-expense"
+  | "payments"
+  | "labor"
+  | "materials"
+  | "expenses-by-category"
+  | "budget-variance";
+
+export interface DownloadReportPdfParams {
+  reportType?: PdfReportType;
+  projectId?: string;
+  category?: string;
+  fromDate?: string;
+  toDate?: string;
+}
+
+export interface DownloadedReportPdf {
+  blob: Blob;
+  filename: string;
 }
 
 export interface UserApiRecord {
@@ -844,6 +867,28 @@ const parseJsonSafe = async (response: Response): Promise<unknown> => {
   } catch {
     return null;
   }
+};
+
+const parseContentDispositionFilename = (headerValue: string | null): string | null => {
+  if (!headerValue) {
+    return null;
+  }
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(headerValue);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      // Fall through to standard filename parsing.
+    }
+  }
+
+  const basicMatch = /filename="?([^";]+)"?/i.exec(headerValue);
+  if (basicMatch?.[1]) {
+    return basicMatch[1];
+  }
+
+  return null;
 };
 
 const apiRequest = async <T>(
@@ -1034,6 +1079,48 @@ export const api = {
     }),
   getActivityLog: () => apiRequest<ActivityApiRecord[]>("/notifications/activity-log"),
   getReports: () => apiRequest<ReportsResponse>("/reports"),
+  downloadReportPdf: async (params?: DownloadReportPdfParams): Promise<DownloadedReportPdf> => {
+    beginApiRequest();
+    try {
+      const query = new URLSearchParams();
+      if (params?.reportType) query.set("reportType", params.reportType);
+      if (params?.projectId) query.set("projectId", params.projectId);
+      if (params?.category) query.set("category", params.category);
+      if (params?.fromDate) query.set("fromDate", params.fromDate);
+      if (params?.toDate) query.set("toDate", params.toDate);
+      const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
+
+      const headers = new Headers();
+      if (authToken) {
+        headers.set("Authorization", `Bearer ${authToken}`);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/reports/pdf${suffix}`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        const payload = await parseJsonSafe(response);
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "message" in payload &&
+          typeof (payload as { message?: unknown }).message === "string"
+            ? (payload as { message: string }).message
+            : `Request failed with status ${response.status}`;
+        throw new ApiError(message, response.status, payload);
+      }
+
+      const blob = await response.blob();
+      const filename =
+        parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+        `report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      return { blob, filename };
+    } finally {
+      endApiRequest();
+    }
+  },
   getPettyCash: () => apiRequest<PettyCashResponse>("/petty-cash"),
   createPettyCash: (payload: CreatePettyCashPayload) =>
     apiRequest<PettyCashApiRecord>("/petty-cash", {

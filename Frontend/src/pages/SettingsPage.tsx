@@ -3,11 +3,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
 import { useCompanySettings } from "../company/CompanySettingsContext";
 import { AppToast, GuiSelect, SectionTitle, SurfaceCard } from "../components/ui";
-import {
-  expenseCategories as fallbackExpenseCategories,
-  materialUnits as fallbackMaterialUnits,
-  paymentMethods as fallbackPaymentMethods,
-} from "../data/mockData";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { api, ApiError, type CreateGalleryItemPayload, type GalleryItemRecord, type QuoteRequestApiRecord, type SmtpStatusResponse, type WebsiteSettings } from "../services/api";
 
@@ -863,13 +858,6 @@ export const SettingsPage = () => {
     }, 2600);
   };
 
-  const resolvedExpenseCategories =
-    expenseCategories.length > 0 ? expenseCategories : fallbackExpenseCategories;
-  const resolvedMaterialUnits =
-    materialUnits.length > 0 ? materialUnits : fallbackMaterialUnits;
-  const resolvedPaymentMethods =
-    paymentMethods.length > 0 ? paymentMethods : fallbackPaymentMethods;
-
   useEffect(() => {
     let mounted = true;
 
@@ -1376,23 +1364,31 @@ export const SettingsPage = () => {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <SurfaceCard title="Expense Categories">
                   <div className="space-y-2">
-                    {resolvedExpenseCategories.map((category) => (
-                      <label className="form-field" key={`set-exp-${category}`}>
-                        <span>{category}</span>
-                        <input className="input-field" defaultValue={category} />
-                      </label>
-                    ))}
+                    {expenseCategories.length === 0 ? (
+                      <p className="text-sm text-slate-500">No expense categories configured yet.</p>
+                    ) : (
+                      expenseCategories.map((category) => (
+                        <label className="form-field" key={`set-exp-${category}`}>
+                          <span>{category}</span>
+                          <input className="input-field" defaultValue={category} />
+                        </label>
+                      ))
+                    )}
                   </div>
                 </SurfaceCard>
 
                 <SurfaceCard title="Material Units">
                   <div className="space-y-2">
-                    {resolvedMaterialUnits.map((unit) => (
-                      <label className="form-field" key={`set-unit-${unit}`}>
-                        <span>{unit}</span>
-                        <input className="input-field" defaultValue={unit} />
-                      </label>
-                    ))}
+                    {materialUnits.length === 0 ? (
+                      <p className="text-sm text-slate-500">No material units configured yet.</p>
+                    ) : (
+                      materialUnits.map((unit) => (
+                        <label className="form-field" key={`set-unit-${unit}`}>
+                          <span>{unit}</span>
+                          <input className="input-field" defaultValue={unit} />
+                        </label>
+                      ))
+                    )}
                   </div>
                 </SurfaceCard>
               </div>
@@ -1400,12 +1396,16 @@ export const SettingsPage = () => {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <SurfaceCard title="Payment Methods">
                   <div className="space-y-2">
-                    {resolvedPaymentMethods.map((method) => (
-                      <label className="form-field" key={`set-pay-${method}`}>
-                        <span>{method}</span>
-                        <input className="input-field" defaultValue={method} />
-                      </label>
-                    ))}
+                    {paymentMethods.length === 0 ? (
+                      <p className="text-sm text-slate-500">No payment methods configured yet.</p>
+                    ) : (
+                      paymentMethods.map((method) => (
+                        <label className="form-field" key={`set-pay-${method}`}>
+                          <span>{method}</span>
+                          <input className="input-field" defaultValue={method} />
+                        </label>
+                      ))
+                    )}
                   </div>
                 </SurfaceCard>
 

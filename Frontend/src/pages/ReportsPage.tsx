@@ -11,6 +11,7 @@ import {
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
+  type PdfReportType,
   type ProjectApiRecord,
   type ReportProjectCostRow,
   type ReportsResponse,
@@ -34,6 +35,17 @@ const TABS: ReportTab[] = [
   "Budget Variance",
 ];
 
+const PDF_REPORT_OPTIONS: Array<{ value: PdfReportType; label: string }> = [
+  { value: "comprehensive", label: "Comprehensive Financial Report" },
+  { value: "project-cost-summary", label: "Project Cost Summary" },
+  { value: "income-expense", label: "Income vs Expense Statement" },
+  { value: "payments", label: "Payment Collection Report" },
+  { value: "labor", label: "Labor Cost Report" },
+  { value: "materials", label: "Material Cost Report" },
+  { value: "expenses-by-category", label: "Expense by Category Report" },
+  { value: "budget-variance", label: "Budget Variance Report" },
+];
+
 const BudgetBar = ({ spent, total }: { spent: number; total: number }) => {
   const pct = total > 0 ? Math.min(100, Math.round((spent / total) * 100)) : 0;
   const color =
@@ -53,6 +65,13 @@ export const ReportsPage = () => {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<ReportTab>("Project Cost Summary");
   const [projectFilter, setProjectFilter] = useState("All");
+  const [pdfReportType, setPdfReportType] = useState<PdfReportType>("comprehensive");
+  const [pdfCategory, setPdfCategory] = useState("All");
+  const [pdfFromDate, setPdfFromDate] = useState("");
+  const [pdfToDate, setPdfToDate] = useState("");
+  const [pdfDownloadMessage, setPdfDownloadMessage] = useState("");
+  const [pdfDownloadError, setPdfDownloadError] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [data, setData] = useState<ReportsResponse | null>(null);
@@ -86,12 +105,55 @@ export const ReportsPage = () => {
     return data.projectCostSummary.filter((r) => r.id === projectFilter);
   }, [data, projectFilter]);
 
+  const selectedProjectName = useMemo(() => {
+    if (projectFilter === "All") return "";
+    return projects.find((project) => project.id === projectFilter)?.name ?? "";
+  }, [projectFilter, projects]);
+
+  const filteredLabor = useMemo(() => {
+    if (!data) return [];
+    if (projectFilter === "All") return data.laborByProject;
+    return data.laborByProject.filter(
+      (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
+    );
+  }, [data, projectFilter, selectedProjectName]);
+
+  const filteredMaterial = useMemo(() => {
+    if (!data) return [];
+    if (projectFilter === "All") return data.materialByProject;
+    return data.materialByProject.filter(
+      (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
+    );
+  }, [data, projectFilter, selectedProjectName]);
+
+  const filteredExpenseByProject = useMemo(() => {
+    if (!data) return [];
+    if (projectFilter === "All") return data.expenseByProject;
+    return data.expenseByProject.filter(
+      (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
+    );
+  }, [data, projectFilter, selectedProjectName]);
+
+  const filteredPayments = useMemo(() => {
+    if (!data) return [];
+    if (projectFilter === "All") return data.paymentByProject;
+    return data.paymentByProject.filter(
+      (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
+    );
+  }, [data, projectFilter, selectedProjectName]);
+
+  const filteredBudgetVariance = useMemo(() => {
+    if (!data) return [];
+    if (projectFilter === "All") return data.budgetVariance;
+    return data.budgetVariance.filter((row) => row.projectName === selectedProjectName);
+  }, [data, projectFilter, selectedProjectName]);
+
   const costPagination = useTablePagination(filteredProjectCost);
-  const laborPagination = useTablePagination(data?.laborByProject ?? []);
-  const materialPagination = useTablePagination(data?.materialByProject ?? []);
-  const expensePagination = useTablePagination(data?.expenseByProject ?? []);
-  const paymentPagination = useTablePagination(data?.paymentByProject ?? []);
-  const variancePagination = useTablePagination(data?.budgetVariance ?? []);
+  const laborPagination = useTablePagination(filteredLabor);
+  const materialPagination = useTablePagination(filteredMaterial);
+  const expensePagination = useTablePagination(filteredExpenseByProject);
+  const paymentPagination = useTablePagination(filteredPayments);
+  const variancePagination = useTablePagination(filteredBudgetVariance);
 
   // Monthly expense trend formatted for chart
   const monthlyChartData = useMemo(() => {
@@ -104,12 +166,60 @@ export const ReportsPage = () => {
   }, [data]);
 
   const totals = data?.totals;
+  const expenseCategoryOptions = useMemo(
+    () =>
+      Array.from(new Set((data?.expenseByCategory ?? []).map((row) => row.category))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [data],
+  );
+
+  const handleDownloadPdf = async () => {
+    if (pdfFromDate && pdfToDate && pdfFromDate > pdfToDate) {
+      setPdfDownloadError(true);
+      setPdfDownloadMessage("From date cannot be after To date.");
+      return;
+    }
+
+    setDownloadingPdf(true);
+    setPdfDownloadError(false);
+    setPdfDownloadMessage("");
+    try {
+      const { blob, filename } = await api.downloadReportPdf({
+        reportType: pdfReportType,
+        projectId: projectFilter === "All" ? undefined : projectFilter,
+        category: pdfCategory === "All" ? undefined : pdfCategory,
+        fromDate: pdfFromDate || undefined,
+        toDate: pdfToDate || undefined,
+      });
+
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(blobUrl);
+      setPdfDownloadError(false);
+      setPdfDownloadMessage(`PDF downloaded: ${filename}`);
+    } catch (downloadError) {
+      setPdfDownloadError(true);
+      setPdfDownloadMessage(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "Failed to generate PDF report.",
+      );
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Analyze project costs, cash movement, profit projections and budget variance."
-        title="Reports & Analytics"
+        subtitle="Choose report type and analyze project costs, cash movement, and budget variance."
+        title="Reports"
       />
 
       {/* KPI Summary Cards */}
@@ -200,9 +310,11 @@ export const ReportsPage = () => {
         </SurfaceCard>
       )}
 
-      {/* Filter + Tabs */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
-        <div className="w-full sm:w-56">
+      <SurfaceCard
+        subtitle="Choose scope and report type, then generate downloadable PDF reports for all projects or a single project."
+        title="Report Controls"
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           <label className="form-field">
             <span className="text-sm">Filter by Project</span>
             <GuiSelect
@@ -212,30 +324,94 @@ export const ReportsPage = () => {
             >
               <option value="All">All Projects</option>
               {projects.map((p) => (
-                <option key={`rp-${p.id}`} value={p.id}>{p.name}</option>
+                <option key={`rp-${p.id}`} value={p.id}>
+                  {p.name}
+                </option>
               ))}
             </GuiSelect>
           </label>
-        </div>
-      </div>
 
-      {/* Tab selector */}
-      <SurfaceCard>
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((tab) => (
-            <button
-              className={
-                tab === activeTab
-                  ? "rounded-full bg-[#0b2a53] px-3 py-1.5 text-xs font-semibold text-white"
-                  : "rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-              }
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              type="button"
+          <label className="form-field">
+            <span className="text-sm">On-screen Report View</span>
+            <GuiSelect
+              className="input-field"
+              onChange={(event) => setActiveTab(event.target.value as ReportTab)}
+              value={activeTab}
             >
-              {tab}
-            </button>
-          ))}
+              {TABS.map((tab) => (
+                <option key={`report-type-${tab}`} value={tab}>
+                  {tab}
+                </option>
+              ))}
+            </GuiSelect>
+          </label>
+
+          <label className="form-field">
+            <span className="text-sm">PDF Report Type</span>
+            <GuiSelect
+              className="input-field"
+              onChange={(event) => setPdfReportType(event.target.value as PdfReportType)}
+              value={pdfReportType}
+            >
+              {PDF_REPORT_OPTIONS.map((option) => (
+                <option key={`pdf-report-${option.value}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </GuiSelect>
+          </label>
+
+          <label className="form-field">
+            <span className="text-sm">Specific Category (Optional)</span>
+            <GuiSelect
+              className="input-field"
+              onChange={(event) => setPdfCategory(event.target.value)}
+              value={pdfCategory}
+            >
+              <option value="All">All Categories</option>
+              {expenseCategoryOptions.map((category) => (
+                <option key={`pdf-category-${category}`} value={category}>
+                  {category}
+                </option>
+              ))}
+            </GuiSelect>
+          </label>
+
+          <label className="form-field">
+            <span className="text-sm">From Date (Optional)</span>
+            <input
+              className="input-field"
+              onChange={(event) => setPdfFromDate(event.target.value)}
+              type="date"
+              value={pdfFromDate}
+            />
+          </label>
+
+          <label className="form-field">
+            <span className="text-sm">To Date (Optional)</span>
+            <input
+              className="input-field"
+              onChange={(event) => setPdfToDate(event.target.value)}
+              type="date"
+              value={pdfToDate}
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            className="btn-primary w-full justify-center sm:w-auto"
+            disabled={downloadingPdf}
+            onClick={() => void handleDownloadPdf()}
+            type="button"
+          >
+            {downloadingPdf ? "Generating PDF..." : "Download PDF Report"}
+          </button>
+          {pdfDownloadMessage && (
+            <p className={`text-xs ${pdfDownloadError ? "text-red-700" : "text-emerald-700"}`}>
+              {pdfDownloadMessage}
+            </p>
+          )}
         </div>
       </SurfaceCard>
 
@@ -349,7 +525,7 @@ export const ReportsPage = () => {
         <SurfaceCard title="Labor Payment Report">
           {loading ? (
             <SkeletonTable rows={4} />
-          ) : (data?.laborByProject ?? []).length === 0 ? (
+          ) : filteredLabor.length === 0 ? (
             <EmptyState description="No labor data available." title="No data" />
           ) : (
             <>
@@ -402,7 +578,7 @@ export const ReportsPage = () => {
         <SurfaceCard title="Material Purchase Report">
           {loading ? (
             <SkeletonTable rows={4} />
-          ) : (data?.materialByProject ?? []).length === 0 ? (
+          ) : filteredMaterial.length === 0 ? (
             <EmptyState description="No material data available." title="No data" />
           ) : (
             <>
@@ -450,7 +626,7 @@ export const ReportsPage = () => {
           <SurfaceCard title="Expenses by Project">
             {loading ? (
               <SkeletonTable rows={4} />
-            ) : (data?.expenseByProject ?? []).length === 0 ? (
+            ) : filteredExpenseByProject.length === 0 ? (
               <EmptyState description="No expense data available." title="No data" />
             ) : (
               <>
@@ -527,7 +703,7 @@ export const ReportsPage = () => {
         <SurfaceCard title="Client Payment Report">
           {loading ? (
             <SkeletonTable rows={4} />
-          ) : (data?.paymentByProject ?? []).length === 0 ? (
+          ) : filteredPayments.length === 0 ? (
             <EmptyState description="No payment data available." title="No data" />
           ) : (
             <>
@@ -582,7 +758,7 @@ export const ReportsPage = () => {
         <SurfaceCard title="Budget Variance Report">
           {loading ? (
             <SkeletonTable rows={4} />
-          ) : (data?.budgetVariance ?? []).length === 0 ? (
+          ) : filteredBudgetVariance.length === 0 ? (
             <EmptyState description="No budget data available." title="No data" />
           ) : (
             <>

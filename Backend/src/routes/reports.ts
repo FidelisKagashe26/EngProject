@@ -1,4 +1,5 @@
-import type { Response } from "express";
+import fs from "fs";
+import path from "path";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import { getSingleTenantCompanyId } from "../db/init";
@@ -95,6 +96,23 @@ type PdfReportType =
   | "expenses-by-category"
   | "budget-variance";
 
+type ReportFilters = {
+  projectId: string | null;
+  category: string | null;
+  fromDate: string | null;
+  toDate: string | null;
+};
+
+type ReportBranding = {
+  companyName: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  location: string;
+  websiteUrl: string;
+  logoPath: string | null;
+};
+
 const VALID_REPORT_TYPES: readonly PdfReportType[] = [
   "comprehensive",
   "project-cost-summary",
@@ -120,6 +138,29 @@ const monthIndex: Record<string, number> = {
   Nov: 10,
   Dec: 11,
 };
+
+const PDF_MARGIN = 56;
+const PDF_BASE_FONT_SIZE = 12;
+const PDF_LINE_GAP = 6; // 12pt with 6pt line gap ~= 1.5 spacing
+const FALLBACK_WEBSITE_URL = "https://www.dreggam.co.tz";
+const REPORT_COLORS = {
+  navy: "#0b2a53",
+  accent: "#f28c28",
+  slate900: "#0f172a",
+  slate700: "#334155",
+  slate600: "#475569",
+  slate300: "#cbd5e1",
+  slate200: "#e2e8f0",
+  slate100: "#f1f5f9",
+  white: "#ffffff",
+} as const;
+const REPORT_LOGO_PATH_CANDIDATES = [
+  path.resolve(process.cwd(), "..", "Frontend", "public", "EngLogo.png"),
+  path.resolve(process.cwd(), "public", "EngLogo.png"),
+  path.resolve(process.cwd(), "uploads", "brand", "logo.png"),
+  path.resolve(process.cwd(), "uploads", "brand", "logo.jpg"),
+  path.resolve(process.cwd(), "uploads", "brand", "logo.jpeg"),
+] as const;
 
 const router = Router();
 
@@ -162,6 +203,70 @@ const parseMonthLabel = (label: string): Date | null => {
     return null;
   }
   return new Date(Date.UTC(year, month, 1));
+};
+
+const normalizeWebsiteUrl = (value: string | null | undefined): string => {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return FALLBACK_WEBSITE_URL;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+  return `https://${raw}`;
+};
+
+const resolveExistingLogoPath = (): string | null => {
+  for (const candidatePath of REPORT_LOGO_PATH_CANDIDATES) {
+    if (fs.existsSync(candidatePath)) {
+      return candidatePath;
+    }
+  }
+  return null;
+};
+
+const buildReportBranding = async (companyId: number): Promise<ReportBranding> => {
+  const [companyResult, websiteSettingsResult] = await Promise.all([
+    db.query<{
+      name: string;
+      email: string | null;
+      phone: string | null;
+      location: string | null;
+    }>(
+      `
+      SELECT name, email, phone, location
+      FROM engicost.companies
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [companyId],
+    ),
+    db.query<{ key: string; value: string }>(
+      `
+      SELECT key, value
+      FROM engicost.website_settings
+      WHERE company_id = $1
+        AND key IN ('email_main', 'phone_main', 'phone_whatsapp', 'location', 'website_url')
+      `,
+      [companyId],
+    ),
+  ]);
+
+  const company = companyResult.rows[0];
+  const websiteSettings = new Map<string, string>();
+  websiteSettingsResult.rows.forEach((row) => {
+    websiteSettings.set(row.key, row.value);
+  });
+
+  return {
+    companyName: company?.name?.trim() || "DREGGAM Company Limited",
+    email: websiteSettings.get("email_main")?.trim() || company?.email?.trim() || "info@dreggam.co.tz",
+    phone: websiteSettings.get("phone_main")?.trim() || company?.phone?.trim() || "+255 000 000 000",
+    whatsapp: websiteSettings.get("phone_whatsapp")?.trim() || "",
+    location: websiteSettings.get("location")?.trim() || company?.location?.trim() || "Dar es Salaam, Tanzania",
+    websiteUrl: normalizeWebsiteUrl(websiteSettings.get("website_url")),
+    logoPath: resolveExistingLogoPath(),
+  };
 };
 
 const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> => {
@@ -474,12 +579,7 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
 
 const applyReportFilters = (
   payload: ReportsPayload,
-  filters: {
-    projectId: string | null;
-    category: string | null;
-    fromDate: string | null;
-    toDate: string | null;
-  },
+  filters: ReportFilters,
 ): ReportsPayload => {
   const projectId = filters.projectId;
   const projectRow = projectId
@@ -587,154 +687,460 @@ const applyReportFilters = (
   };
 };
 
-const ensureRoom = (doc: PDFKit.PDFDocument, requiredHeight = 22): void => {
-  const bottomLimit = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + requiredHeight > bottomLimit) {
+type TableColumn<RowType> = {
+  header: string;
+  widthRatio: number;
+  align?: "left" | "center" | "right";
+  value: (row: RowType, index: number) => string;
+};
+
+const getContentLeft = (doc: PDFKit.PDFDocument): number => doc.page.margins.left;
+
+const getContentWidth = (doc: PDFKit.PDFDocument): number =>
+  doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+const getBottomLimit = (doc: PDFKit.PDFDocument): number =>
+  doc.page.height - doc.page.margins.bottom;
+
+const formatGeneratedAt = (value: Date): string =>
+  new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Dar_es_Salaam",
+  }).format(value);
+
+const ensureRoom = (doc: PDFKit.PDFDocument, requiredHeight = 24): void => {
+  if (doc.y + requiredHeight > getBottomLimit(doc)) {
     doc.addPage();
   }
 };
 
-const writeSectionTitle = (doc: PDFKit.PDFDocument, title: string): void => {
-  ensureRoom(doc, 28);
+const setBodyFont = (doc: PDFKit.PDFDocument): void => {
   doc
-    .moveDown(0.4)
-    .font("Helvetica-Bold")
-    .fontSize(13)
-    .fillColor("#0b2a53")
-    .text(title)
-    .moveDown(0.15);
+    .font("Times-Roman")
+    .fontSize(PDF_BASE_FONT_SIZE)
+    .fillColor(REPORT_COLORS.slate900);
 };
 
-const writeLine = (doc: PDFKit.PDFDocument, text: string): void => {
-  ensureRoom(doc, 18);
+const fitCellText = (doc: PDFKit.PDFDocument, value: string, maxWidth: number): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "-";
+  }
+  if (doc.widthOfString(normalized) <= maxWidth) {
+    return normalized;
+  }
+
+  let result = normalized;
+  while (result.length > 1 && doc.widthOfString(`${result}...`) > maxWidth) {
+    result = result.slice(0, -1);
+  }
+  return `${result}...`;
+};
+
+const writeSectionTitle = (doc: PDFKit.PDFDocument, title: string): void => {
+  ensureRoom(doc, 40);
+  const x = getContentLeft(doc);
+  const width = getContentWidth(doc);
   doc
-    .font("Helvetica")
-    .fontSize(10)
-    .fillColor("#1e293b")
-    .text(text, {
-      width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+    .moveDown(0.35)
+    .font("Times-Bold")
+    .fontSize(13)
+    .fillColor(REPORT_COLORS.navy)
+    .text(title, x, doc.y, { width, lineGap: 2 });
+
+  const lineY = doc.y + 2;
+  doc
+    .save()
+    .moveTo(x, lineY)
+    .lineTo(x + width, lineY)
+    .lineWidth(1)
+    .strokeColor(REPORT_COLORS.slate300)
+    .stroke()
+    .restore();
+  doc.y = lineY + 8;
+};
+
+const writeParagraph = (
+  doc: PDFKit.PDFDocument,
+  text: string,
+  options?: PDFKit.Mixins.TextOptions,
+): void => {
+  ensureRoom(doc, 24);
+  setBodyFont(doc);
+  doc.text(text, {
+    width: getContentWidth(doc),
+    lineGap: PDF_LINE_GAP,
+    ...options,
+  });
+};
+
+const writeNoData = (doc: PDFKit.PDFDocument, message = "No data available for the selected criteria."): void => {
+  ensureRoom(doc, 30);
+  doc
+    .font("Times-Italic")
+    .fontSize(PDF_BASE_FONT_SIZE)
+    .fillColor(REPORT_COLORS.slate600)
+    .text(message, {
+      width: getContentWidth(doc),
+      lineGap: PDF_LINE_GAP,
     });
 };
 
-const writeNoData = (doc: PDFKit.PDFDocument): void => {
-  writeLine(doc, "No data available for the selected criteria.");
+const writeTable = <RowType>(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  rows: RowType[],
+  columns: TableColumn<RowType>[],
+): void => {
+  writeSectionTitle(doc, title);
+  if (rows.length === 0) {
+    writeNoData(doc);
+    return;
+  }
+
+  const tableLeft = getContentLeft(doc);
+  const tableWidth = getContentWidth(doc);
+  const totalRatio = columns.reduce((sum, column) => sum + column.widthRatio, 0) || 1;
+  const columnWidths = columns.map((column) => (tableWidth * column.widthRatio) / totalRatio);
+  const headerHeight = 28;
+  const rowHeight = 26;
+  const cellPaddingX = 6;
+
+  const drawHeader = (): void => {
+    ensureRoom(doc, headerHeight + rowHeight + 4);
+    const headerY = doc.y;
+    doc
+      .save()
+      .roundedRect(tableLeft, headerY, tableWidth, headerHeight, 5)
+      .fillColor(REPORT_COLORS.navy)
+      .fill()
+      .restore();
+
+    let cursorX = tableLeft;
+    columns.forEach((column, index) => {
+      const columnWidth = columnWidths[index];
+      doc
+        .font("Times-Bold")
+        .fontSize(PDF_BASE_FONT_SIZE)
+        .fillColor(REPORT_COLORS.white)
+        .text(column.header, cursorX + cellPaddingX, headerY + 8, {
+          width: columnWidth - (cellPaddingX * 2),
+          align: column.align ?? "left",
+          lineBreak: false,
+          ellipsis: true,
+        });
+      cursorX += columnWidth;
+    });
+
+    doc.y = headerY + headerHeight;
+  };
+
+  drawHeader();
+
+  rows.forEach((row, rowIndex) => {
+    if (doc.y + rowHeight > getBottomLimit(doc)) {
+      doc.addPage();
+      drawHeader();
+    }
+
+    const rowY = doc.y;
+    const rowFillColor = rowIndex % 2 === 0 ? REPORT_COLORS.white : REPORT_COLORS.slate100;
+    doc
+      .save()
+      .rect(tableLeft, rowY, tableWidth, rowHeight)
+      .fillColor(rowFillColor)
+      .fill()
+      .restore();
+    doc
+      .save()
+      .rect(tableLeft, rowY, tableWidth, rowHeight)
+      .lineWidth(0.6)
+      .strokeColor(REPORT_COLORS.slate200)
+      .stroke()
+      .restore();
+
+    let cursorX = tableLeft;
+    setBodyFont(doc);
+    columns.forEach((column, columnIndex) => {
+      const columnWidth = columnWidths[columnIndex];
+      const text = fitCellText(
+        doc,
+        column.value(row, rowIndex),
+        Math.max(10, columnWidth - (cellPaddingX * 2)),
+      );
+      doc
+        .font("Times-Roman")
+        .fontSize(PDF_BASE_FONT_SIZE)
+        .fillColor(REPORT_COLORS.slate900)
+        .text(text, cursorX + cellPaddingX, rowY + 7, {
+          width: columnWidth - (cellPaddingX * 2),
+          align: column.align ?? "left",
+          lineBreak: false,
+          ellipsis: true,
+        });
+      cursorX += columnWidth;
+    });
+
+    doc.y = rowY + rowHeight;
+  });
+
+  doc.moveDown(0.5);
+};
+
+const renderReportHeader = (
+  doc: PDFKit.PDFDocument,
+  branding: ReportBranding,
+  reportTypeTitle: string,
+  generatedAt: Date,
+  projectScopeLabel: string,
+  filters: ReportFilters,
+): void => {
+  const x = getContentLeft(doc);
+  const width = getContentWidth(doc);
+  const startY = doc.y;
+  const headerHeight = 130;
+  const contentY = startY + 16;
+  const logoWidth = 96;
+  const textStartX = x + 16;
+  const textWidth = width - 32 - logoWidth - 12;
+
+  doc
+    .save()
+    .roundedRect(x, startY, width, headerHeight, 8)
+    .fillColor(REPORT_COLORS.slate100)
+    .fill()
+    .restore();
+  doc
+    .save()
+    .rect(x, startY, width, 8)
+    .fillColor(REPORT_COLORS.accent)
+    .fill()
+    .restore();
+  doc
+    .save()
+    .roundedRect(x, startY, width, headerHeight, 8)
+    .lineWidth(1)
+    .strokeColor(REPORT_COLORS.slate200)
+    .stroke()
+    .restore();
+
+  if (branding.logoPath) {
+    try {
+      doc.image(branding.logoPath, x + width - logoWidth - 16, contentY, {
+        fit: [logoWidth, 56],
+        align: "right",
+      });
+    } catch {
+      // skip logo rendering if file is unreadable
+    }
+  }
+
+  doc
+    .font("Times-Bold")
+    .fontSize(18)
+    .fillColor(REPORT_COLORS.navy)
+    .text(branding.companyName, textStartX, contentY, {
+      width: textWidth,
+      lineGap: 2,
+    });
+  doc
+    .font("Times-Bold")
+    .fontSize(12)
+    .fillColor(REPORT_COLORS.slate700)
+    .text(`${reportTypeTitle} Report`, textStartX, doc.y + 2, {
+      width: textWidth,
+      lineGap: 2,
+    });
+
+  const contactLine = [
+    `Email: ${branding.email}`,
+    `Phone: ${branding.phone}`,
+    branding.whatsapp ? `WhatsApp: ${branding.whatsapp}` : "",
+  ].filter((part) => part.length > 0).join("  |  ");
+
+  doc
+    .font("Times-Roman")
+    .fontSize(PDF_BASE_FONT_SIZE)
+    .fillColor(REPORT_COLORS.slate700)
+    .text(contactLine, textStartX, doc.y + 4, {
+      width: textWidth,
+      lineGap: PDF_LINE_GAP,
+    });
+  doc
+    .font("Times-Roman")
+    .fontSize(PDF_BASE_FONT_SIZE)
+    .fillColor(REPORT_COLORS.navy)
+    .text(`Website: ${branding.websiteUrl}`, textStartX, doc.y + 1, {
+      width: textWidth,
+      lineGap: PDF_LINE_GAP,
+      underline: true,
+    });
+
+  const filterLines = [
+    `Generated: ${formatGeneratedAt(generatedAt)}`,
+    `Project Scope: ${projectScopeLabel}`,
+    filters.category ? `Category Filter: ${filters.category}` : "",
+    filters.fromDate || filters.toDate
+      ? `Date Window: ${filters.fromDate ?? "N/A"} to ${filters.toDate ?? "N/A"}`
+      : "",
+    `Location: ${branding.location}`,
+  ].filter((line) => line.length > 0);
+
+  filterLines.forEach((line) => {
+    doc
+      .font("Times-Roman")
+      .fontSize(PDF_BASE_FONT_SIZE)
+      .fillColor(REPORT_COLORS.slate700)
+      .text(line, textStartX, doc.y + 1, {
+        width: textWidth,
+        lineGap: PDF_LINE_GAP,
+      });
+  });
+
+  doc.y = startY + headerHeight + 8;
 };
 
 const renderSummaryBlock = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Income & Expense Summary");
-  writeLine(doc, `Total Contract Value: ${formatCurrency(payload.totals.contractValue)}`);
-  writeLine(doc, `Total Income Received: ${formatCurrency(payload.totals.amountReceived)}`);
-  writeLine(doc, `Total Expenses: ${formatCurrency(payload.totals.totalSpent)}`);
-  writeLine(doc, `Estimated Profit/Loss: ${formatCurrency(payload.totals.estimatedProfitLoss)}`);
-  writeLine(doc, `Outstanding Balance: ${formatCurrency(payload.totals.remainingBalance)}`);
+  writeTable(
+    doc,
+    "Executive Summary",
+    [
+      { metric: "Total Contract Value", value: formatCurrency(payload.totals.contractValue) },
+      { metric: "Total Income Received", value: formatCurrency(payload.totals.amountReceived) },
+      { metric: "Total Labor Cost", value: formatCurrency(payload.totals.laborCost) },
+      { metric: "Total Material Cost", value: formatCurrency(payload.totals.materialCost) },
+      { metric: "Total Other Expenses", value: formatCurrency(payload.totals.otherExpenses) },
+      { metric: "Total Expenses", value: formatCurrency(payload.totals.totalSpent) },
+      { metric: "Estimated Profit / Loss", value: formatCurrency(payload.totals.estimatedProfitLoss) },
+      { metric: "Outstanding Balance", value: formatCurrency(payload.totals.remainingBalance) },
+    ],
+    [
+      { header: "Metric", widthRatio: 0.62, value: (row) => row.metric },
+      { header: "Value", widthRatio: 0.38, align: "right", value: (row) => row.value },
+    ],
+  );
 };
 
 const renderProjectCostSummary = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Project Cost Summary");
-  if (payload.projectCostSummary.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.projectCostSummary.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} (${row.id}) | Income: ${formatCurrency(row.amountReceived)} | Expenses: ${formatCurrency(row.totalSpent)} | Profit/Loss: ${formatCurrency(row.estimatedProfitLoss)} | Status: ${row.status}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Project Cost Summary",
+    payload.projectCostSummary,
+    [
+      { header: "Project", widthRatio: 0.28, value: (row) => `${row.projectName} (${row.id})` },
+      { header: "Income", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.amountReceived) },
+      { header: "Expenses", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.totalSpent) },
+      { header: "Profit/Loss", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
+      { header: "Status", widthRatio: 0.12, value: (row) => row.status },
+      { header: "Progress", widthRatio: 0.12, align: "right", value: (row) => `${row.progress}%` },
+    ],
+  );
 };
 
 const renderIncomeExpense = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Income vs Expense Statement");
-  if (payload.projectCostSummary.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.projectCostSummary.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} | Income: ${formatCurrency(row.amountReceived)} | Expenses: ${formatCurrency(row.totalSpent)} | Net: ${formatCurrency(row.estimatedProfitLoss)}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Income vs Expense Statement",
+    payload.projectCostSummary,
+    [
+      { header: "Project", widthRatio: 0.36, value: (row) => row.projectName },
+      { header: "Income", widthRatio: 0.22, align: "right", value: (row) => formatCurrency(row.amountReceived) },
+      { header: "Expenses", widthRatio: 0.22, align: "right", value: (row) => formatCurrency(row.totalSpent) },
+      { header: "Net", widthRatio: 0.20, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
+    ],
+  );
+
   if (payload.monthlyExpenseTrend.length > 0) {
-    writeSectionTitle(doc, "Monthly Expense Trend");
-    payload.monthlyExpenseTrend.forEach((row) => {
-      writeLine(doc, `${row.month}: ${formatCurrency(row.total)}`);
-    });
+    writeTable(
+      doc,
+      "Monthly Expense Trend",
+      payload.monthlyExpenseTrend,
+      [
+        { header: "Month", widthRatio: 0.48, value: (row) => row.month },
+        { header: "Total Expense", widthRatio: 0.52, align: "right", value: (row) => formatCurrency(row.total) },
+      ],
+    );
   }
 };
 
 const renderPayments = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Client Payment Collection Report");
-  if (payload.paymentByProject.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.paymentByProject.forEach((row, index) => {
-    const rate =
-      row.totalExpected > 0
-        ? `${Math.round((row.totalReceived / row.totalExpected) * 100)}%`
-        : "0%";
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} | Expected: ${formatCurrency(row.totalExpected)} | Received: ${formatCurrency(row.totalReceived)} | Balance: ${formatCurrency(row.totalBalance)} | Collection Rate: ${rate}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Client Payment Collection Report",
+    payload.paymentByProject,
+    [
+      { header: "Project", widthRatio: 0.27, value: (row) => row.projectName },
+      { header: "Expected", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalExpected) },
+      { header: "Received", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalReceived) },
+      { header: "Balance", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalBalance) },
+      {
+        header: "Collection",
+        widthRatio: 0.16,
+        align: "right",
+        value: (row) => (row.totalExpected > 0 ? `${Math.round((row.totalReceived / row.totalExpected) * 100)}%` : "0%"),
+      },
+    ],
+  );
 };
 
 const renderLabor = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Labor Cost Report");
-  if (payload.laborByProject.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.laborByProject.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} | Workers: ${row.workerCount} | Paid: ${formatCurrency(row.totalPaid)} | Outstanding: ${formatCurrency(row.outstanding)}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Labor Cost Report",
+    payload.laborByProject,
+    [
+      { header: "Project", widthRatio: 0.34, value: (row) => row.projectName },
+      { header: "Workers", widthRatio: 0.13, align: "right", value: (row) => String(row.workerCount) },
+      { header: "Total Paid", widthRatio: 0.27, align: "right", value: (row) => formatCurrency(row.totalPaid) },
+      { header: "Outstanding", widthRatio: 0.26, align: "right", value: (row) => formatCurrency(row.outstanding) },
+    ],
+  );
 };
 
 const renderMaterials = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Material Purchase Report");
-  if (payload.materialByProject.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.materialByProject.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} | Purchases: ${row.purchaseCount} | Total Cost: ${formatCurrency(row.totalCost)}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Material Purchase Report",
+    payload.materialByProject,
+    [
+      { header: "Project", widthRatio: 0.42, value: (row) => row.projectName },
+      { header: "Purchases", widthRatio: 0.20, align: "right", value: (row) => String(row.purchaseCount) },
+      { header: "Total Cost", widthRatio: 0.38, align: "right", value: (row) => formatCurrency(row.totalCost) },
+    ],
+  );
 };
 
 const renderExpenseCategories = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Expense Category Report");
-  if (payload.expenseByCategory.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.expenseByCategory.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.category} | Entries: ${row.count} | Total: ${formatCurrency(row.total)}`,
-    );
-  });
+  writeTable(
+    doc,
+    "Expense Category Report",
+    payload.expenseByCategory,
+    [
+      { header: "Category", widthRatio: 0.46, value: (row) => row.category },
+      { header: "Entries", widthRatio: 0.20, align: "right", value: (row) => String(row.count) },
+      { header: "Total", widthRatio: 0.34, align: "right", value: (row) => formatCurrency(row.total) },
+    ],
+  );
 };
 
 const renderBudgetVariance = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeSectionTitle(doc, "Budget Variance Report");
-  if (payload.budgetVariance.length === 0) {
-    writeNoData(doc);
-    return;
-  }
-  payload.budgetVariance.forEach((row, index) => {
-    writeLine(
-      doc,
-      `${index + 1}. ${row.projectName} | Contract: ${formatCurrency(row.contractValue)} | Spent: ${formatCurrency(row.totalSpent)} | Variance: ${formatCurrency(row.variance)} | Used: ${row.variancePct}%`,
-    );
-  });
+  writeTable(
+    doc,
+    "Budget Variance Report",
+    payload.budgetVariance,
+    [
+      { header: "Project", widthRatio: 0.31, value: (row) => row.projectName },
+      { header: "Contract", widthRatio: 0.23, align: "right", value: (row) => formatCurrency(row.contractValue) },
+      { header: "Spent", widthRatio: 0.20, align: "right", value: (row) => formatCurrency(row.totalSpent) },
+      { header: "Variance", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.variance) },
+      { header: "Used", widthRatio: 0.10, align: "right", value: (row) => `${row.variancePct}%` },
+    ],
+  );
 };
 
 const getReportTypeTitle = (reportType: PdfReportType): string => {
@@ -758,86 +1164,95 @@ const getReportTypeTitle = (reportType: PdfReportType): string => {
   }
 };
 
-const renderPdfReport = (
-  res: Response,
+const buildPdfReport = (
   reportType: PdfReportType,
   payload: ReportsPayload,
-  filters: {
-    projectId: string | null;
-    category: string | null;
-    fromDate: string | null;
-    toDate: string | null;
-  },
-): void => {
-  const timestamp = new Date();
-  const dateToken = timestamp.toISOString().slice(0, 10);
-  const reportToken = toSafeFileToken(getReportTypeTitle(reportType));
-  const projectScopeLabel = filters.projectId
-    ? payload.projectCostSummary[0]?.projectName ?? filters.projectId
-    : "All Projects";
-  const scopeToken = filters.projectId
-    ? toSafeFileToken(projectScopeLabel)
-    : "all-projects";
-  const filename = `report-${reportToken}-${scopeToken}-${dateToken}.pdf`;
+  branding: ReportBranding,
+  filters: ReportFilters,
+): Promise<{ filename: string; data: Buffer }> =>
+  new Promise((resolve, reject) => {
+    const timestamp = new Date();
+    const dateToken = timestamp.toISOString().slice(0, 10);
+    const reportToken = toSafeFileToken(getReportTypeTitle(reportType));
+    const projectScopeLabel = filters.projectId
+      ? payload.projectCostSummary[0]?.projectName ?? filters.projectId
+      : "All Projects";
+    const scopeToken = filters.projectId
+      ? toSafeFileToken(projectScopeLabel)
+      : "all-projects";
+    const filename = `report-${reportToken}-${scopeToken}-${dateToken}.pdf`;
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    const doc = new PDFDocument({ size: "A4", margin: PDF_MARGIN });
+    doc.info.Title = `${branding.companyName} ${getReportTypeTitle(reportType)} Report`;
+    doc.info.Author = branding.companyName;
+    doc.info.Subject = "Project Financial Report";
+    doc.info.Keywords = "DREGGAM, Engineering, Project Report";
 
-  const doc = new PDFDocument({ size: "A4", margin: 42 });
-  doc.pipe(res);
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    doc.on("end", () => {
+      resolve({ filename, data: Buffer.concat(chunks) });
+    });
+    doc.on("error", (error) => {
+      reject(error);
+    });
 
-  doc
-    .font("Helvetica-Bold")
-    .fontSize(18)
-    .fillColor("#0b2a53")
-    .text("DREGGAM Engineering Project Report");
-  doc
-    .font("Helvetica")
-    .fontSize(11)
-    .fillColor("#334155")
-    .text(`Report Type: ${getReportTypeTitle(reportType)}`)
-    .text(`Generated: ${timestamp.toISOString()}`)
-    .text(`Project Scope: ${projectScopeLabel}`);
-  if (filters.category) {
-    doc.text(`Category Filter: ${filters.category}`);
-  }
-  if (filters.fromDate || filters.toDate) {
-    doc.text(`Date Window: ${filters.fromDate ?? "N/A"} to ${filters.toDate ?? "N/A"}`);
-  }
+    try {
+      renderReportHeader(
+        doc,
+        branding,
+        getReportTypeTitle(reportType),
+        timestamp,
+        projectScopeLabel,
+        filters,
+      );
+      writeParagraph(
+        doc,
+        "This report follows standard formatting with Times Roman typography, 12pt body text, 1.5 line spacing, and tabular financial presentation for easy review.",
+      );
 
-  renderSummaryBlock(doc, payload);
+      renderSummaryBlock(doc, payload);
 
-  if (reportType === "comprehensive" || reportType === "project-cost-summary") {
-    renderProjectCostSummary(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "income-expense") {
-    renderIncomeExpense(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "payments") {
-    renderPayments(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "labor") {
-    renderLabor(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "materials") {
-    renderMaterials(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "expenses-by-category") {
-    renderExpenseCategories(doc, payload);
-  }
-  if (reportType === "comprehensive" || reportType === "budget-variance") {
-    renderBudgetVariance(doc, payload);
-  }
+      if (reportType === "comprehensive" || reportType === "project-cost-summary") {
+        renderProjectCostSummary(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "income-expense") {
+        renderIncomeExpense(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "payments") {
+        renderPayments(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "labor") {
+        renderLabor(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "materials") {
+        renderMaterials(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "expenses-by-category") {
+        renderExpenseCategories(doc, payload);
+      }
+      if (reportType === "comprehensive" || reportType === "budget-variance") {
+        renderBudgetVariance(doc, payload);
+      }
 
-  doc
-    .moveDown(1)
-    .font("Helvetica-Oblique")
-    .fontSize(9)
-    .fillColor("#64748b")
-    .text("End of report");
+      doc
+        .moveDown(1)
+        .font("Times-Italic")
+        .fontSize(10)
+        .fillColor(REPORT_COLORS.slate600)
+        .text("Prepared by DREGGAM Engineering Systems", {
+          width: getContentWidth(doc),
+          align: "center",
+          lineGap: PDF_LINE_GAP,
+        });
 
-  doc.end();
-};
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
 
 router.get(
   "/",
@@ -871,6 +1286,7 @@ router.get(
     }
 
     const companyId = await getSingleTenantCompanyId();
+    const branding = await buildReportBranding(companyId);
     const payload = await buildReportsPayload(companyId);
     const filtered = applyReportFilters(payload, {
       projectId: projectIdRaw.length > 0 ? projectIdRaw : null,
@@ -879,12 +1295,24 @@ router.get(
       toDate,
     });
 
-    renderPdfReport(res, reportType, filtered, {
+    const filters: ReportFilters = {
       projectId: projectIdRaw.length > 0 ? projectIdRaw : null,
       category: categoryRaw.length > 0 ? categoryRaw : null,
       fromDate,
       toDate,
-    });
+    };
+
+    const { filename, data } = await buildPdfReport(
+      reportType,
+      filtered,
+      branding,
+      filters,
+    );
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", String(data.length));
+    res.status(200).send(data);
   }),
 );
 

@@ -106,31 +106,44 @@ export const SurfaceCard = ({
 export const KpiCard = ({
   label,
   value,
+  desktopValue,
   meta,
   icon,
+  isMonetary = false,
   accent = false,
 }: {
   label: string;
   value: string;
+  desktopValue?: string;
   meta?: string;
   icon: ReactNode;
+  isMonetary?: boolean;
   accent?: boolean;
 }) => (
   <article
     className={
       accent
-        ? "rounded-2xl border border-[#0b2a53] bg-[#0b2a53] p-4 shadow-sm"
-        : "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+        ? "min-w-0 overflow-hidden rounded-2xl border border-[#0b2a53] bg-[#0b2a53] p-2.5 shadow-sm sm:p-4"
+        : "min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-4"
     }
   >
-    <div className="mb-3 flex items-start justify-between">
-      <span className={accent ? "text-xs font-semibold uppercase tracking-wide text-blue-100" : "text-xs font-semibold uppercase tracking-wide text-slate-500"}>
+    <div className="mb-2.5 flex items-start justify-between gap-2 sm:mb-3">
+      <span className={accent ? "block max-w-[82%] break-words text-[10px] font-semibold uppercase leading-4 tracking-wide text-blue-100 sm:max-w-none sm:text-xs" : "block max-w-[82%] break-words text-[10px] font-semibold uppercase leading-4 tracking-wide text-slate-500 sm:max-w-none sm:text-xs"}>
         {label}
       </span>
-      <span className={accent ? "text-blue-100" : "text-[#0b2a53]/60"}>{icon}</span>
+      <span className={accent ? "shrink-0 text-blue-100 [&_svg]:h-3.5 [&_svg]:w-3.5 sm:[&_svg]:h-4 sm:[&_svg]:w-4" : "shrink-0 text-[#0b2a53]/60 [&_svg]:h-3.5 [&_svg]:w-3.5 sm:[&_svg]:h-4 sm:[&_svg]:w-4"}>{icon}</span>
     </div>
-    <p className={accent ? "text-xl font-bold text-white sm:text-2xl" : "text-xl font-bold text-slate-900 sm:text-2xl"}>{value}</p>
-    {meta && <p className={accent ? "mt-2 text-xs text-blue-100" : "mt-2 text-xs text-slate-500"}>{meta}</p>}
+    <p
+      className={
+        accent
+          ? `${isMonetary ? "break-words text-[0.95rem] [overflow-wrap:anywhere] sm:text-2xl" : "break-words text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-white`
+          : `${isMonetary ? "break-words text-[0.95rem] [overflow-wrap:anywhere] sm:text-2xl" : "break-words text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-slate-900`
+      }
+    >
+      <span className="sm:hidden">{value}</span>
+      <span className="hidden sm:inline">{desktopValue ?? value}</span>
+    </p>
+    {meta && <p className={accent ? "mt-1.5 break-words text-[10px] leading-4 text-blue-100 sm:text-xs" : "mt-1.5 break-words text-[10px] leading-4 text-slate-500 sm:text-xs"}>{meta}</p>}
   </article>
 );
 
@@ -171,7 +184,7 @@ export const EmptyState = ({
 );
 
 export const SkeletonCards = () => (
-  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <div className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
     {Array.from({ length: 4 }).map((_, index) => (
       <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4" key={`sk-card-${index}`}>
         <div className="h-3 w-20 rounded bg-slate-200" />
@@ -208,8 +221,8 @@ export const SectionTitle = ({
 }) => (
   <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
     <div className="text-center">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+      <h2 className="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{title}</h2>
+      {subtitle && <p className="mt-1 text-[13px] leading-6 text-slate-500 sm:text-sm">{subtitle}</p>}
     </div>
     {action}
   </div>

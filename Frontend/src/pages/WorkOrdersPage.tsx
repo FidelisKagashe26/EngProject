@@ -22,11 +22,14 @@ import { formatDate, formatTzs } from "../utils/format";
 
 const statusOptions = ["Draft", "Approved", "In Progress", "Completed", "Cancelled"];
 
+/** Returns today's date as YYYY-MM-DD */
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
 const emptyForm = (): CreateWorkOrderPayload => ({
   projectId: "",
   orderNumber: "",
   clientName: "",
-  orderDate: "",
+  orderDate: todayStr(),
   description: "",
   materialsCost: 0,
   materialsProfitPct: 0,
@@ -36,8 +39,356 @@ const emptyForm = (): CreateWorkOrderPayload => ({
   notes: "",
 });
 
-export const WorkOrdersPage = () => {
+// ─── Reusable Work Order Modal ────────────────────────────────────────────────
+// Exported so ProjectDetailPage can embed it inline without duplicating logic.
+
+type WorkOrderModalProps = {
+  projects: ProjectApiRecord[];
+  /** When set, the project dropdown is locked to this project */
+  lockedProjectId?: string;
+  editingOrder?: WorkOrderApiRecord | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
+export const WorkOrderModal = ({
+  projects,
+  lockedProjectId,
+  editingOrder,
+  onClose,
+  onSaved,
+}: WorkOrderModalProps) => {
   const { markSaved } = useUnsavedChanges();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Derive initial project: locked > editing > first available
+  const initialProjectId =
+    lockedProjectId ??
+    editingOrder?.projectId ??
+    projects[0]?.id ??
+    "";
+
+  const initialClient =
+    editingOrder?.clientName ??
+    projects.find((p) => p.id === initialProjectId)?.clientName ??
+    "";
+
+  const [form, setForm] = useState<CreateWorkOrderPayload>(() =>
+    editingOrder
+      ? {
+          projectId: editingOrder.projectId,
+          orderNumber: editingOrder.orderNumber,
+          clientName: editingOrder.clientName,
+          orderDate: editingOrder.orderDate,
+          description: editingOrder.description,
+          materialsCost: editingOrder.materialsCost,
+          materialsProfitPct: editingOrder.materialsProfitPct,
+          labourCost: editingOrder.labourCost,
+          labourProfitPct: editingOrder.labourProfitPct,
+          status: editingOrder.status,
+          notes: editingOrder.notes,
+        }
+      : {
+          ...emptyForm(),
+          projectId: initialProjectId,
+          clientName: initialClient,
+        },
+  );
+
+  const [materialsCostStr, setMaterialsCostStr] = useState(
+    editingOrder ? String(editingOrder.materialsCost) : "",
+  );
+  const [labourCostStr, setLabourCostStr] = useState(
+    editingOrder ? String(editingOrder.labourCost) : "",
+  );
+
+  // Auto-fill client when project changes (only when not locked)
+  const handleProjectChange = (projectId: string) => {
+    if (lockedProjectId) return; // locked — ignore
+    const project = projects.find((p) => p.id === projectId);
+    setForm((prev) => ({
+      ...prev,
+      projectId,
+      clientName: project?.clientName ?? prev.clientName,
+    }));
+  };
+
+  // Computed totals
+  const materialsProfitAmount = useMemo(
+    () => (form.materialsCost * form.materialsProfitPct) / 100,
+    [form.materialsCost, form.materialsProfitPct],
+  );
+  const labourProfitAmount = useMemo(
+    () => (form.labourCost * form.labourProfitPct) / 100,
+    [form.labourCost, form.labourProfitPct],
+  );
+  const totalCost = form.materialsCost + form.labourCost;
+  const totalProfit = materialsProfitAmount + labourProfitAmount;
+  const grandTotal = totalCost + totalProfit;
+
+  const handleSave = async () => {
+    if (
+      form.projectId.trim().length === 0 ||
+      form.orderNumber.trim().length < 2 ||
+      form.orderDate.trim().length === 0 ||
+      form.description.trim().length < 2
+    ) {
+      setError("Jaza: project, namba ya order, tarehe, na maelezo.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    try {
+      if (editingOrder) {
+        await api.updateWorkOrder(editingOrder.id, form);
+      } else {
+        await api.createWorkOrder(form);
+      }
+      markSaved();
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Imeshindwa kuhifadhi work order.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const selectedProject = projects.find((p) => p.id === form.projectId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <SurfaceCard
+        className="w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        title={editingOrder ? "Hariri Work Order" : "Work Order Mpya"}
+      >
+        {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
+        <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+          {/* ── Project / Site ── */}
+          <label className="form-field">
+            <span>Project / Site</span>
+            {lockedProjectId ? (
+              // Locked — show as read-only display
+              <div className="input-field bg-slate-50 text-slate-700 cursor-not-allowed select-none">
+                {selectedProject?.name ?? lockedProjectId}
+              </div>
+            ) : (
+              <GuiSelect
+                className="input-field"
+                onChange={(e) => handleProjectChange(e.target.value)}
+                value={form.projectId}
+              >
+                {projects.map((p) => (
+                  <option key={`wo-proj-${p.id}`} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </GuiSelect>
+            )}
+          </label>
+
+          {/* ── Order Number ── */}
+          <label className="form-field">
+            <span>Namba ya Order <span className="text-red-500">*</span></span>
+            <input
+              className="input-field"
+              onChange={(e) => setForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
+              placeholder="WO-2026-001"
+              value={form.orderNumber}
+            />
+          </label>
+
+          {/* ── Client Name — auto-filled, read-only ── */}
+          <label className="form-field">
+            <span>Jina la Mteja</span>
+            <input
+              className="input-field bg-slate-50 text-slate-600"
+              readOnly
+              title="Inajaza kiotomatiki kutoka kwa mradi"
+              value={form.clientName}
+            />
+          </label>
+
+          {/* ── Order Date — defaults to today ── */}
+          <label className="form-field">
+            <span>Tarehe ya Order <span className="text-red-500">*</span></span>
+            <input
+              className="input-field"
+              onChange={(e) => setForm((prev) => ({ ...prev, orderDate: e.target.value }))}
+              type="date"
+              value={form.orderDate}
+            />
+          </label>
+
+          {/* ── Description ── */}
+          <label className="form-field sm:col-span-2">
+            <span>Maelezo ya Kazi <span className="text-red-500">*</span></span>
+            <textarea
+              className="input-field min-h-16"
+              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              placeholder="Elezea kazi itakayofanywa..."
+              value={form.description}
+            />
+          </label>
+
+          {/* ── Materials ── */}
+          <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Vifaa (Materials)
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <FinancialInput
+                label="Gharama ya Vifaa"
+                onChange={(val) => {
+                  setMaterialsCostStr(val);
+                  setForm((prev) => ({ ...prev, materialsCost: Number(val) || 0 }));
+                }}
+                placeholder="0"
+                value={materialsCostStr}
+              />
+              <label className="form-field">
+                <span>Faida % ya Vifaa</span>
+                <input
+                  className="input-field"
+                  max="100"
+                  min="0"
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      materialsProfitPct: Number(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="15"
+                  type="number"
+                  value={form.materialsProfitPct || ""}
+                />
+              </label>
+              <label className="form-field">
+                <span>Faida ya Vifaa (Auto)</span>
+                <input
+                  className="input-field bg-slate-100 text-emerald-700 font-semibold"
+                  readOnly
+                  value={formatTzs(materialsProfitAmount)}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* ── Labour ── */}
+          <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Wafanyakazi (Labour)
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <FinancialInput
+                label="Gharama ya Wafanyakazi"
+                onChange={(val) => {
+                  setLabourCostStr(val);
+                  setForm((prev) => ({ ...prev, labourCost: Number(val) || 0 }));
+                }}
+                placeholder="0"
+                value={labourCostStr}
+              />
+              <label className="form-field">
+                <span>Faida % ya Wafanyakazi</span>
+                <input
+                  className="input-field"
+                  max="100"
+                  min="0"
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      labourProfitPct: Number(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="10"
+                  type="number"
+                  value={form.labourProfitPct || ""}
+                />
+              </label>
+              <label className="form-field">
+                <span>Faida ya Wafanyakazi (Auto)</span>
+                <input
+                  className="input-field bg-slate-100 text-emerald-700 font-semibold"
+                  readOnly
+                  value={formatTzs(labourProfitAmount)}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* ── Order Summary ── */}
+          <div className="sm:col-span-2 rounded-xl border border-[#0b2a53]/20 bg-[#0b2a53]/5 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#0b2a53]">
+              Muhtasari wa Order
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-slate-500">Jumla ya Gharama</p>
+                <p className="text-base font-bold text-slate-900">{formatTzs(totalCost)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Jumla ya Faida</p>
+                <p className="text-base font-bold text-emerald-700">{formatTzs(totalProfit)}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-xs text-slate-500">Grand Total (Kuchajiwa Mteja)</p>
+                <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(grandTotal)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Status ── */}
+          <label className="form-field">
+            <span>Hali (Status)</span>
+            <GuiSelect
+              className="input-field"
+              onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
+              value={form.status}
+            >
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </GuiSelect>
+          </label>
+
+          {/* ── Notes ── */}
+          <label className="form-field sm:col-span-2">
+            <span>Maelezo ya Ziada</span>
+            <textarea
+              className="input-field min-h-16"
+              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              placeholder="Maelezo ya ziada..."
+              value={form.notes}
+            />
+          </label>
+
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <button className="btn-secondary" onClick={onClose} type="button">
+              Ghairi
+            </button>
+            <button
+              className="btn-primary"
+              disabled={saving}
+              onClick={() => void handleSave()}
+              type="button"
+            >
+              {saving ? "Inahifadhi..." : editingOrder ? "Sasisha Order" : "Hifadhi Order"}
+            </button>
+          </div>
+        </form>
+      </SurfaceCard>
+    </div>
+  );
+};
+
+// ─── Work Orders Page (global view — all projects) ────────────────────────────
+
+export const WorkOrdersPage = () => {
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
 
@@ -47,19 +398,10 @@ export const WorkOrdersPage = () => {
   const [workOrders, setWorkOrders] = useState<WorkOrderApiRecord[]>([]);
   const [projectFilter, setProjectFilter] = useState(projectFromQuery || "All");
 
-  // Modal states
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<WorkOrderApiRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WorkOrderApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  // Form state
-  const [form, setForm] = useState<CreateWorkOrderPayload>(emptyForm());
-
-  // String inputs for financial fields (for FinancialInput component)
-  const [materialsCostStr, setMaterialsCostStr] = useState("");
-  const [labourCostStr, setLabourCostStr] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -75,7 +417,7 @@ export const WorkOrdersPage = () => {
         setError("");
       } catch (err) {
         if (!mounted) return;
-        setError(err instanceof Error ? err.message : "Failed to load work orders.");
+        setError(err instanceof Error ? err.message : "Imeshindwa kupakia work orders.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -85,18 +427,8 @@ export const WorkOrdersPage = () => {
   }, []);
 
   useEffect(() => {
-    if (projectFromQuery.length > 0) {
-      setProjectFilter(projectFromQuery);
-      setForm((prev) => ({ ...prev, projectId: projectFromQuery }));
-    }
+    if (projectFromQuery.length > 0) setProjectFilter(projectFromQuery);
   }, [projectFromQuery]);
-
-  useEffect(() => {
-    if (projects.length > 0 && form.projectId.length === 0) {
-      const defaultId = projectFromQuery || projects[0].id;
-      setForm((prev) => ({ ...prev, projectId: defaultId }));
-    }
-  }, [form.projectId, projectFromQuery, projects]);
 
   const refreshOrders = async () => {
     const rows = await api.getWorkOrders();
@@ -110,104 +442,15 @@ export const WorkOrdersPage = () => {
 
   const pagination = useTablePagination(filteredOrders);
 
-  // Computed totals from form
-  const materialsProfitAmount = useMemo(
-    () => (form.materialsCost * form.materialsProfitPct) / 100,
-    [form.materialsCost, form.materialsProfitPct],
-  );
-  const labourProfitAmount = useMemo(
-    () => (form.labourCost * form.labourProfitPct) / 100,
-    [form.labourCost, form.labourProfitPct],
-  );
-  const totalCost = form.materialsCost + form.labourCost;
-  const totalProfit = materialsProfitAmount + labourProfitAmount;
-  const grandTotal = totalCost + totalProfit;
-
-  const openAddModal = () => {
-    const defaultProjectId = projectFromQuery || projects[0]?.id || "";
-    const defaultClient = projects.find((p) => p.id === defaultProjectId)?.clientName ?? "";
-    setForm({ ...emptyForm(), projectId: defaultProjectId, clientName: defaultClient });
-    setMaterialsCostStr("");
-    setLabourCostStr("");
-    setEditingId(null);
-    setShowModal(true);
-  };
-
-  const openEditModal = (order: WorkOrderApiRecord) => {
-    setForm({
-      projectId: order.projectId,
-      orderNumber: order.orderNumber,
-      clientName: order.clientName,
-      orderDate: order.orderDate,
-      description: order.description,
-      materialsCost: order.materialsCost,
-      materialsProfitPct: order.materialsProfitPct,
-      labourCost: order.labourCost,
-      labourProfitPct: order.labourProfitPct,
-      status: order.status,
-      notes: order.notes,
-    });
-    setMaterialsCostStr(String(order.materialsCost));
-    setLabourCostStr(String(order.labourCost));
-    setEditingId(order.id);
-    setShowModal(true);
-  };
-
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingId(null);
-    setError("");
-  };
-
-  const handleProjectChange = (projectId: string) => {
-    const project = projects.find((p) => p.id === projectId);
-    setForm((prev) => ({
-      ...prev,
-      projectId,
-      clientName: project?.clientName ?? prev.clientName,
-    }));
-  };
-
-  const handleSave = async () => {
-    if (
-      form.projectId.trim().length === 0 ||
-      form.orderNumber.trim().length < 2 ||
-      form.clientName.trim().length < 2 ||
-      form.orderDate.trim().length === 0 ||
-      form.description.trim().length < 2
-    ) {
-      setError("Please fill in project, order number, client, date, and description.");
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    try {
-      if (editingId) {
-        await api.updateWorkOrder(editingId, form);
-      } else {
-        await api.createWorkOrder(form);
-      }
-      await refreshOrders();
-      markSaved();
-      closeModal();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save work order.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
       await api.deleteWorkOrder(deleteTarget.id);
       await refreshOrders();
-      markSaved();
       setDeleteTarget(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete work order.");
+      setError(err instanceof Error ? err.message : "Imeshindwa kufuta work order.");
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -217,7 +460,7 @@ export const WorkOrdersPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Manage work orders with materials, labour costs, and profit calculations."
+        subtitle="Simamia work orders — gharama za vifaa, wafanyakazi, na hesabu za faida."
         title="Work Orders"
       />
 
@@ -225,13 +468,13 @@ export const WorkOrdersPage = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
         <div className="w-full sm:w-56">
           <label className="form-field">
-            <span className="text-sm">Filter by Project</span>
+            <span className="text-sm">Chuja kwa Mradi</span>
             <GuiSelect
               className="input-field"
               onChange={(e) => setProjectFilter(e.target.value)}
               value={projectFilter}
             >
-              <option value="All">All Projects</option>
+              <option value="All">Miradi Yote</option>
               {projects.map((p) => (
                 <option key={`wo-filter-${p.id}`} value={p.id}>
                   {p.name}
@@ -240,22 +483,26 @@ export const WorkOrdersPage = () => {
             </GuiSelect>
           </label>
         </div>
-        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-          + New Work Order
+        <button
+          className="btn-primary whitespace-nowrap"
+          onClick={() => { setEditingOrder(null); setShowModal(true); }}
+          type="button"
+        >
+          + Work Order Mpya
         </button>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SurfaceCard title="Total Orders">
+        <SurfaceCard title="Jumla ya Orders">
           <p className="text-2xl font-bold text-slate-900">{filteredOrders.length}</p>
         </SurfaceCard>
-        <SurfaceCard title="Total Grand Total">
+        <SurfaceCard title="Grand Total">
           <p className="text-2xl font-bold text-emerald-700">
             {formatTzs(filteredOrders.reduce((s, o) => s + o.grandTotal, 0))}
           </p>
         </SurfaceCard>
-        <SurfaceCard title="Total Profit">
+        <SurfaceCard title="Jumla ya Faida">
           <p className="text-2xl font-bold text-[#0b2a53]">
             {formatTzs(filteredOrders.reduce((s, o) => s + o.totalProfit, 0))}
           </p>
@@ -263,15 +510,15 @@ export const WorkOrdersPage = () => {
       </div>
 
       {/* Table */}
-      <SurfaceCard title="Work Orders List">
+      <SurfaceCard title="Orodha ya Work Orders">
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
         {loading ? (
           <SkeletonTable rows={5} />
         ) : filteredOrders.length === 0 ? (
           <EmptyState
-            description="No work orders found. Create your first work order."
-            title="No work orders"
+            description="Hakuna work orders. Unda work order yako ya kwanza."
+            title="Hakuna work orders"
           />
         ) : (
           <>
@@ -280,19 +527,19 @@ export const WorkOrdersPage = () => {
                 <thead>
                   <tr>
                     <th>S/N</th>
-                    <th>Order No.</th>
-                    <th>Project</th>
-                    <th>Client</th>
-                    <th>Date</th>
-                    <th>Materials Cost</th>
-                    <th>Mat. Profit</th>
-                    <th>Labour Cost</th>
-                    <th>Labour Profit</th>
-                    <th>Total Cost</th>
-                    <th>Total Profit</th>
+                    <th>Namba ya Order</th>
+                    <th>Mradi</th>
+                    <th>Mteja</th>
+                    <th>Tarehe</th>
+                    <th>Gharama Vifaa</th>
+                    <th>Faida Vifaa</th>
+                    <th>Gharama Wafanyakazi</th>
+                    <th>Faida Wafanyakazi</th>
+                    <th>Jumla Gharama</th>
+                    <th>Jumla Faida</th>
                     <th>Grand Total</th>
-                    <th>Status</th>
-                    <th>Actions</th>
+                    <th>Hali</th>
+                    <th>Vitendo</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -335,17 +582,17 @@ export const WorkOrdersPage = () => {
                         <div className="flex gap-2">
                           <button
                             className="btn-secondary py-1 px-3 text-xs"
-                            onClick={() => openEditModal(order)}
+                            onClick={() => { setEditingOrder(order); setShowModal(true); }}
                             type="button"
                           >
-                            Edit
+                            Hariri
                           </button>
                           <button
                             className="btn-danger py-1 px-3 text-xs"
                             onClick={() => setDeleteTarget(order)}
                             type="button"
                           >
-                            Delete
+                            Futa
                           </button>
                         </div>
                       </td>
@@ -369,241 +616,34 @@ export const WorkOrdersPage = () => {
         )}
       </SurfaceCard>
 
-      {/* Add / Edit Modal */}
+      {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard
-            className="w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-            title={editingId ? "Edit Work Order" : "New Work Order"}
-          >
-            {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
-            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {/* Project */}
-              <label className="form-field">
-                <span>Project / Site</span>
-                <GuiSelect
-                  className="input-field"
-                  onChange={(e) => handleProjectChange(e.target.value)}
-                  value={form.projectId}
-                >
-                  {projects.map((p) => (
-                    <option key={`wo-proj-${p.id}`} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </GuiSelect>
-              </label>
-
-              {/* Order Number */}
-              <label className="form-field">
-                <span>Order Number</span>
-                <input
-                  className="input-field"
-                  onChange={(e) => setForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
-                  placeholder="WO-2026-001"
-                  value={form.orderNumber}
-                />
-              </label>
-
-              {/* Client */}
-              <label className="form-field">
-                <span>Client Name</span>
-                <input
-                  className="input-field"
-                  onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))}
-                  placeholder="Client name"
-                  value={form.clientName}
-                />
-              </label>
-
-              {/* Date */}
-              <label className="form-field">
-                <span>Order Date</span>
-                <input
-                  className="input-field"
-                  onChange={(e) => setForm((prev) => ({ ...prev, orderDate: e.target.value }))}
-                  type="date"
-                  value={form.orderDate}
-                />
-              </label>
-
-              {/* Description */}
-              <label className="form-field sm:col-span-2">
-                <span>Description</span>
-                <textarea
-                  className="input-field min-h-16"
-                  onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                  placeholder="Describe the work to be done..."
-                  value={form.description}
-                />
-              </label>
-
-              {/* Materials section */}
-              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Materials
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <FinancialInput
-                    label="Materials Cost"
-                    onChange={(val) => {
-                      setMaterialsCostStr(val);
-                      setForm((prev) => ({ ...prev, materialsCost: Number(val) || 0 }));
-                    }}
-                    placeholder="0"
-                    value={materialsCostStr}
-                  />
-                  <label className="form-field">
-                    <span>Profit % on Materials</span>
-                    <input
-                      className="input-field"
-                      max="100"
-                      min="0"
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          materialsProfitPct: Number(e.target.value) || 0,
-                        }))
-                      }
-                      placeholder="15"
-                      type="number"
-                      value={form.materialsProfitPct || ""}
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Materials Profit (Auto)</span>
-                    <input
-                      className="input-field bg-slate-100"
-                      readOnly
-                      value={formatTzs(materialsProfitAmount)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Labour section */}
-              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Labour
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <FinancialInput
-                    label="Labour Cost"
-                    onChange={(val) => {
-                      setLabourCostStr(val);
-                      setForm((prev) => ({ ...prev, labourCost: Number(val) || 0 }));
-                    }}
-                    placeholder="0"
-                    value={labourCostStr}
-                  />
-                  <label className="form-field">
-                    <span>Profit % on Labour</span>
-                    <input
-                      className="input-field"
-                      max="100"
-                      min="0"
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          labourProfitPct: Number(e.target.value) || 0,
-                        }))
-                      }
-                      placeholder="10"
-                      type="number"
-                      value={form.labourProfitPct || ""}
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Labour Profit (Auto)</span>
-                    <input
-                      className="input-field bg-slate-100"
-                      readOnly
-                      value={formatTzs(labourProfitAmount)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Grand total summary */}
-              <div className="sm:col-span-2 rounded-xl border border-[#0b2a53]/20 bg-[#0b2a53]/5 p-4">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#0b2a53]">
-                  Order Summary
-                </p>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div>
-                    <p className="text-xs text-slate-500">Total Cost</p>
-                    <p className="text-base font-bold text-slate-900">{formatTzs(totalCost)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500">Total Profit</p>
-                    <p className="text-base font-bold text-emerald-700">{formatTzs(totalProfit)}</p>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <p className="text-xs text-slate-500">Grand Total (Charge to Client)</p>
-                    <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(grandTotal)}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status */}
-              <label className="form-field">
-                <span>Status</span>
-                <GuiSelect
-                  className="input-field"
-                  onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
-                  value={form.status}
-                >
-                  {statusOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </GuiSelect>
-              </label>
-
-              {/* Notes */}
-              <label className="form-field sm:col-span-2">
-                <span>Notes</span>
-                <textarea
-                  className="input-field min-h-16"
-                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Additional notes..."
-                  value={form.notes}
-                />
-              </label>
-
-              <div className="sm:col-span-2 flex justify-end gap-2">
-                <button className="btn-secondary" onClick={closeModal} type="button">
-                  Cancel
-                </button>
-                <button
-                  className="btn-primary"
-                  disabled={saving}
-                  onClick={() => void handleSave()}
-                  type="button"
-                >
-                  {saving ? "Saving..." : editingId ? "Update Order" : "Create Order"}
-                </button>
-              </div>
-            </form>
-          </SurfaceCard>
-        </div>
+        <WorkOrderModal
+          editingOrder={editingOrder}
+          onClose={() => { setShowModal(false); setEditingOrder(null); }}
+          onSaved={async () => {
+            setShowModal(false);
+            setEditingOrder(null);
+            await refreshOrders();
+          }}
+          projects={projects}
+        />
       )}
 
       {/* Confirm Delete */}
       <ConfirmModal
-        cancelLabel="Cancel"
+        cancelLabel="Ghairi"
         confirmClassName="btn-danger"
-        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        confirmLabel={deleting ? "Inafuta..." : "Futa"}
         description={
           deleteTarget
-            ? `Delete work order "${deleteTarget.orderNumber}"? This cannot be undone.`
+            ? `Futa work order "${deleteTarget.orderNumber}"? Haiwezi kurudishwa.`
             : ""
         }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDelete()}
         open={deleteTarget !== null}
-        title="Delete Work Order"
+        title="Futa Work Order"
       />
     </div>
   );

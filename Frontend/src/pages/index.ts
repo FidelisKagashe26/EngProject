@@ -17,6 +17,7 @@ export { ProjectFormPage } from "./ProjectFormPage";
 export { ProjectsPage } from "./ProjectsPage";
 export { ReportsPage } from "./ReportsPage";
 export { ResetPasswordPage } from "./ResetPasswordPage";
+export { SiteOperationsPage } from "./SiteOperationsPage";
 export { SettingsPage } from "./SettingsPage";
 export { SuppliersPage } from "./SuppliersPage";
 export { TendersPage } from "./TendersPage";

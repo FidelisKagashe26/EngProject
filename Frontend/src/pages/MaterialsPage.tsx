@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   EmptyState,
@@ -46,7 +46,13 @@ type MaterialTableRow = {
 const normalizeMaterialName = (value: string): string =>
   value.trim().toLowerCase().replace(/\s+/g, " ");
 
-export const MaterialsPage = () => {
+type MaterialsPageProps = {
+  embedded?: boolean;
+  search?: string;
+  tabBar?: ReactNode;
+};
+
+export const MaterialsPage = ({ embedded = false, search = "", tabBar }: MaterialsPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -183,9 +189,22 @@ export const MaterialsPage = () => {
   }, [purchases, requirements]);
 
   const filteredRows = useMemo(() => {
-    if (listProjectFilter === "All") return tableRows;
-    return tableRows.filter((r) => r.projectId === listProjectFilter);
-  }, [listProjectFilter, tableRows]);
+    let result = tableRows;
+    if (listProjectFilter !== "All") {
+      result = result.filter((r) => r.projectId === listProjectFilter);
+    }
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.materialName.toLowerCase().includes(q) ||
+          r.projectName.toLowerCase().includes(q) ||
+          r.supplier.toLowerCase().includes(q) ||
+          r.deliveryStatus.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [listProjectFilter, search, tableRows]);
 
   const materialsPagination = useTablePagination(filteredRows);
 
@@ -282,10 +301,15 @@ export const MaterialsPage = () => {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        subtitle="Track required materials, purchases, supplier deliveries and quantity gaps."
-        title="Materials & Requirements Management"
-      />
+      {!embedded ? (
+        <SectionTitle
+          subtitle="Track required materials, purchases, supplier deliveries and quantity gaps."
+          title="Materials & Requirements Management"
+        />
+      ) : null}
+
+      {/* Tab bar — above filter and table */}
+      {tabBar}
 
       {/* Filter and Add buttons - outside card, right aligned */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">

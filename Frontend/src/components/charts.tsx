@@ -6,27 +6,37 @@ export const IncomeExpenseChart = ({
   data: Array<{ month: string; income: number; expenses: number }>;
 }) => {
   const maxValue = Math.max(...data.map((item) => Math.max(item.income, item.expenses)), 1);
+  const columnCount = Math.max(data.length, 1);
+  const minChartWidth = Math.max(columnCount * 58, 320);
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-6 gap-3">
-        {data.map((item) => (
-          <div className="flex flex-col items-center gap-2" key={item.month}>
-            <div className="flex h-44 w-full items-end gap-1 rounded-lg bg-slate-50 p-2">
-              <div
-                className="w-1/2 rounded-sm bg-[#0b2a53]"
-                style={{ height: `${(item.income / maxValue) * 100}%` }}
-                title={`Income ${formatTzs(item.income)}`}
-              />
-              <div
-                className="w-1/2 rounded-sm bg-[#f28c28]"
-                style={{ height: `${(item.expenses / maxValue) * 100}%` }}
-                title={`Expenses ${formatTzs(item.expenses)}`}
-              />
+      <div className="-mx-1 overflow-x-auto px-1 sm:mx-0 sm:px-0">
+        <div
+          className="grid gap-2.5 sm:gap-3"
+          style={{
+            gridTemplateColumns: `repeat(${columnCount}, minmax(48px, 1fr))`,
+            minWidth: `${minChartWidth}px`,
+          }}
+        >
+          {data.map((item) => (
+            <div className="flex flex-col items-center gap-2" key={item.month}>
+              <div className="flex h-44 w-full items-end gap-1 rounded-lg bg-slate-50 p-2">
+                <div
+                  className="w-1/2 rounded-sm bg-[#0b2a53]"
+                  style={{ height: `${(item.income / maxValue) * 100}%` }}
+                  title={`Income ${formatTzs(item.income)}`}
+                />
+                <div
+                  className="w-1/2 rounded-sm bg-[#f28c28]"
+                  style={{ height: `${(item.expenses / maxValue) * 100}%` }}
+                  title={`Expenses ${formatTzs(item.expenses)}`}
+                />
+              </div>
+              <span className="text-xs font-semibold text-slate-600">{item.month}</span>
             </div>
-            <span className="text-xs font-semibold text-slate-600">{item.month}</span>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
       <div className="flex gap-4 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-2">

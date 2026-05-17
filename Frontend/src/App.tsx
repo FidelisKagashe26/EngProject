@@ -12,32 +12,25 @@ import { LandingLayout } from "./landing/LandingLayout";
 import { ServicesPage } from "./landing/ServicesPage";
 import { WebsiteSettingsProvider } from "./landing/WebsiteSettingsContext";
 import { AppShell } from "./layout/AppShell";
-
-import {
-  ActivityLogPage,
-  DashboardPage,
-  DocumentsPage,
-  EquipmentPage,
-  ExpensesPage,
-  ForgotPasswordOtpPage,
-  ForgotPasswordPage,
-  LaborPage,
-  LoginPage,
-  MaterialsPage,
-  MobileSupervisorPage,
-  NotificationsPage,
-  PaymentsPage,
-  PettyCashPage,
-  ProjectDetailPage,
-  ProjectFormPage,
-  ProjectsPage,
-  ReportsPage,
-  ResetPasswordPage,
-  SettingsPage,
-  SuppliersPage,
-  UsersRolesPage,
-  WorkOrdersPage,
-} from "./pages";
+import { ActivityLogPage } from "./pages/ActivityLogPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { DocumentsPage } from "./pages/DocumentsPage";
+import { ForgotPasswordOtpPage } from "./pages/ForgotPasswordOtpPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { LoginPage } from "./pages/LoginPage";
+import { MobileSupervisorPage } from "./pages/MobileSupervisorPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
+import { PaymentsPage } from "./pages/PaymentsPage";
+import { ProjectDetailPage } from "./pages/ProjectDetailPage";
+import { ProjectFormPage } from "./pages/ProjectFormPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { SiteOperationsPage } from "./pages/SiteOperationsPage";
+import { SuppliersPage } from "./pages/SuppliersPage";
+import { UsersRolesPage } from "./pages/UsersRolesPage";
+import { WorkOrdersPage } from "./pages/WorkOrdersPage";
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -45,6 +38,13 @@ const ScrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
   return null;
+};
+
+const LegacyOperationsRedirect = ({ tab }: { tab: string }) => {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("tab", tab);
+  return <Navigate replace to={`/site-operations?${params.toString()}`} />;
 };
 
 const ProtectedAppLayout = () => {
@@ -128,15 +128,16 @@ function App() {
             <Route element={<ProjectFormPage />} path="/projects/:projectId/edit" />
             <Route element={<Navigate replace to="/projects" />} path="/tenders" />
             <Route element={<WorkOrdersPage />} path="/work-orders" />
-            <Route element={<LaborPage />} path="/labor" />
-            <Route element={<MaterialsPage />} path="/materials" />
-            <Route element={<ExpensesPage />} path="/expenses" />
+            <Route element={<SiteOperationsPage />} path="/site-operations" />
+            <Route element={<LegacyOperationsRedirect tab="labor" />} path="/labor" />
+            <Route element={<LegacyOperationsRedirect tab="materials" />} path="/materials" />
+            <Route element={<LegacyOperationsRedirect tab="expenses" />} path="/expenses" />
             <Route element={<PaymentsPage />} path="/payments" />
             <Route element={<DocumentsPage />} path="/documents" />
             <Route element={<ReportsPage />} path="/reports" />
             <Route element={<SuppliersPage />} path="/suppliers" />
-            <Route element={<EquipmentPage />} path="/equipment" />
-            <Route element={<PettyCashPage />} path="/petty-cash" />
+            <Route element={<LegacyOperationsRedirect tab="equipment" />} path="/equipment" />
+            <Route element={<LegacyOperationsRedirect tab="petty-cash" />} path="/petty-cash" />
             <Route element={<UsersRolesPage />} path="/users" />
             <Route element={<SettingsPage />} path="/settings" />
             <Route element={<NotificationsPage />} path="/notifications" />

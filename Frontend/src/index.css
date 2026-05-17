@@ -33,9 +33,16 @@
 
 body {
   margin: 0;
-  font-family: "Inter", sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text-main);
   background-color: var(--app-bg);
+}
+
+@media (max-width: 639px) {
+  html {
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+  }
 }
 
 a {
@@ -240,22 +247,6 @@ a {
     @apply mt-1 text-base font-semibold text-slate-900;
   }
 
-  .mobile-bottom-nav {
-    @apply fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-around border-t border-slate-200 bg-white px-2;
-  }
-
-  .mobile-tab {
-    @apply rounded-lg px-2 py-1 text-xs font-semibold text-slate-600;
-  }
-
-  .mobile-tab.active {
-    @apply bg-blue-50 text-[#0b2a53];
-  }
-
-  .mobile-tab-add {
-    @apply bg-[#f28c28] text-slate-900;
-  }
-
   .phone-frame {
     @apply rounded-2xl border border-slate-200 bg-white p-3 shadow-sm;
     min-height: 220px;
@@ -382,14 +373,6 @@ a {
 
   .dark .metric-value {
     @apply text-slate-100;
-  }
-
-  .dark .mobile-bottom-nav {
-    @apply border-slate-700 bg-slate-900;
-  }
-
-  .dark .mobile-tab {
-    @apply text-slate-300;
   }
 
   .dark .phone-frame {

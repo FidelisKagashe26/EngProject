@@ -43,6 +43,16 @@ export const formatTzs = (value: number): string => {
   return formatted;
 };
 
+export const formatCompactCurrency = (value: number): string => {
+  const currency = getAppCurrency();
+  const compactValue = new Intl.NumberFormat("en-TZ", {
+    notation: "compact",
+    compactDisplay: "short",
+    maximumFractionDigits: 1,
+  }).format(value);
+  return `${currency} ${compactValue}`;
+};
+
 export const formatPercent = (value: number): string => `${value}%`;
 
 export const formatNumber = (value: number): string =>

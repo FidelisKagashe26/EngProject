@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
   EmptyState,
@@ -19,7 +18,13 @@ import {
 } from "../services/api";
 import { formatTzs } from "../utils/format";
 
-export const LaborPage = () => {
+type LaborPageProps = {
+  embedded?: boolean;
+  search?: string;
+  tabBar?: ReactNode;
+};
+
+export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -130,11 +135,22 @@ export const LaborPage = () => {
   }, [paymentProjectId, projectFromQuery, projects, workerAssignedProjectId]);
 
   const filteredWorkers = useMemo(() => {
-    if (listProjectFilter === "All") {
-      return workers;
+    let result = workers;
+    if (listProjectFilter !== "All") {
+      result = result.filter((worker) => worker.assignedProjectId === listProjectFilter);
     }
-    return workers.filter((worker) => worker.assignedProjectId === listProjectFilter);
-  }, [listProjectFilter, workers]);
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (w) =>
+          w.fullName.toLowerCase().includes(q) ||
+          w.phone.toLowerCase().includes(q) ||
+          w.skillRole.toLowerCase().includes(q) ||
+          (w.assignedProjectName ?? "").toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [listProjectFilter, search, workers]);
 
   const workersPagination = useTablePagination(filteredWorkers);
 
@@ -349,11 +365,12 @@ export const LaborPage = () => {
 
   return (
     <div className="space-y-6">
-      {/* Title and Subtitle - Normal stacking */}
-      <SectionTitle
-        subtitle="Track workers, assignments, wages, and outstanding labor payments."
-        title="Labor / Workforce Management"
-      />
+      {!embedded ? (
+        <SectionTitle
+          subtitle="Track workers, assignments, wages, and outstanding labor payments."
+          title="Labor / Workforce Management"
+        />
+      ) : null}
 
       {/* Filter and Add Worker Button - Right aligned */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
@@ -405,6 +422,9 @@ export const LaborPage = () => {
           </ul>
         </SurfaceCard>
       </div>
+
+      {/* Tab bar — between stats and table */}
+      {tabBar}
 
       {/* Workers List Table */}
       <SurfaceCard title="Workers List">
@@ -732,5 +752,4 @@ export const LaborPage = () => {
     </div>
   );
 };
-
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ConfirmModal,
   EmptyState,
@@ -21,7 +21,13 @@ import { formatDate, formatTzs } from "../utils/format";
 
 const OPENING_BALANCE = 1_800_000;
 
-export const PettyCashPage = () => {
+type PettyCashPageProps = {
+  embedded?: boolean;
+  search?: string;
+  tabBar?: ReactNode;
+};
+
+export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCashPageProps) => {
   const { markSaved } = useUnsavedChanges();
 
   const [loading, setLoading] = useState(true);
@@ -82,7 +88,20 @@ export const PettyCashPage = () => {
     setRows(response.rows);
   };
 
-  const pagination = useTablePagination(rows);
+  const filteredRows = useMemo(() => {
+    if (search.trim().length === 0) return rows;
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        r.description.toLowerCase().includes(q) ||
+        r.projectName.toLowerCase().includes(q) ||
+        r.recordedBy.toLowerCase().includes(q) ||
+        r.transactionType.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  const pagination = useTablePagination(filteredRows);
 
   const currentBalance = useMemo(
     () => OPENING_BALANCE + summary.totalCashIn - summary.totalCashOut,
@@ -171,10 +190,12 @@ export const PettyCashPage = () => {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        subtitle="Manage daily petty cash movement and reconciliation for each site."
-        title="Petty Cash Management"
-      />
+      {!embedded ? (
+        <SectionTitle
+          subtitle="Manage daily petty cash movement and reconciliation for each site."
+          title="Petty Cash Management"
+        />
+      ) : null}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -198,6 +219,9 @@ export const PettyCashPage = () => {
           </p>
         </SurfaceCard>
       </div>
+
+      {/* Tab bar — between stats and table */}
+      {tabBar}
 
       {/* Add button - outside card, right aligned */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">

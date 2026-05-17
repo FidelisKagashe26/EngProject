@@ -362,7 +362,7 @@ export const TendersPage = () => {
                           </Link>
                           <Link
                             className="btn-primary py-1 px-3 text-xs"
-                            to={`/labor?projectId=${encodeURIComponent(item.projectId)}`}
+                            to={`/site-operations?tab=labor&projectId=${encodeURIComponent(item.projectId)}`}
                           >
                             Labor
                           </Link>
@@ -514,5 +514,4 @@ export const TendersPage = () => {
     </div>
   );
 };
-
 

@@ -128,15 +128,8 @@ export const DashboardPage = () => {
   const recentProjectsPagination = useTablePagination(dashboard.recentProjects);
 
   return (
-    <div className="space-y-6">
-      <SectionTitle
-        subtitle="Cross-project financial visibility for active engineering sites."
-        title="Main Dashboard"
-      />
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <button className="btn-accent whitespace-nowrap">Export Snapshot</button>
-      </div>
+    <div className="space-y-4 sm:space-y-6">
+      <SectionTitle title="Main Dashboard" />
 
       {error && (
         <SurfaceCard>
@@ -147,7 +140,7 @@ export const DashboardPage = () => {
       {loading ? (
         <SkeletonCards />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
           <KpiCard
             icon={<BriefcaseBusiness className="h-4 w-4" />}
             label="Total Projects"
@@ -162,18 +155,21 @@ export const DashboardPage = () => {
           />
           <KpiCard
             icon={<CircleDollarSign className="h-4 w-4" />}
+            isMonetary
             label="Total Contract Value"
             meta="TZS portfolio value"
             value={formatTzs(dashboard.summary.totalContractValue)}
           />
           <KpiCard
             icon={<Wallet className="h-4 w-4" />}
+            isMonetary
             label="Total Amount Received"
             meta="Client inflows"
             value={formatTzs(dashboard.summary.totalAmountReceived)}
           />
           <KpiCard
             icon={<TrendingDown className="h-4 w-4" />}
+            isMonetary
             label="Total Expenses"
             meta="Execution outflows"
             value={formatTzs(dashboard.summary.totalExpenses)}
@@ -181,12 +177,14 @@ export const DashboardPage = () => {
           <KpiCard
             accent
             icon={<TrendingUp className="h-4 w-4" />}
+            isMonetary
             label="Estimated Profit"
             meta="Net margin estimate"
             value={formatTzs(dashboard.summary.estimatedProfit)}
           />
           <KpiCard
             icon={<HandCoins className="h-4 w-4" />}
+            isMonetary
             label="Pending Client Payments"
             meta="Receivables pending"
             value={formatTzs(dashboard.summary.pendingClientPayments)}
@@ -201,7 +199,7 @@ export const DashboardPage = () => {
       )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard subtitle="Monthly Income vs Expenses (Jan-Jun)" title="Financial Overview">
+        <SurfaceCard subtitle="Monthly Income vs Expenses" title="Financial Overview">
           <IncomeExpenseChart data={dashboard.monthlyFinance} />
         </SurfaceCard>
 

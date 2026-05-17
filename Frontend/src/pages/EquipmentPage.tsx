@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
@@ -20,7 +20,13 @@ import {
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
 
-export const EquipmentPage = () => {
+type EquipmentPageProps = {
+  embedded?: boolean;
+  search?: string;
+  tabBar?: ReactNode;
+};
+
+export const EquipmentPage = ({ embedded = false, search = "", tabBar }: EquipmentPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -97,7 +103,20 @@ export const EquipmentPage = () => {
     setEquipmentRows(response.rows);
   };
 
-  const equipmentPagination = useTablePagination(equipmentRows);
+  const filteredEquipmentRows = useMemo(() => {
+    if (search.trim().length === 0) return equipmentRows;
+    const q = search.toLowerCase();
+    return equipmentRows.filter(
+      (r) =>
+        r.equipmentName.toLowerCase().includes(q) ||
+        r.equipmentType.toLowerCase().includes(q) ||
+        r.projectName.toLowerCase().includes(q) ||
+        r.ownerName.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q),
+    );
+  }, [equipmentRows, search]);
+
+  const equipmentPagination = useTablePagination(filteredEquipmentRows);
 
   const computedTotalCost = useMemo(() => {
     const days = Number(usageDays) || 0;
@@ -190,10 +209,12 @@ export const EquipmentPage = () => {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        subtitle="Manage rented and owned equipment usage, costs and maintenance."
-        title="Equipment Usage Records"
-      />
+      {!embedded ? (
+        <SectionTitle
+          subtitle="Manage rented and owned equipment usage, costs and maintenance."
+          title="Equipment Usage Records"
+        />
+      ) : null}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -213,6 +234,9 @@ export const EquipmentPage = () => {
           <p className="text-2xl font-bold text-emerald-700">{summary.inUseCount}</p>
         </SurfaceCard>
       </div>
+
+      {/* Tab bar — between stats and table */}
+      {tabBar}
 
       {/* Filter and Add button - outside card, right aligned */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">

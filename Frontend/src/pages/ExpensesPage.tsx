@@ -1,5 +1,5 @@
 import { BarChart2, PieChart, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   EmptyState,
@@ -29,7 +29,13 @@ const defaultExpenseCategories = [
   "Admin",
 ];
 
-export const ExpensesPage = () => {
+type ExpensesPageProps = {
+  embedded?: boolean;
+  search?: string;
+  tabBar?: ReactNode;
+};
+
+export const ExpensesPage = ({ embedded = false, search = "", tabBar }: ExpensesPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -111,7 +117,20 @@ export const ExpensesPage = () => {
     setCategory(expenseCategories[0] ?? defaultExpenseCategories[0]);
   }, [category, expenseCategories]);
 
-  const expensePagination = useTablePagination(expenseRows);
+  const filteredExpenseRows = useMemo(() => {
+    if (search.trim().length === 0) return expenseRows;
+    const q = search.toLowerCase();
+    return expenseRows.filter(
+      (r) =>
+        r.projectName.toLowerCase().includes(q) ||
+        r.category.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q) ||
+        r.paidBy.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q),
+    );
+  }, [expenseRows, search]);
+
+  const expensePagination = useTablePagination(filteredExpenseRows);
 
   const monthTrendSummary = useMemo(() => {
     const trend = charts.monthlyTrend;
@@ -184,10 +203,15 @@ export const ExpensesPage = () => {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        subtitle="Capture all operational expenses beyond labor and materials."
-        title="Expense Management"
-      />
+      {!embedded ? (
+        <SectionTitle
+          subtitle="Capture all operational expenses beyond labor and materials."
+          title="Expense Management"
+        />
+      ) : null}
+
+      {/* Tab bar — above content */}
+      {tabBar}
 
       {/* Expense Categories */}
       <SurfaceCard title="Expense Categories">

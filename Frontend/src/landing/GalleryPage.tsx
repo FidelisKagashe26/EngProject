@@ -285,11 +285,11 @@ export const GalleryPage = () => {
           {!loading && filtered.length === 0 && (
             <div className="py-20 text-center">
               <LayoutGrid className="mx-auto mb-4 text-slate-300" size={48} />
-              <p className="text-base font-semibold text-slate-500">Hakuna picha kwa sasa</p>
+              <p className="text-base font-semibold text-slate-500">No images available right now</p>
               <p className="mt-1 text-sm text-slate-400">
                 {filter !== "All"
                   ? `Hakuna picha katika kategoria "${filter}"`
-                  : "Picha za miradi zitaonekana hapa"}
+                  : "Project images will appear here"}
               </p>
             </div>
           )}

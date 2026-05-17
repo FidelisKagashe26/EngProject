@@ -453,7 +453,7 @@ export const initializeDatabase = async (): Promise<void> => {
     const created = await db.query<{ id: number }>(
       `
       INSERT INTO engicost.companies (name, email, phone, location, currency)
-      VALUES ('Nexivo Company Limited', 'info@nexivo.co.tz', '+255 754 000 100', 'Dar es Salaam, Tanzania', 'TZS')
+      VALUES ('DREGGAM Company Limited', 'info@dreggam.co.tz', '+255 754 000 100', 'Dar es Salaam, Tanzania', 'TZS')
       RETURNING id
       `,
     );
@@ -461,6 +461,26 @@ export const initializeDatabase = async (): Promise<void> => {
   } else {
     companyId = companyResult.rows[0].id;
   }
+
+  await db.query(
+    `
+    UPDATE engicost.companies
+    SET
+      name = 'DREGGAM Company Limited',
+      email = 'info@dreggam.co.tz'
+    WHERE id = $1
+    `,
+    [companyId],
+  );
+
+  await db.query(
+    `
+    UPDATE engicost.equipment_usage
+    SET owner_name = 'DREGGAM Company Limited'
+    WHERE company_id = $1 AND ownership_type = 'Owned'
+    `,
+    [companyId],
+  );
 
   await db.query(
     `
@@ -749,7 +769,7 @@ export const initializeDatabase = async (): Promise<void> => {
         start_date, end_date, usage_days, daily_rate, rental_cost, maintenance_cost, total_cost, status, maintenance_notes
       ) VALUES
       ('EQ-001', $1, 'PRJ-001', 'JCB 3DX', 'Backhoe Loader', 'Rented', 'BuildFleet Ltd', '2026-04-10', '2026-04-26', 16, 300000, 4800000, 320000, 5120000, 'In Use', 'Hydraulic hose replaced on day 8'),
-      ('EQ-002', $1, 'PRJ-002', 'Concrete Mixer 400L', 'Mixer', 'Owned', 'Nexivo Company Limited', '2026-04-02', '2026-04-30', 28, 0, 0, 190000, 190000, 'In Use', 'Routine lubrication completed'),
+      ('EQ-002', $1, 'PRJ-002', 'Concrete Mixer 400L', 'Mixer', 'Owned', 'DREGGAM Company Limited', '2026-04-02', '2026-04-30', 28, 0, 0, 190000, 190000, 'In Use', 'Routine lubrication completed'),
       ('EQ-003', $1, 'PRJ-004', 'Toyota Hilux T920', 'Transport Vehicle', 'Rented', 'SCL Transport', '2026-04-15', '2026-05-12', 27, 77777.78, 2100000, 0, 2100000, 'Idle', 'Standby transport for field logistics')
       `,
       [companyId],

@@ -84,7 +84,7 @@ export const ForgotPasswordPage = () => {
             <input
               className="input-field pl-10"
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="manager@nexivo.co.tz"
+              placeholder="manager@dreggam.co.tz"
               required
               type="email"
               value={email}

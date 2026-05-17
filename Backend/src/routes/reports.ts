@@ -790,7 +790,7 @@ const renderPdfReport = (
     .font("Helvetica-Bold")
     .fontSize(18)
     .fillColor("#0b2a53")
-    .text("Nexivo Engineering Project Report");
+    .text("DREGGAM Engineering Project Report");
   doc
     .font("Helvetica")
     .fontSize(11)

@@ -1,4 +1,4 @@
-import { Download, LayoutGrid, Loader2, Upload, X } from "lucide-react";
+import { Download, LayoutGrid, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type GalleryItemRecord } from "../services/api";
 
@@ -6,24 +6,10 @@ const API_ORIGIN =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace("/api", "") ??
   "http://localhost:5050";
 const WATERMARK_TEXT = "DREGGAM";
+const DEFAULT_DOWNLOAD_LOGO_SRC = "/EngLogo.png";
 
 const resolveImageSource = (imageUrl: string): string =>
   imageUrl.startsWith("/uploads") ? `${API_ORIGIN}${imageUrl}` : imageUrl;
-
-const readFileAsDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") {
-        resolve(result);
-        return;
-      }
-      reject(new Error("Could not read selected file."));
-    };
-    reader.onerror = () => reject(new Error("Could not read selected file."));
-    reader.readAsDataURL(file);
-  });
 
 const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -53,7 +39,6 @@ export const GalleryPage = () => {
   const [categories, setCategories] = useState<string[]>(["All"]);
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(true);
-  const [logoDataUrl, setLogoDataUrl] = useState("");
   const [downloadError, setDownloadError] = useState("");
   const [downloadingItemId, setDownloadingItemId] = useState<string | null>(null);
 
@@ -77,31 +62,13 @@ export const GalleryPage = () => {
     };
   }, []);
 
-  const handleLogoFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setLogoDataUrl(dataUrl);
-      setDownloadError("");
-    } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : "Imeshindikana kusoma logo.");
-    }
-  };
-
   const handleDownload = async (item: GalleryItemRecord) => {
     setDownloadingItemId(item.id);
     setDownloadError("");
 
     try {
       const imageSrc = resolveImageSource(item.imageUrl);
-      if (!logoDataUrl) {
-        throw new Error("Weka logo yako kwanza kabla ya kupakua picha.");
-      }
-
-      const logoSrc = logoDataUrl;
+      const logoSrc = DEFAULT_DOWNLOAD_LOGO_SRC;
       const [baseImage, overlayLogo] = await Promise.all([loadImage(imageSrc), loadImage(logoSrc)]);
 
       const width = baseImage.naturalWidth || baseImage.width;
@@ -213,44 +180,6 @@ export const GalleryPage = () => {
 
       <section className="bg-[#faf9fd] py-12 lg:py-24">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:mb-10 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="font-[Manrope,sans-serif] text-base font-bold text-slate-900 sm:text-lg">
-                  Download With Your Logo
-                </h2>
-                <p className="text-xs text-slate-500 sm:text-sm">
-                  Weka logo yako. Kila picha utakayodownload itawekwa logo juu kulia na watermark ya DREGGAM chini.
-                </p>
-              </div>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#0b2a53] hover:text-[#0b2a53] sm:text-sm">
-                <Upload className="h-4 w-4" />
-                {logoDataUrl ? "Badilisha Logo" : "Weka Logo"}
-                <input accept="image/*" className="hidden" onChange={handleLogoFileChange} type="file" />
-              </label>
-            </div>
-
-            {logoDataUrl && (
-              <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5 sm:w-fit">
-                <img alt="Logo preview" className="h-10 w-auto object-contain sm:h-12" src={logoDataUrl} />
-                <button
-                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-100"
-                  onClick={() => setLogoDataUrl("")}
-                  type="button"
-                >
-                  <X className="h-3 w-3" />
-                  Ondoa
-                </button>
-              </div>
-            )}
-
-            {!logoDataUrl && (
-              <p className="mt-3 text-xs font-medium text-amber-700">
-                Weka logo yako kwanza ili download ionyeshe logo yako juu kulia.
-              </p>
-            )}
-          </div>
-
           {downloadError && (
             <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 sm:text-sm">
               {downloadError}

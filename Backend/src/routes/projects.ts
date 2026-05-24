@@ -20,6 +20,11 @@ const projectSchema = z.object({
   status: z.string().min(2).optional().default("Pending"),
   progress: z.number().int().min(0).max(100).optional().default(0),
   pendingClientPayments: z.number().nonnegative().optional().default(0),
+  laborBudget: z.number().nonnegative().optional().default(0),
+  materialBudget: z.number().nonnegative().optional().default(0),
+  operationalBudget: z.number().nonnegative().optional().default(0),
+  expectedProfitMarginPct: z.number().min(0).max(100).optional().default(0),
+  paymentTerms: z.string().optional().default(""),
   description: z.string().optional().default(""),
   notes: z.string().optional().default(""),
 });
@@ -40,6 +45,11 @@ const mapProject = (row: {
   status: string;
   progress: number;
   pending_client_payments: string;
+  labor_budget: string;
+  material_budget: string;
+  operational_budget: string;
+  expected_profit_margin_pct: string;
+  payment_terms: string | null;
   description: string | null;
   notes: string | null;
   created_at: string;
@@ -60,6 +70,11 @@ const mapProject = (row: {
   status: row.status,
   progress: row.progress,
   pendingClientPayments: Number(row.pending_client_payments),
+  laborBudget: Number(row.labor_budget),
+  materialBudget: Number(row.material_budget),
+  operationalBudget: Number(row.operational_budget),
+  expectedProfitMarginPct: Number(row.expected_profit_margin_pct),
+  paymentTerms: row.payment_terms ?? "",
   description: row.description ?? "",
   notes: row.notes ?? "",
   createdAt: row.created_at,
@@ -118,6 +133,11 @@ router.get(
         status,
         progress,
         pending_client_payments::text,
+        labor_budget::text,
+        material_budget::text,
+        operational_budget::text,
+        expected_profit_margin_pct::text,
+        payment_terms,
         description,
         notes,
         created_at::text,
@@ -153,6 +173,11 @@ router.get(
         status,
         progress,
         pending_client_payments::text,
+        labor_budget::text,
+        material_budget::text,
+        operational_budget::text,
+        expected_profit_margin_pct::text,
+        payment_terms,
         description,
         notes,
         created_at::text,
@@ -183,6 +208,10 @@ router.post(
       amountReceived: toMoney(req.body.amountReceived),
       totalSpent: toMoney(req.body.totalSpent),
       pendingClientPayments: toMoney(req.body.pendingClientPayments),
+      laborBudget: toMoney(req.body.laborBudget),
+      materialBudget: toMoney(req.body.materialBudget),
+      operationalBudget: toMoney(req.body.operationalBudget),
+      expectedProfitMarginPct: toMoney(req.body.expectedProfitMarginPct),
       progress: toInteger(req.body.progress),
     });
 
@@ -192,11 +221,13 @@ router.post(
       INSERT INTO engicost.projects (
         id, company_id, name, site_location, client_name, contract_number,
         start_date, expected_completion_date, contract_value, amount_received,
-        total_spent, status, progress, pending_client_payments, description, notes
+        total_spent, status, progress, pending_client_payments, labor_budget, material_budget,
+        operational_budget, expected_profit_margin_pct, payment_terms, description, notes
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16
+        $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21
       )
       RETURNING
         id,
@@ -212,6 +243,11 @@ router.post(
         status,
         progress,
         pending_client_payments::text,
+        labor_budget::text,
+        material_budget::text,
+        operational_budget::text,
+        expected_profit_margin_pct::text,
+        payment_terms,
         description,
         notes,
         created_at::text,
@@ -232,6 +268,11 @@ router.post(
         parsed.status,
         parsed.progress,
         parsed.pendingClientPayments,
+        parsed.laborBudget,
+        parsed.materialBudget,
+        parsed.operationalBudget,
+        parsed.expectedProfitMarginPct,
+        parsed.paymentTerms,
         parsed.description,
         parsed.notes,
       ],
@@ -269,6 +310,22 @@ router.put(
         req.body.pendingClientPayments !== undefined
           ? toMoney(req.body.pendingClientPayments)
           : undefined,
+      laborBudget:
+        req.body.laborBudget !== undefined
+          ? toMoney(req.body.laborBudget)
+          : undefined,
+      materialBudget:
+        req.body.materialBudget !== undefined
+          ? toMoney(req.body.materialBudget)
+          : undefined,
+      operationalBudget:
+        req.body.operationalBudget !== undefined
+          ? toMoney(req.body.operationalBudget)
+          : undefined,
+      expectedProfitMarginPct:
+        req.body.expectedProfitMarginPct !== undefined
+          ? toMoney(req.body.expectedProfitMarginPct)
+          : undefined,
       progress:
         req.body.progress !== undefined ? toInteger(req.body.progress) : undefined,
     });
@@ -297,6 +354,11 @@ router.put(
         status,
         progress,
         pending_client_payments::text,
+        labor_budget::text,
+        material_budget::text,
+        operational_budget::text,
+        expected_profit_margin_pct::text,
+        payment_terms,
         description,
         notes
       FROM engicost.projects
@@ -323,8 +385,13 @@ router.put(
         status = $12,
         progress = $13,
         pending_client_payments = $14,
-        description = $15,
-        notes = $16,
+        labor_budget = $15,
+        material_budget = $16,
+        operational_budget = $17,
+        expected_profit_margin_pct = $18,
+        payment_terms = $19,
+        description = $20,
+        notes = $21,
         updated_at = NOW()
       WHERE company_id = $1 AND id = $2
       RETURNING
@@ -341,6 +408,11 @@ router.put(
         status,
         progress,
         pending_client_payments::text,
+        labor_budget::text,
+        material_budget::text,
+        operational_budget::text,
+        expected_profit_margin_pct::text,
+        payment_terms,
         description,
         notes,
         created_at::text,
@@ -361,6 +433,11 @@ router.put(
         parsed.status ?? row.status,
         parsed.progress ?? row.progress,
         parsed.pendingClientPayments ?? Number(row.pending_client_payments),
+        parsed.laborBudget ?? Number(row.labor_budget),
+        parsed.materialBudget ?? Number(row.material_budget),
+        parsed.operationalBudget ?? Number(row.operational_budget),
+        parsed.expectedProfitMarginPct ?? Number(row.expected_profit_margin_pct),
+        parsed.paymentTerms ?? (row.payment_terms ?? ""),
         parsed.description ?? row.description,
         parsed.notes ?? row.notes,
       ],

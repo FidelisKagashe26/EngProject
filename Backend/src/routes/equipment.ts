@@ -157,7 +157,7 @@ router.post(
     const end = new Date(parsed.endDate);
     const computedDays =
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const usageDays = parsed.usageDays > 0 ? parsed.usageDays : computedDays;
+    const usageDays = computedDays;
     if (usageDays <= 0) {
       res.status(400).json({ message: "Usage days must be greater than zero." });
       return;
@@ -284,4 +284,3 @@ router.post(
 );
 
 export default router;
-

@@ -57,7 +57,6 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
   const [ownerName, setOwnerName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [usageDays, setUsageDays] = useState("1");
   const [dailyRate, setDailyRate] = useState("0");
   const [maintenanceCost, setMaintenanceCost] = useState("0");
   const [status, setStatus] = useState<"In Use" | "Idle" | "Under Maintenance">("In Use");
@@ -118,13 +117,29 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
 
   const equipmentPagination = useTablePagination(filteredEquipmentRows);
 
+  const computedUsageDays = useMemo(() => {
+    if (startDate.trim().length === 0 || endDate.trim().length === 0 || endDate < startDate) {
+      return 0;
+    }
+
+    const [sy, sm, sd] = startDate.split("-").map(Number);
+    const [ey, em, ed] = endDate.split("-").map(Number);
+    if ([sy, sm, sd, ey, em, ed].some((value) => !Number.isFinite(value))) {
+      return 0;
+    }
+
+    const startUtc = Date.UTC(sy, sm - 1, sd);
+    const endUtc = Date.UTC(ey, em - 1, ed);
+    return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
+  }, [startDate, endDate]);
+
   const computedTotalCost = useMemo(() => {
-    const days = Number(usageDays) || 0;
+    const days = computedUsageDays;
     const rate = Number(dailyRate) || 0;
     const maintenance = Number(maintenanceCost) || 0;
     const rental = ownershipType === "Rented" ? days * rate : 0;
     return rental + maintenance;
-  }, [dailyRate, maintenanceCost, ownershipType, usageDays]);
+  }, [computedUsageDays, dailyRate, maintenanceCost, ownershipType]);
 
   const resetForm = () => {
     setEquipmentName("");
@@ -133,7 +148,6 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     setOwnerName("");
     setStartDate("");
     setEndDate("");
-    setUsageDays("1");
     setDailyRate("0");
     setMaintenanceCost("0");
     setStatus("In Use");
@@ -162,6 +176,10 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
       setError("Please provide project, equipment name/type, owner and usage dates.");
       return;
     }
+    if (computedUsageDays <= 0) {
+      setError("End date must be on or after start date so usage days can be calculated.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -173,7 +191,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         ownerName: ownerName.trim(),
         startDate,
         endDate,
-        usageDays: Number(usageDays) || 0,
+        usageDays: computedUsageDays,
         dailyRate: Number(dailyRate) || 0,
         maintenanceCost: Number(maintenanceCost) || 0,
         status,
@@ -373,9 +391,19 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
                 <span>End Date</span>
                 <input className="input-field" onChange={(e) => setEndDate(e.target.value)} type="date" value={endDate} />
               </label>
+              {startDate.trim().length > 0 && endDate.trim().length > 0 && computedUsageDays <= 0 ? (
+                <p className="text-xs text-red-600 sm:col-span-2 xl:col-span-3">
+                  End date must be the same day or after start date.
+                </p>
+              ) : null}
               <label className="form-field">
                 <span>Usage Days</span>
-                <input className="input-field" onChange={(e) => setUsageDays(e.target.value)} type="number" value={usageDays} />
+                <input
+                  className="input-field bg-slate-50"
+                  readOnly
+                  type="number"
+                  value={computedUsageDays > 0 ? String(computedUsageDays) : ""}
+                />
               </label>
               <FinancialInput label="Daily Rate" onChange={setDailyRate} placeholder="160000" value={dailyRate} />
               <FinancialInput label="Maintenance Cost" onChange={setMaintenanceCost} placeholder="200000" value={maintenanceCost} />

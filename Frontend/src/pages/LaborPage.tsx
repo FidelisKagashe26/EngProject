@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
   EmptyState,
@@ -62,7 +63,6 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [paymentWorkerId, setPaymentWorkerId] = useState("");
   const [workStart, setWorkStart] = useState("");
   const [workEnd, setWorkEnd] = useState("");
-  const [daysWorked, setDaysWorked] = useState("6");
   const [hoursWorked, setHoursWorked] = useState("8");
   const [rate, setRate] = useState("45000");
   const [amountPaid, setAmountPaid] = useState("180000");
@@ -154,13 +154,29 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
 
   const workersPagination = useTablePagination(filteredWorkers);
 
+  const computedDaysWorked = useMemo(() => {
+    if (workStart.trim().length === 0 || workEnd.trim().length === 0 || workEnd < workStart) {
+      return 0;
+    }
+
+    const [sy, sm, sd] = workStart.split("-").map(Number);
+    const [ey, em, ed] = workEnd.split("-").map(Number);
+    if ([sy, sm, sd, ey, em, ed].some((value) => !Number.isFinite(value))) {
+      return 0;
+    }
+
+    const startUtc = Date.UTC(sy, sm - 1, sd);
+    const endUtc = Date.UTC(ey, em - 1, ed);
+    return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
+  }, [workEnd, workStart]);
+
   const totalPayable = useMemo(() => {
     const workerRate = Number(rate) || 0;
     if (selectedWorkerForPayment?.paymentType === "Hourly") {
       return (Number(hoursWorked) || 0) * workerRate;
     }
-    return (Number(daysWorked) || 0) * workerRate;
-  }, [daysWorked, hoursWorked, rate, selectedWorkerForPayment]);
+    return computedDaysWorked * workerRate;
+  }, [computedDaysWorked, hoursWorked, rate, selectedWorkerForPayment]);
 
   const balance = Math.max(totalPayable - (Number(amountPaid) || 0), 0);
 
@@ -252,7 +268,6 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     setRate(String(worker.rateAmount));
     setWorkStart("");
     setWorkEnd("");
-    setDaysWorked("6");
     setHoursWorked("8");
     setAmountPaid("");
     setPaymentNotes("");
@@ -308,6 +323,10 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
       setError("Please fill work date range.");
       return;
     }
+    if (workEnd < workStart || (selectedWorkerForPayment.paymentType !== "Hourly" && computedDaysWorked <= 0)) {
+      setError("Work end date must be on or after start date.");
+      return;
+    }
 
     setSavingPayment(true);
     setError("");
@@ -319,7 +338,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         workerId: selectedWorkerForPayment.id,
         workStart,
         workEnd,
-        daysWorked: Number(daysWorked) || 0,
+        daysWorked: computedDaysWorked,
         hoursWorked: Number(hoursWorked) || 0,
         rateAmount: Number(rate) || 0,
         amountPaid: Number(amountPaid) || 0,
@@ -651,6 +670,11 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                   value={workEnd}
                 />
               </label>
+              {workStart.trim().length > 0 && workEnd.trim().length > 0 && workEnd < workStart ? (
+                <p className="text-xs text-red-600 sm:col-span-2">
+                  Work end date must be the same day or after start date.
+                </p>
+              ) : null}
               {selectedWorkerForPayment.paymentType === "Hourly" ? (
                 <label className="form-field sm:col-span-2">
                   <span>Hours Worked</span>
@@ -665,10 +689,10 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                 <label className="form-field sm:col-span-2">
                   <span>Days Worked</span>
                   <input
-                    className="input-field"
-                    onChange={(event) => setDaysWorked(event.target.value)}
+                    className="input-field bg-slate-50"
+                    readOnly
                     type="number"
-                    value={daysWorked}
+                    value={computedDaysWorked > 0 ? String(computedDaysWorked) : ""}
                   />
                 </label>
               )}
@@ -679,7 +703,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                   <p className="text-sm text-slate-700">
                     {selectedWorkerForPayment.paymentType === "Hourly"
                       ? `${hoursWorked} hrs × ${formatTzs(Number(rate))}`
-                      : `${daysWorked} days × ${formatTzs(Number(rate))}`}
+                      : `${computedDaysWorked} days × ${formatTzs(Number(rate))}`}
                     {" → "}Total Payable: <span className="font-semibold">{formatTzs(totalPayable)}</span>
                   </p>
                   <p className="text-sm text-slate-700">
@@ -752,4 +776,3 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     </div>
   );
 };
-

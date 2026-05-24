@@ -1,6 +1,7 @@
 import { Info, Loader2, Paperclip } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../auth";
 import { FinancialInput, SectionTitle, SuccessToast, SurfaceCard, GuiSelect } from "../components/ui";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { api, type CreateProjectPayload, type ProjectApiRecord } from "../services/api";
@@ -44,11 +45,20 @@ const toPayload = (values: {
   contractValue: string;
   initialAdvance: string;
   status: string;
+  laborBudget: string;
+  materialBudget: string;
+  operationalBudget: string;
+  profitMargin: string;
+  paymentTerms: string;
   description: string;
   notes: string;
 }): CreateProjectPayload => {
   const contractVal = Number(values.contractValue) || 0;
   const advance = Number(values.initialAdvance) || 0;
+  const laborBudget = Number(values.laborBudget) || 0;
+  const materialBudget = Number(values.materialBudget) || 0;
+  const operationalBudget = Number(values.operationalBudget) || 0;
+  const expectedProfitMarginPct = Number(values.profitMargin) || 0;
   return {
     name: values.projectName,
     siteLocation: values.siteLocation,
@@ -64,9 +74,32 @@ const toPayload = (values: {
     status: values.status,
     progress: 0,
     pendingClientPayments: Math.max(contractVal - advance, 0),
+    laborBudget,
+    materialBudget,
+    operationalBudget,
+    expectedProfitMarginPct,
+    paymentTerms: values.paymentTerms,
     description: values.description,
     notes: values.notes,
   };
+};
+
+const formatBytes = (size: number): string => {
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+const toFileType = (file: File): string => {
+  const dotIndex = file.name.lastIndexOf(".");
+  if (dotIndex >= 0 && dotIndex < file.name.length - 1) {
+    return file.name.slice(dotIndex + 1).toUpperCase();
+  }
+  if (file.type.includes("/")) {
+    return file.type.split("/")[1].toUpperCase();
+  }
+  return "FILE";
 };
 
 // ─── Small helper: read-only auto field ──────────────────────────────────────
@@ -103,10 +136,12 @@ const AutoField = ({
 export const ProjectFormPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { markSaved, setDirty } = useUnsavedChanges();
   const isEditMode = useMemo(() => Boolean(projectId), [projectId]);
   const baselineFingerprintRef = useRef("");
   const dirtyCheckReadyRef = useRef(false);
+  const initialDocsInputRef = useRef<HTMLInputElement>(null);
 
   // ── Manual fields ──
   const [projectName, setProjectName] = useState("");
@@ -127,6 +162,7 @@ export const ProjectFormPage = () => {
   const [profitMargin, setProfitMargin] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [notes, setNotes] = useState("");
+  const [initialDocuments, setInitialDocuments] = useState<File[]>([]);
 
   // ── Read-only live values (edit mode only) ──
   const [liveAmountReceived, setLiveAmountReceived] = useState(0);
@@ -197,6 +233,13 @@ export const ProjectFormPage = () => {
         setDescription(row.description ?? "");
         setStatus(row.status);
         setContractValue(String(row.contractValue));
+        setLaborBudget(row.laborBudget > 0 ? String(row.laborBudget) : "");
+        setMaterialBudget(row.materialBudget > 0 ? String(row.materialBudget) : "");
+        setOperationalBudget(row.operationalBudget > 0 ? String(row.operationalBudget) : "");
+        setProfitMargin(
+          row.expectedProfitMarginPct > 0 ? String(row.expectedProfitMarginPct) : "",
+        );
+        setPaymentTerms(row.paymentTerms ?? "");
         // Live running totals — shown as read-only
         setLiveAmountReceived(row.amountReceived);
         setLiveTotalSpent(row.totalSpent);
@@ -208,8 +251,13 @@ export const ProjectFormPage = () => {
           startDate: row.startDate, endDate: row.expectedCompletionDate,
           description: row.description ?? "", status: row.status,
           contractValue: String(row.contractValue),
-          initialAdvance: "", laborBudget, materialBudget,
-          operationalBudget, profitMargin, paymentTerms,
+          initialAdvance: "",
+          laborBudget: row.laborBudget > 0 ? String(row.laborBudget) : "",
+          materialBudget: row.materialBudget > 0 ? String(row.materialBudget) : "",
+          operationalBudget: row.operationalBudget > 0 ? String(row.operationalBudget) : "",
+          profitMargin:
+            row.expectedProfitMarginPct > 0 ? String(row.expectedProfitMarginPct) : "",
+          paymentTerms: row.paymentTerms ?? "",
           notes: row.notes ?? "",
         });
         baselineFingerprintRef.current = fp;
@@ -232,36 +280,80 @@ export const ProjectFormPage = () => {
 
     void load();
     return () => { mounted = false; };
-  }, [
-    currentFingerprint, isEditMode, laborBudget, materialBudget,
-    notes, operationalBudget, profitMargin, paymentTerms, projectId, setDirty,
-  ]);
+  }, [currentFingerprint, isEditMode, projectId, setDirty]);
 
-  const validateRequired = (): boolean =>
+  const validateRequired = (mode: SaveMode): boolean =>
     projectName.trim().length > 0 &&
     siteLocation.trim().length > 0 &&
     clientName.trim().length > 0 &&
     contractNumber.trim().length > 0 &&
     startDate.trim().length > 0 &&
     endDate.trim().length > 0 &&
-    status.trim().length > 0 &&
-    contractValue.trim().length > 0;
+    contractValue.trim().length > 0 &&
+    (mode === "draft" || status.trim().length > 0);
+
+  const handlePickInitialDocuments = () => {
+    initialDocsInputRef.current?.click();
+  };
+
+  const handleInitialDocumentsChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    setInitialDocuments((prev) => {
+      const byKey = new Map(
+        prev.map((file) => [`${file.name}:${file.size}:${file.lastModified}`, file]),
+      );
+      for (const file of files) {
+        byKey.set(`${file.name}:${file.size}:${file.lastModified}`, file);
+      }
+      return Array.from(byKey.values());
+    });
+    event.target.value = "";
+  };
+
+  const removeInitialDocument = (indexToRemove: number) => {
+    setInitialDocuments((prev) => prev.filter((_, index) => index !== indexToRemove));
+  };
+
+  const attachInitialDocuments = async (savedProjectId: string) => {
+    if (initialDocuments.length === 0) return;
+    const uploadedBy = user?.fullName?.trim().length ? user.fullName : "Project Manager";
+    await Promise.all(
+      initialDocuments.map((file) =>
+        api.createDocument({
+          projectId: savedProjectId,
+          category: "Other Documents",
+          documentName: file.name,
+          fileType: toFileType(file),
+          fileSize: formatBytes(file.size),
+          fileReference: file.name,
+          uploadedBy,
+          notes: "Uploaded from Project Form initial documents.",
+        }),
+      ),
+    );
+    setInitialDocuments([]);
+  };
 
   const triggerSave = async (mode: SaveMode) => {
-    if (mode === "draft") {
-      setSaveMode("draft");
-      window.setTimeout(() => setSaveMode(null), 2200);
+    if (!mode) return;
+
+    if (!validateRequired(mode)) {
+      setShowErrors(true);
       return;
     }
 
-    if (!validateRequired()) {
+    if (endDate < startDate) {
       setShowErrors(true);
+      setSubmitError("Tarehe ya kukamilika lazima iwe sawa au baada ya tarehe ya kuanza.");
       return;
     }
 
     setShowErrors(false);
     setSubmitting(true);
     setSubmitError("");
+
+    const statusToSave = mode === "draft" ? "Draft" : status;
 
     try {
       let savedProject: ProjectApiRecord;
@@ -276,7 +368,12 @@ export const ProjectFormPage = () => {
           startDate,
           expectedCompletionDate: endDate,
           contractValue: Number(contractValue) || 0,
-          status,
+          status: statusToSave,
+          laborBudget: Number(laborBudget) || 0,
+          materialBudget: Number(materialBudget) || 0,
+          operationalBudget: Number(operationalBudget) || 0,
+          expectedProfitMarginPct: Number(profitMargin) || 0,
+          paymentTerms,
           description,
           notes,
           // pendingClientPayments recalculated from live data
@@ -285,18 +382,49 @@ export const ProjectFormPage = () => {
       } else {
         savedProject = await api.createProject(
           toPayload({
-            projectName, siteLocation, clientName, contractNumber,
-            startDate, endDate, contractValue, initialAdvance,
-            status, description, notes,
+            projectName,
+            siteLocation,
+            clientName,
+            contractNumber,
+            startDate,
+            endDate,
+            contractValue,
+            initialAdvance,
+            status: statusToSave,
+            laborBudget,
+            materialBudget,
+            operationalBudget,
+            profitMargin,
+            paymentTerms,
+            description,
+            notes,
           }),
         );
       }
 
+      let attachmentSaveError = "";
+      try {
+        await attachInitialDocuments(savedProject.id);
+      } catch (error) {
+        attachmentSaveError =
+          error instanceof Error ? error.message : "Nyaraka za awali hazikuhifadhiwa.";
+      }
       markSaved();
-      setSaveMode("project");
+      setSaveMode(mode);
+      if (attachmentSaveError.length > 0) {
+        setSubmitError(
+          `${attachmentSaveError} Mradi umehifadhiwa, unaweza kuongeza nyaraka tena.`,
+        );
+      }
       window.setTimeout(() => {
         setSaveMode(null);
-        navigate(`/projects/${encodeURIComponent(savedProject.id)}`);
+        if (mode === "project") {
+          navigate(`/projects/${encodeURIComponent(savedProject.id)}`);
+          return;
+        }
+        if (!isEditMode) {
+          navigate(`/projects/${encodeURIComponent(savedProject.id)}/edit`);
+        }
       }, 1500);
     } catch (error) {
       setSubmitError(
@@ -419,6 +547,7 @@ export const ProjectFormPage = () => {
                 value={status}
               >
                 <option disabled value="">Chagua hali</option>
+                <option>Draft</option>
                 <option>Active</option>
                 <option>Pending</option>
                 <option>Completed</option>
@@ -555,10 +684,39 @@ export const ProjectFormPage = () => {
             <p className="mt-1 text-xs text-slate-500">
               Pakia rasimu ya mkataba, BOQ, michoro ya ubunifu, nukuu.
             </p>
-            <button className="btn-secondary mt-4" type="button">
+            <input
+              className="hidden"
+              multiple
+              onChange={handleInitialDocumentsChange}
+              ref={initialDocsInputRef}
+              type="file"
+            />
+            <button className="btn-secondary mt-4" onClick={handlePickInitialDocuments} type="button">
               <Paperclip className="h-4 w-4" />
               Pakia Faili
             </button>
+            {initialDocuments.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {initialDocuments.map((file, index) => (
+                  <div
+                    className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                    key={`${file.name}-${file.lastModified}-${file.size}`}
+                  >
+                    <p className="truncate pr-3">
+                      {file.name}
+                      {file.size > 0 ? ` (${formatBytes(file.size)})` : ""}
+                    </p>
+                    <button
+                      className="text-red-600 hover:text-red-700"
+                      onClick={() => removeInitialDocument(index)}
+                      type="button"
+                    >
+                      Ondoa
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </SurfaceCard>

@@ -1,6 +1,6 @@
 import { Calendar, MapPin, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { EmptyState, ProgressBar, SectionTitle, SkeletonTable, SurfaceCard, GuiSelect } from "../components/ui";
 import { api, type ProjectApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
@@ -40,6 +40,7 @@ const toViewProject = (row: ProjectApiRecord): ViewProject => ({
 });
 
 export const ProjectsPage = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ViewProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -140,6 +141,7 @@ export const ProjectsPage = () => {
               value={statusFilter}
             >
               <option value="All">All</option>
+              <option value="Draft">Draft</option>
               <option value="Active">Active</option>
               <option value="Completed">Completed</option>
               <option value="On Hold">On Hold</option>
@@ -177,6 +179,7 @@ export const ProjectsPage = () => {
         <EmptyState
           actionLabel="Create First Project"
           description="No projects found. Start by registering your first engineering site."
+          onAction={() => navigate("/projects/new")}
           title="No projects found"
         />
       ) : (
@@ -290,4 +293,3 @@ export const ProjectsPage = () => {
     </div>
   );
 };
-

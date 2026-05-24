@@ -137,6 +137,26 @@ export const initializeDatabase = async (): Promise<void> => {
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS labor_budget NUMERIC(16, 2) NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS material_budget NUMERIC(16, 2) NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS operational_budget NUMERIC(16, 2) NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS expected_profit_margin_pct NUMERIC(6, 2) NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS payment_terms TEXT NOT NULL DEFAULT ''
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.expenses (
@@ -724,7 +744,7 @@ export const initializeDatabase = async (): Promise<void> => {
     `,
     [companyId],
   );
-  if (Number(usersCount.rows[0]?.count ?? 0) < 4) {
+  if (env.seedDemoData && Number(usersCount.rows[0]?.count ?? 0) < 4) {
     await db.query(
       `
       INSERT INTO engicost.users (company_id, full_name, email, phone, role, status, assigned_projects)
@@ -742,7 +762,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.suppliers WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (existingSuppliers.rowCount === 0) {
+  if (env.seedDemoData && existingSuppliers.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.suppliers (
@@ -761,7 +781,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.equipment_usage WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (existingEquipment.rowCount === 0) {
+  if (env.seedDemoData && existingEquipment.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.equipment_usage (
@@ -780,7 +800,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.petty_cash_transactions WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (existingPettyCash.rowCount === 0) {
+  if (env.seedDemoData && existingPettyCash.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.petty_cash_transactions (

@@ -279,7 +279,11 @@ router.post(
     }
 
     const isHourly = worker.payment_type === "Hourly";
-    const effectiveUnits = isHourly ? (parsed.hoursWorked ?? 0) : parsed.daysWorked;
+    const start = new Date(parsed.workStart);
+    const end = new Date(parsed.workEnd);
+    const computedDaysWorked =
+      Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const effectiveUnits = isHourly ? (parsed.hoursWorked ?? 0) : computedDaysWorked;
 
     if (effectiveUnits <= 0) {
       res.status(400).json({
@@ -384,7 +388,7 @@ router.post(
           parsed.workerId,
           parsed.workStart,
           parsed.workEnd,
-          parsed.daysWorked,
+          computedDaysWorked,
           parsed.rateAmount,
           totalPayable,
           parsed.amountPaid,

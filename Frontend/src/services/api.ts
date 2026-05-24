@@ -56,6 +56,11 @@ export interface ProjectApiRecord {
   status: string;
   progress: number;
   pendingClientPayments: number;
+  laborBudget: number;
+  materialBudget: number;
+  operationalBudget: number;
+  expectedProfitMarginPct: number;
+  paymentTerms: string;
   description: string;
   notes: string;
   createdAt: string;
@@ -121,6 +126,11 @@ export interface CreateProjectPayload {
   status: string;
   progress: number;
   pendingClientPayments: number;
+  laborBudget: number;
+  materialBudget: number;
+  operationalBudget: number;
+  expectedProfitMarginPct: number;
+  paymentTerms: string;
   description: string;
   notes: string;
 }

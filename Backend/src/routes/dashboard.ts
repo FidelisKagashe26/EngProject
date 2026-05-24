@@ -10,7 +10,7 @@ router.get(
   handleAsync(async (_req, res) => {
     const companyId = await getSingleTenantCompanyId();
 
-    const [summaryResult, statusResult, projectsResult, alertsResult, activitiesResult] =
+    const [summaryResult, monthlyFinanceResult, statusResult, projectsResult, alertsResult, activitiesResult] =
       await Promise.all([
         db.query<{
           total_projects: string;
@@ -34,6 +34,84 @@ router.get(
             COUNT(*) FILTER (WHERE status = 'Over Budget' OR total_spent > contract_value)::text AS over_budget_projects
           FROM engicost.projects
           WHERE company_id = $1
+          `,
+          [companyId],
+        ),
+        db.query<{
+          month_label: string;
+          income: string;
+          expenses: string;
+        }>(
+          `
+          WITH months AS (
+            SELECT
+              DATE_TRUNC('month', CURRENT_DATE) - (INTERVAL '1 month' * month_offset) AS month_start
+            FROM generate_series(11, 0, -1) AS month_offset
+          ),
+          income_by_month AS (
+            SELECT
+              DATE_TRUNC('month', cp.payment_date) AS month_start,
+              COALESCE(SUM(cp.amount_received), 0) AS income
+            FROM engicost.client_payments cp
+            WHERE cp.company_id = $1
+              AND cp.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND cp.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+            GROUP BY DATE_TRUNC('month', cp.payment_date)
+          ),
+          expense_entries AS (
+            SELECT DATE_TRUNC('month', e.expense_date) AS month_start, e.amount AS amount
+            FROM engicost.expenses e
+            WHERE e.company_id = $1
+              AND e.expense_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND e.expense_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+            UNION ALL
+
+            SELECT DATE_TRUNC('month', mp.purchase_date) AS month_start, mp.total_cost AS amount
+            FROM engicost.material_purchases mp
+            WHERE mp.company_id = $1
+              AND mp.purchase_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND mp.purchase_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+            UNION ALL
+
+            SELECT DATE_TRUNC('month', lp.work_end) AS month_start, lp.amount_paid AS amount
+            FROM engicost.labor_payments lp
+            WHERE lp.company_id = $1
+              AND lp.work_end >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND lp.work_end < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+            UNION ALL
+
+            SELECT DATE_TRUNC('month', eu.end_date) AS month_start, eu.total_cost AS amount
+            FROM engicost.equipment_usage eu
+            WHERE eu.company_id = $1
+              AND eu.end_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND eu.end_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+            UNION ALL
+
+            SELECT
+              DATE_TRUNC('month', pc.transaction_date) AS month_start,
+              CASE WHEN pc.transaction_type = 'Cash Out' THEN pc.amount ELSE 0 END AS amount
+            FROM engicost.petty_cash_transactions pc
+            WHERE pc.company_id = $1
+              AND pc.transaction_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+              AND pc.transaction_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ),
+          expenses_by_month AS (
+            SELECT month_start, COALESCE(SUM(amount), 0) AS expenses
+            FROM expense_entries
+            GROUP BY month_start
+          )
+          SELECT
+            TO_CHAR(months.month_start, 'Mon') AS month_label,
+            COALESCE(ibm.income, 0)::text AS income,
+            COALESCE(ebm.expenses, 0)::text AS expenses
+          FROM months
+          LEFT JOIN income_by_month ibm ON ibm.month_start = months.month_start
+          LEFT JOIN expenses_by_month ebm ON ebm.month_start = months.month_start
+          ORDER BY months.month_start ASC
           `,
           [companyId],
         ),
@@ -122,14 +200,11 @@ router.get(
         pendingClientPayments: Number(summary?.pending_client_payments ?? 0),
         overBudgetProjects: Number(summary?.over_budget_projects ?? 0),
       },
-      monthlyFinance: [
-        { month: "Jan", income: 36_000_000, expenses: 24_500_000 },
-        { month: "Feb", income: 45_000_000, expenses: 29_300_000 },
-        { month: "Mar", income: 29_000_000, expenses: 31_000_000 },
-        { month: "Apr", income: 40_000_000, expenses: 27_500_000 },
-        { month: "May", income: 33_000_000, expenses: 22_000_000 },
-        { month: "Jun", income: 27_000_000, expenses: 22_100_000 },
-      ],
+      monthlyFinance: monthlyFinanceResult.rows.map((row) => ({
+        month: row.month_label,
+        income: Number(row.income),
+        expenses: Number(row.expenses),
+      })),
       statusBreakdown: statusResult.rows.map((row) => ({
         label: row.status,
         value: Number(row.count),

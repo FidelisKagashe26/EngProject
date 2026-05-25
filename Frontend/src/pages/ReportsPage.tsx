@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { IncomeExpenseChart, StackedCostBar } from "../components/charts";
+import { IncomeExpenseChart } from "../components/charts";
 import {
   EmptyState,
   GuiSelect,
@@ -16,34 +16,47 @@ import {
   type ReportProjectCostRow,
   type ReportsResponse,
 } from "../services/api";
-import { formatTzs } from "../utils/format";
+import { formatDate, formatTzs } from "../utils/format";
 
-type ReportTab =
-  | "Project Cost Summary"
-  | "Labor Report"
-  | "Material Report"
-  | "Expense Report"
-  | "Payment Report"
-  | "Budget Variance";
+type ReportCategory =
+  | "project-cost-summary"
+  | "income-expense"
+  | "payments"
+  | "labor"
+  | "materials"
+  | "expenses-by-category";
 
-const TABS: ReportTab[] = [
-  "Project Cost Summary",
-  "Labor Report",
-  "Material Report",
-  "Expense Report",
-  "Payment Report",
-  "Budget Variance",
-];
-
-const PDF_REPORT_OPTIONS: Array<{ value: PdfReportType; label: string }> = [
-  { value: "comprehensive", label: "Comprehensive Financial Report" },
-  { value: "project-cost-summary", label: "Project Cost Summary" },
-  { value: "income-expense", label: "Income vs Expense Statement" },
-  { value: "payments", label: "Payment Collection Report" },
-  { value: "labor", label: "Labor Cost Report" },
-  { value: "materials", label: "Material Cost Report" },
-  { value: "expenses-by-category", label: "Expense by Category Report" },
-  { value: "budget-variance", label: "Budget Variance Report" },
+const REPORT_CATEGORIES: Array<{ value: ReportCategory; label: string; help: string }> = [
+  {
+    value: "project-cost-summary",
+    label: "Project Summary",
+    help: "Snapshot of contract value, receipts, spending, profit/loss, and status per project.",
+  },
+  {
+    value: "income-expense",
+    label: "Income vs Expense",
+    help: "Shows incoming funds versus spending for each project.",
+  },
+  {
+    value: "payments",
+    label: "Client Payments",
+    help: "Tracks expected amount, received amount, and outstanding balance.",
+  },
+  {
+    value: "labor",
+    label: "Labor Cost",
+    help: "Detailed labour payments by worker, payment type, rate, paid, and outstanding amounts.",
+  },
+  {
+    value: "materials",
+    label: "Material Cost",
+    help: "Detailed material purchases including quantity, unit cost, and total cost.",
+  },
+  {
+    value: "expenses-by-category",
+    label: "Expense Categories",
+    help: "Breakdown of expenses by project and category to identify top cost drivers.",
+  },
 ];
 
 const BudgetBar = ({ spent, total }: { spent: number; total: number }) => {
@@ -63,10 +76,9 @@ const BudgetBar = ({ spent, total }: { spent: number; total: number }) => {
 export const ReportsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<ReportTab>("Project Cost Summary");
   const [projectFilter, setProjectFilter] = useState("All");
-  const [pdfReportType, setPdfReportType] = useState<PdfReportType>("comprehensive");
-  const [pdfCategory, setPdfCategory] = useState("All");
+  const [selectedCategory, setSelectedCategory] = useState<ReportCategory>("project-cost-summary");
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All");
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
   const [pdfDownloadMessage, setPdfDownloadMessage] = useState("");
@@ -96,13 +108,15 @@ export const ReportsPage = () => {
       }
     };
     void load();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const filteredProjectCost = useMemo<ReportProjectCostRow[]>(() => {
     if (!data) return [];
     if (projectFilter === "All") return data.projectCostSummary;
-    return data.projectCostSummary.filter((r) => r.id === projectFilter);
+    return data.projectCostSummary.filter((row) => row.id === projectFilter);
   }, [data, projectFilter]);
 
   const selectedProjectName = useMemo(() => {
@@ -112,16 +126,16 @@ export const ReportsPage = () => {
 
   const filteredLabor = useMemo(() => {
     if (!data) return [];
-    if (projectFilter === "All") return data.laborByProject;
-    return data.laborByProject.filter(
+    if (projectFilter === "All") return data.laborDetails;
+    return data.laborDetails.filter(
       (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
     );
   }, [data, projectFilter, selectedProjectName]);
 
   const filteredMaterial = useMemo(() => {
     if (!data) return [];
-    if (projectFilter === "All") return data.materialByProject;
-    return data.materialByProject.filter(
+    if (projectFilter === "All") return data.materialPurchaseDetails;
+    return data.materialPurchaseDetails.filter(
       (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
     );
   }, [data, projectFilter, selectedProjectName]);
@@ -142,37 +156,112 @@ export const ReportsPage = () => {
     );
   }, [data, projectFilter, selectedProjectName]);
 
-  const filteredBudgetVariance = useMemo(() => {
+  const scopedExpenseCategoryRows = useMemo(() => {
     if (!data) return [];
-    if (projectFilter === "All") return data.budgetVariance;
-    return data.budgetVariance.filter((row) => row.projectName === selectedProjectName);
-  }, [data, projectFilter, selectedProjectName]);
+    let rows = data.expenseByCategoryByProject;
+    if (projectFilter !== "All") {
+      rows = rows.filter(
+        (row) => row.projectId === projectFilter || row.projectName === selectedProjectName,
+      );
+    }
+    if (expenseCategoryFilter !== "All") {
+      rows = rows.filter((row) => row.category === expenseCategoryFilter);
+    }
+    return rows;
+  }, [data, expenseCategoryFilter, projectFilter, selectedProjectName]);
 
-  const costPagination = useTablePagination(filteredProjectCost);
-  const laborPagination = useTablePagination(filteredLabor);
-  const materialPagination = useTablePagination(filteredMaterial);
-  const expensePagination = useTablePagination(filteredExpenseByProject);
-  const paymentPagination = useTablePagination(filteredPayments);
-  const variancePagination = useTablePagination(filteredBudgetVariance);
+  const categorySummaryRows = useMemo(() => {
+    const grouped = scopedExpenseCategoryRows.reduce<Record<string, { count: number; total: number }>>(
+      (acc, row) => {
+        const key = row.category;
+        const current = acc[key] ?? { count: 0, total: 0 };
+        current.count += row.count;
+        current.total += row.total;
+        acc[key] = current;
+        return acc;
+      },
+      {},
+    );
 
-  // Monthly expense trend formatted for chart
+    return Object.entries(grouped)
+      .map(([category, summary]) => ({
+        category,
+        count: summary.count,
+        total: summary.total,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [scopedExpenseCategoryRows]);
+
+  const incomeStatementRows = useMemo(
+    () =>
+      filteredProjectCost.map((row) => {
+        const marginPct = row.amountReceived > 0
+          ? (row.estimatedProfitLoss / row.amountReceived) * 100
+          : 0;
+        return {
+          id: row.id,
+          projectName: row.projectName,
+          income: row.amountReceived,
+          expenses: row.totalSpent,
+          net: row.estimatedProfitLoss,
+          marginPct,
+        };
+      }),
+    [filteredProjectCost],
+  );
+
+  const scopeTotals = useMemo(
+    () =>
+      filteredProjectCost.reduce(
+        (acc, row) => {
+          acc.contractValue += row.contractValue;
+          acc.amountReceived += row.amountReceived;
+          acc.totalSpent += row.totalSpent;
+          acc.estimatedProfitLoss += row.estimatedProfitLoss;
+          acc.pendingClientPayments += row.pendingClientPayments;
+          return acc;
+        },
+        {
+          contractValue: 0,
+          amountReceived: 0,
+          totalSpent: 0,
+          estimatedProfitLoss: 0,
+          pendingClientPayments: 0,
+        },
+      ),
+    [filteredProjectCost],
+  );
+
   const monthlyChartData = useMemo(() => {
     if (!data) return [];
-    return data.monthlyExpenseTrend.map((r) => ({
-      month: r.month.split(" ")[0],
+    return data.monthlyExpenseTrend.map((row) => ({
+      month: row.month.split(" ")[0],
       income: 0,
-      expenses: r.total,
+      expenses: row.total,
     }));
   }, [data]);
 
-  const totals = data?.totals;
   const expenseCategoryOptions = useMemo(
     () =>
-      Array.from(new Set((data?.expenseByCategory ?? []).map((row) => row.category))).sort((a, b) =>
-        a.localeCompare(b),
+      Array.from(new Set((data?.expenseByCategoryByProject ?? []).map((row) => row.category))).sort(
+        (a, b) => a.localeCompare(b),
       ),
     [data],
   );
+
+  const selectedCategoryInfo = useMemo(
+    () =>
+      REPORT_CATEGORIES.find((item) => item.value === selectedCategory) ?? REPORT_CATEGORIES[0],
+    [selectedCategory],
+  );
+
+  const overviewPagination = useTablePagination(filteredProjectCost);
+  const incomePagination = useTablePagination(incomeStatementRows);
+  const laborPagination = useTablePagination(filteredLabor);
+  const materialPagination = useTablePagination(filteredMaterial);
+  const expenseProjectPagination = useTablePagination(filteredExpenseByProject);
+  const paymentPagination = useTablePagination(filteredPayments);
+  const expenseCategoryPagination = useTablePagination(categorySummaryRows);
 
   const handleDownloadPdf = async () => {
     if (pdfFromDate && pdfToDate && pdfFromDate > pdfToDate) {
@@ -184,11 +273,16 @@ export const ReportsPage = () => {
     setDownloadingPdf(true);
     setPdfDownloadError(false);
     setPdfDownloadMessage("");
+
     try {
+      const reportType: PdfReportType = selectedCategory;
       const { blob, filename } = await api.downloadReportPdf({
-        reportType: pdfReportType,
+        reportType,
         projectId: projectFilter === "All" ? undefined : projectFilter,
-        category: pdfCategory === "All" ? undefined : pdfCategory,
+        category:
+          selectedCategory === "expenses-by-category" && expenseCategoryFilter !== "All"
+            ? expenseCategoryFilter
+            : undefined,
         fromDate: pdfFromDate || undefined,
         toDate: pdfToDate || undefined,
       });
@@ -201,6 +295,7 @@ export const ReportsPage = () => {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(blobUrl);
+
       setPdfDownloadError(false);
       setPdfDownloadMessage(`PDF downloaded: ${filename}`);
     } catch (downloadError) {
@@ -218,185 +313,113 @@ export const ReportsPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Choose report type and analyze project costs, cash movement, and budget variance."
+        subtitle="Choose a report category, apply filters, and export a standard PDF."
         title="Reports"
       />
 
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SurfaceCard title="Total Contract Value">
-          <p className="text-2xl font-bold text-[#0b2a53]">
-            {formatTzs(totals?.contractValue ?? 0)}
-          </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <SurfaceCard title="Contract Value">
+          <p className="text-2xl font-bold text-[#0b2a53]">{formatTzs(scopeTotals.contractValue)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Total Amount Received">
-          <p className="text-2xl font-bold text-emerald-700">
-            {formatTzs(totals?.amountReceived ?? 0)}
-          </p>
+        <SurfaceCard title="Amount Received">
+          <p className="text-2xl font-bold text-emerald-700">{formatTzs(scopeTotals.amountReceived)}</p>
         </SurfaceCard>
         <SurfaceCard title="Total Spent">
-          <p className="text-2xl font-bold text-amber-700">
-            {formatTzs(totals?.totalSpent ?? 0)}
+          <p className="text-2xl font-bold text-amber-700">{formatTzs(scopeTotals.totalSpent)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Profit / Loss">
+          <p
+            className={`text-2xl font-bold ${
+              scopeTotals.estimatedProfitLoss >= 0 ? "text-emerald-700" : "text-red-700"
+            }`}
+          >
+            {formatTzs(scopeTotals.estimatedProfitLoss)}
           </p>
         </SurfaceCard>
-        <SurfaceCard title="Estimated Profit / Loss">
-          <p className={`text-2xl font-bold ${(totals?.estimatedProfitLoss ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-            {formatTzs(totals?.estimatedProfitLoss ?? 0)}
-          </p>
+        <SurfaceCard title="Pending Client Payments">
+          <p className="text-2xl font-bold text-slate-900">{formatTzs(scopeTotals.pendingClientPayments)}</p>
         </SurfaceCard>
       </div>
-
-      {/* Cost Breakdown Bar + Expense by Category */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <SurfaceCard title="Overall Cost Breakdown">
-          {totals ? (
-            <div className="space-y-4">
-              <StackedCostBar
-                labor={totals.laborCost}
-                material={totals.materialCost}
-                operations={totals.otherExpenses}
-              />
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 text-sm">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Labor</p>
-                  <p className="mt-1 font-bold text-[#0b2a53]">{formatTzs(totals.laborCost)}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Materials</p>
-                  <p className="mt-1 font-bold text-[#f28c28]">{formatTzs(totals.materialCost)}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Operations</p>
-                  <p className="mt-1 font-bold text-emerald-700">{formatTzs(totals.otherExpenses)}</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">Loading...</p>
-          )}
-        </SurfaceCard>
-
-        <SurfaceCard title="Top Expense Categories">
-          {loading ? (
-            <SkeletonTable rows={4} />
-          ) : (data?.expenseByCategory ?? []).length === 0 ? (
-            <EmptyState description="No expense data yet." title="No data" />
-          ) : (
-            <ul className="space-y-3">
-              {(data?.expenseByCategory ?? []).slice(0, 6).map((item) => {
-                const maxCat = Math.max(...(data?.expenseByCategory ?? []).map((c) => c.total), 1);
-                const pct = Math.round((item.total / maxCat) * 100);
-                return (
-                  <li key={item.category}>
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span className="font-medium text-slate-700">{item.category}</span>
-                      <span className="text-slate-500">{formatTzs(item.total)}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-[#f28c28]" style={{ width: `${pct}%` }} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </SurfaceCard>
-      </div>
-
-      {/* Monthly Expense Trend */}
-      {monthlyChartData.length > 0 && (
-        <SurfaceCard title="Monthly Expense Trend">
-          <IncomeExpenseChart data={monthlyChartData} />
-        </SurfaceCard>
-      )}
 
       <SurfaceCard
-        subtitle="Choose scope and report type, then generate downloadable PDF reports for all projects or a single project."
+        subtitle="The selected category controls both on-screen data and the downloaded PDF."
         title="Report Controls"
       >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label className="form-field">
-            <span className="text-sm">Filter by Project</span>
+            <span className="text-sm">Project / Site</span>
             <GuiSelect
               className="input-field"
-              onChange={(e) => setProjectFilter(e.target.value)}
+              onChange={(event) => setProjectFilter(event.target.value)}
               value={projectFilter}
             >
               <option value="All">All Projects</option>
-              {projects.map((p) => (
-                <option key={`rp-${p.id}`} value={p.id}>
-                  {p.name}
+              {projects.map((project) => (
+                <option key={`rp-${project.id}`} value={project.id}>
+                  {project.name}
                 </option>
               ))}
             </GuiSelect>
           </label>
 
           <label className="form-field">
-            <span className="text-sm">On-screen Report View</span>
+            <span className="text-sm">Report Category</span>
             <GuiSelect
               className="input-field"
-              onChange={(event) => setActiveTab(event.target.value as ReportTab)}
-              value={activeTab}
+              onChange={(event) => setSelectedCategory(event.target.value as ReportCategory)}
+              value={selectedCategory}
             >
-              {TABS.map((tab) => (
-                <option key={`report-type-${tab}`} value={tab}>
-                  {tab}
+              {REPORT_CATEGORIES.map((category) => (
+                <option key={`rc-${category.value}`} value={category.value}>
+                  {category.label}
                 </option>
               ))}
             </GuiSelect>
           </label>
 
-          <label className="form-field">
-            <span className="text-sm">PDF Report Type</span>
-            <GuiSelect
-              className="input-field"
-              onChange={(event) => setPdfReportType(event.target.value as PdfReportType)}
-              value={pdfReportType}
-            >
-              {PDF_REPORT_OPTIONS.map((option) => (
-                <option key={`pdf-report-${option.value}`} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </GuiSelect>
-          </label>
+          {selectedCategory === "expenses-by-category" ? (
+            <label className="form-field">
+              <span className="text-sm">Expense Category (Optional)</span>
+              <GuiSelect
+                className="input-field"
+                onChange={(event) => setExpenseCategoryFilter(event.target.value)}
+                value={expenseCategoryFilter}
+              >
+                <option value="All">All Categories</option>
+                {expenseCategoryOptions.map((category) => (
+                  <option key={`expense-category-${category}`} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </GuiSelect>
+            </label>
+          ) : (
+            <div />
+          )}
 
-          <label className="form-field">
-            <span className="text-sm">Specific Category (Optional)</span>
-            <GuiSelect
-              className="input-field"
-              onChange={(event) => setPdfCategory(event.target.value)}
-              value={pdfCategory}
-            >
-              <option value="All">All Categories</option>
-              {expenseCategoryOptions.map((category) => (
-                <option key={`pdf-category-${category}`} value={category}>
-                  {category}
-                </option>
-              ))}
-            </GuiSelect>
-          </label>
-
-          <label className="form-field">
-            <span className="text-sm">From Date (Optional)</span>
-            <input
-              className="input-field"
-              onChange={(event) => setPdfFromDate(event.target.value)}
-              type="date"
-              value={pdfFromDate}
-            />
-          </label>
-
-          <label className="form-field">
-            <span className="text-sm">To Date (Optional)</span>
-            <input
-              className="input-field"
-              onChange={(event) => setPdfToDate(event.target.value)}
-              type="date"
-              value={pdfToDate}
-            />
-          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="form-field">
+              <span className="text-sm">From Date</span>
+              <input
+                className="input-field"
+                onChange={(event) => setPdfFromDate(event.target.value)}
+                type="date"
+                value={pdfFromDate}
+              />
+            </label>
+            <label className="form-field">
+              <span className="text-sm">To Date</span>
+              <input
+                className="input-field"
+                onChange={(event) => setPdfToDate(event.target.value)}
+                type="date"
+                value={pdfToDate}
+              />
+            </label>
+          </div>
         </div>
+
+        <p className="mt-3 text-xs text-slate-600">{selectedCategoryInfo.help}</p>
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <button
@@ -405,7 +428,7 @@ export const ReportsPage = () => {
             onClick={() => void handleDownloadPdf()}
             type="button"
           >
-            {downloadingPdf ? "Generating PDF..." : "Download PDF Report"}
+            {downloadingPdf ? "Generating PDF..." : "Download Standard PDF"}
           </button>
           {pdfDownloadMessage && (
             <p className={`text-xs ${pdfDownloadError ? "text-red-700" : "text-emerald-700"}`}>
@@ -415,16 +438,14 @@ export const ReportsPage = () => {
         </div>
       </SurfaceCard>
 
-      {/* Report Tables */}
       {error && (
         <SurfaceCard>
           <p className="text-sm text-red-700">{error}</p>
         </SurfaceCard>
       )}
 
-      {/* PROJECT COST SUMMARY */}
-      {activeTab === "Project Cost Summary" && (
-        <SurfaceCard title="Project Cost Summary Report">
+      {selectedCategory === "project-cost-summary" && (
+        <SurfaceCard title="Project Summary Report">
           {loading ? (
             <SkeletonTable rows={4} />
           ) : filteredProjectCost.length === 0 ? (
@@ -432,274 +453,132 @@ export const ReportsPage = () => {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="data-table min-w-[1300px]">
+                <table className="data-table min-w-[980px]">
                   <thead>
                     <tr>
                       <th>S/N</th>
                       <th>Project</th>
                       <th>Contract Value</th>
                       <th>Amount Received</th>
-                      <th>Labor Cost</th>
-                      <th>Material Cost</th>
-                      <th>Other Expenses</th>
                       <th>Total Spent</th>
-                      <th>Remaining Balance</th>
                       <th>Profit / Loss</th>
-                      <th>Budget Used</th>
+                      <th>Pending Client Payment</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {costPagination.paginatedRows.map((row, index) => (
+                    {overviewPagination.paginatedRows.map((row, index) => (
                       <tr key={row.id}>
-                        <td>{costPagination.startIndex + index + 1}</td>
+                        <td>{overviewPagination.startIndex + index + 1}</td>
                         <td className="font-medium text-slate-900">{row.projectName}</td>
                         <td>{formatTzs(row.contractValue)}</td>
                         <td>{formatTzs(row.amountReceived)}</td>
-                        <td>{formatTzs(row.laborCost)}</td>
-                        <td>{formatTzs(row.materialCost)}</td>
-                        <td>{formatTzs(row.otherExpenses)}</td>
-                        <td className="font-medium">{formatTzs(row.totalSpent)}</td>
-                        <td className={row.remainingBalance >= 0 ? "text-emerald-700" : "text-red-700"}>
-                          {formatTzs(row.remainingBalance)}
-                        </td>
-                        <td className={row.estimatedProfitLoss >= 0 ? "text-emerald-700 font-medium" : "text-red-700 font-medium"}>
+                        <td>{formatTzs(row.totalSpent)}</td>
+                        <td className={row.estimatedProfitLoss >= 0 ? "text-emerald-700" : "text-red-700"}>
                           {formatTzs(row.estimatedProfitLoss)}
                         </td>
-                        <td className="min-w-[120px]">
-                          <BudgetBar spent={row.totalSpent} total={row.contractValue} />
+                        <td className={row.pendingClientPayments > 0 ? "text-amber-700" : "text-emerald-700"}>
+                          {formatTzs(row.pendingClientPayments)}
                         </td>
                         <td>
-                          <span className={
-                            row.status === "Active"
-                              ? "text-sm font-medium text-emerald-700"
-                              : row.status === "Completed"
-                                ? "text-sm font-medium text-blue-700"
-                                : row.status === "On Hold"
-                                  ? "text-sm font-medium text-amber-700"
-                                  : "text-sm font-medium text-red-600"
-                          }>
+                          <span
+                            className={
+                              row.status === "Active"
+                                ? "text-sm font-medium text-emerald-700"
+                                : row.status === "Completed"
+                                  ? "text-sm font-medium text-blue-700"
+                                  : row.status === "On Hold"
+                                    ? "text-sm font-medium text-amber-700"
+                                    : "text-sm font-medium text-red-600"
+                            }
+                          >
                             {row.status}
                           </span>
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                  {/* Totals row */}
-                  {totals && filteredProjectCost.length > 1 && (
-                    <tfoot>
-                      <tr className="bg-slate-50 font-semibold text-slate-900">
-                        <td colSpan={2} className="px-3 py-3 text-xs uppercase tracking-wider">Totals</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.contractValue, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.amountReceived, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.laborCost, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.materialCost, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.otherExpenses, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.totalSpent, 0))}</td>
-                        <td className="px-3 py-3 text-emerald-700">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.remainingBalance, 0))}</td>
-                        <td className="px-3 py-3">{formatTzs(filteredProjectCost.reduce((s, r) => s + r.estimatedProfitLoss, 0))}</td>
-                        <td colSpan={2} />
-                      </tr>
-                    </tfoot>
-                  )}
                 </table>
               </div>
               <TablePagination
-                endIndex={costPagination.endIndex}
+                endIndex={overviewPagination.endIndex}
                 itemLabel="projects"
-                onPageChange={costPagination.setPage}
-                onPageSizeChange={costPagination.setPageSize}
-                page={costPagination.page}
-                pageSize={costPagination.pageSize}
-                startIndex={costPagination.startIndex}
-                totalCount={costPagination.totalCount}
-                totalPages={costPagination.totalPages}
+                onPageChange={overviewPagination.setPage}
+                onPageSizeChange={overviewPagination.setPageSize}
+                page={overviewPagination.page}
+                pageSize={overviewPagination.pageSize}
+                startIndex={overviewPagination.startIndex}
+                totalCount={overviewPagination.totalCount}
+                totalPages={overviewPagination.totalPages}
               />
             </>
           )}
         </SurfaceCard>
       )}
 
-      {/* LABOR REPORT */}
-      {activeTab === "Labor Report" && (
-        <SurfaceCard title="Labor Payment Report">
-          {loading ? (
-            <SkeletonTable rows={4} />
-          ) : filteredLabor.length === 0 ? (
-            <EmptyState description="No labor data available." title="No data" />
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="data-table min-w-[700px]">
-                  <thead>
-                    <tr>
-                      <th>S/N</th>
-                      <th>Project / Site</th>
-                      <th>Workers</th>
-                      <th>Total Paid</th>
-                      <th>Outstanding</th>
-                      <th>Total Labor Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {laborPagination.paginatedRows.map((row, index) => (
-                      <tr key={`labor-${index}`}>
-                        <td>{laborPagination.startIndex + index + 1}</td>
-                        <td className="font-medium text-slate-900">{row.projectName}</td>
-                        <td>{row.workerCount}</td>
-                        <td className="text-emerald-700">{formatTzs(row.totalPaid)}</td>
-                        <td className={row.outstanding > 0 ? "text-amber-700" : "text-emerald-700"}>
-                          {formatTzs(row.outstanding)}
-                        </td>
-                        <td className="font-medium">{formatTzs(row.totalPaid + row.outstanding)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination
-                endIndex={laborPagination.endIndex}
-                itemLabel="projects"
-                onPageChange={laborPagination.setPage}
-                onPageSizeChange={laborPagination.setPageSize}
-                page={laborPagination.page}
-                pageSize={laborPagination.pageSize}
-                startIndex={laborPagination.startIndex}
-                totalCount={laborPagination.totalCount}
-                totalPages={laborPagination.totalPages}
-              />
-            </>
-          )}
-        </SurfaceCard>
-      )}
-
-      {/* MATERIAL REPORT */}
-      {activeTab === "Material Report" && (
-        <SurfaceCard title="Material Purchase Report">
-          {loading ? (
-            <SkeletonTable rows={4} />
-          ) : filteredMaterial.length === 0 ? (
-            <EmptyState description="No material data available." title="No data" />
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="data-table min-w-[600px]">
-                  <thead>
-                    <tr>
-                      <th>S/N</th>
-                      <th>Project / Site</th>
-                      <th>Purchases</th>
-                      <th>Total Material Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materialPagination.paginatedRows.map((row, index) => (
-                      <tr key={`mat-${index}`}>
-                        <td>{materialPagination.startIndex + index + 1}</td>
-                        <td className="font-medium text-slate-900">{row.projectName}</td>
-                        <td>{row.purchaseCount}</td>
-                        <td className="font-medium text-amber-700">{formatTzs(row.totalCost)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination
-                endIndex={materialPagination.endIndex}
-                itemLabel="projects"
-                onPageChange={materialPagination.setPage}
-                onPageSizeChange={materialPagination.setPageSize}
-                page={materialPagination.page}
-                pageSize={materialPagination.pageSize}
-                startIndex={materialPagination.startIndex}
-                totalCount={materialPagination.totalCount}
-                totalPages={materialPagination.totalPages}
-              />
-            </>
-          )}
-        </SurfaceCard>
-      )}
-
-      {/* EXPENSE REPORT */}
-      {activeTab === "Expense Report" && (
+      {selectedCategory === "income-expense" && (
         <div className="space-y-4">
-          <SurfaceCard title="Expenses by Project">
+          {monthlyChartData.length > 0 && (
+            <SurfaceCard title="Monthly Expense Trend">
+              <IncomeExpenseChart data={monthlyChartData} />
+            </SurfaceCard>
+          )}
+
+          <SurfaceCard title="Income vs Expense Statement">
             {loading ? (
               <SkeletonTable rows={4} />
-            ) : filteredExpenseByProject.length === 0 ? (
-              <EmptyState description="No expense data available." title="No data" />
+            ) : incomeStatementRows.length === 0 ? (
+              <EmptyState description="No financial data available." title="No data" />
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="data-table min-w-[600px]">
+                  <table className="data-table min-w-[850px]">
                     <thead>
                       <tr>
                         <th>S/N</th>
-                        <th>Project / Site</th>
-                        <th>Entries</th>
-                        <th>Total Expenses</th>
+                        <th>Project</th>
+                        <th>Income</th>
+                        <th>Expenses</th>
+                        <th>Net</th>
+                        <th>Margin</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {expensePagination.paginatedRows.map((row, index) => (
-                        <tr key={`exp-${index}`}>
-                          <td>{expensePagination.startIndex + index + 1}</td>
+                      {incomePagination.paginatedRows.map((row, index) => (
+                        <tr key={`income-${row.id}`}>
+                          <td>{incomePagination.startIndex + index + 1}</td>
                           <td className="font-medium text-slate-900">{row.projectName}</td>
-                          <td>{row.expenseCount}</td>
-                          <td className="font-medium text-amber-700">{formatTzs(row.totalAmount)}</td>
+                          <td className="text-emerald-700">{formatTzs(row.income)}</td>
+                          <td className="text-amber-700">{formatTzs(row.expenses)}</td>
+                          <td className={row.net >= 0 ? "text-emerald-700 font-medium" : "text-red-700 font-medium"}>
+                            {formatTzs(row.net)}
+                          </td>
+                          <td className={row.marginPct >= 0 ? "text-emerald-700" : "text-red-700"}>
+                            {row.marginPct.toFixed(1)}%
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <TablePagination
-                  endIndex={expensePagination.endIndex}
+                  endIndex={incomePagination.endIndex}
                   itemLabel="projects"
-                  onPageChange={expensePagination.setPage}
-                  onPageSizeChange={expensePagination.setPageSize}
-                  page={expensePagination.page}
-                  pageSize={expensePagination.pageSize}
-                  startIndex={expensePagination.startIndex}
-                  totalCount={expensePagination.totalCount}
-                  totalPages={expensePagination.totalPages}
+                  onPageChange={incomePagination.setPage}
+                  onPageSizeChange={incomePagination.setPageSize}
+                  page={incomePagination.page}
+                  pageSize={incomePagination.pageSize}
+                  startIndex={incomePagination.startIndex}
+                  totalCount={incomePagination.totalCount}
+                  totalPages={incomePagination.totalPages}
                 />
               </>
-            )}
-          </SurfaceCard>
-
-          <SurfaceCard title="Expenses by Category">
-            {(data?.expenseByCategory ?? []).length === 0 ? (
-              <EmptyState description="No category data." title="No data" />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="data-table min-w-[400px]">
-                  <thead>
-                    <tr>
-                      <th>S/N</th>
-                      <th>Category</th>
-                      <th>Entries</th>
-                      <th>Total Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data?.expenseByCategory ?? []).map((row, index) => (
-                      <tr key={`cat-${row.category}`}>
-                        <td>{index + 1}</td>
-                        <td className="font-medium text-slate-900">{row.category}</td>
-                        <td>{row.count}</td>
-                        <td className="font-medium text-amber-700">{formatTzs(row.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             )}
           </SurfaceCard>
         </div>
       )}
 
-      {/* PAYMENT REPORT */}
-      {activeTab === "Payment Report" && (
+      {selectedCategory === "payments" && (
         <SurfaceCard title="Client Payment Report">
           {loading ? (
             <SkeletonTable rows={4} />
@@ -708,7 +587,7 @@ export const ReportsPage = () => {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="data-table min-w-[700px]">
+                <table className="data-table min-w-[760px]">
                   <thead>
                     <tr>
                       <th>S/N</th>
@@ -721,18 +600,18 @@ export const ReportsPage = () => {
                   </thead>
                   <tbody>
                     {paymentPagination.paginatedRows.map((row, index) => (
-                        <tr key={`pay-${index}`}>
-                          <td>{paymentPagination.startIndex + index + 1}</td>
-                          <td className="font-medium text-slate-900">{row.projectName}</td>
-                          <td>{formatTzs(row.totalExpected)}</td>
-                          <td className="text-emerald-700">{formatTzs(row.totalReceived)}</td>
-                          <td className={row.totalBalance > 0 ? "text-amber-700" : "text-emerald-700"}>
-                            {formatTzs(row.totalBalance)}
-                          </td>
-                          <td>
-                            <BudgetBar spent={row.totalReceived} total={row.totalExpected} />
-                          </td>
-                        </tr>
+                      <tr key={`pay-${index}`}>
+                        <td>{paymentPagination.startIndex + index + 1}</td>
+                        <td className="font-medium text-slate-900">{row.projectName}</td>
+                        <td>{formatTzs(row.totalExpected)}</td>
+                        <td className="text-emerald-700">{formatTzs(row.totalReceived)}</td>
+                        <td className={row.totalBalance > 0 ? "text-amber-700" : "text-emerald-700"}>
+                          {formatTzs(row.totalBalance)}
+                        </td>
+                        <td className="min-w-[140px]">
+                          <BudgetBar spent={row.totalReceived} total={row.totalExpected} />
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -753,79 +632,218 @@ export const ReportsPage = () => {
         </SurfaceCard>
       )}
 
-      {/* BUDGET VARIANCE */}
-      {activeTab === "Budget Variance" && (
-        <SurfaceCard title="Budget Variance Report">
+      {selectedCategory === "labor" && (
+        <SurfaceCard title="Labor Payment Report (Detailed)">
           {loading ? (
             <SkeletonTable rows={4} />
-          ) : filteredBudgetVariance.length === 0 ? (
-            <EmptyState description="No budget data available." title="No data" />
+          ) : filteredLabor.length === 0 ? (
+            <EmptyState description="No labor data available." title="No data" />
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="data-table min-w-[800px]">
+                <table className="data-table min-w-[980px]">
                   <thead>
                     <tr>
                       <th>S/N</th>
-                      <th>Project</th>
-                      <th>Contract Value</th>
-                      <th>Total Spent</th>
-                      <th>Variance</th>
-                      <th>Budget Used</th>
-                      <th>Health</th>
+                      <th>Worker</th>
+                      <th>Project / Site</th>
+                      <th>Payment Type</th>
+                      <th>Rate</th>
+                      <th>Total Paid</th>
+                      <th>Outstanding</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {variancePagination.paginatedRows.map((row, index) => {
-                      const health =
-                        row.variancePct >= 90
-                          ? "Critical"
-                          : row.variancePct >= 70
-                            ? "Warning"
-                            : "Healthy";
-                      return (
-                        <tr key={`var-${index}`}>
-                          <td>{variancePagination.startIndex + index + 1}</td>
-                          <td className="font-medium text-slate-900">{row.projectName}</td>
-                          <td>{formatTzs(row.contractValue)}</td>
-                          <td>{formatTzs(row.totalSpent)}</td>
-                          <td className={row.variance >= 0 ? "text-emerald-700 font-medium" : "text-red-700 font-medium"}>
-                            {formatTzs(row.variance)}
-                          </td>
-                          <td className="min-w-[140px]">
-                            <BudgetBar spent={row.totalSpent} total={row.contractValue} />
-                          </td>
-                          <td>
-                            <span className={
-                              health === "Critical"
-                                ? "text-sm font-medium text-red-600"
-                                : health === "Warning"
-                                  ? "text-sm font-medium text-amber-700"
-                                  : "text-sm font-medium text-emerald-700"
-                            }>
-                              {health}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {laborPagination.paginatedRows.map((row, index) => (
+                      <tr key={`labor-${row.workerId}`}>
+                        <td>{laborPagination.startIndex + index + 1}</td>
+                        <td className="font-medium text-slate-900">{row.workerName}</td>
+                        <td className="font-medium text-slate-900">{row.projectName}</td>
+                        <td>{row.paymentType}</td>
+                        <td>{formatTzs(row.rateAmount)}</td>
+                        <td className="text-emerald-700">{formatTzs(row.totalPaid)}</td>
+                        <td className={row.outstandingAmount > 0 ? "text-amber-700" : "text-emerald-700"}>
+                          {formatTzs(row.outstandingAmount)}
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              row.status === "Active"
+                                ? "text-sm font-medium text-emerald-700"
+                                : row.status === "Inactive"
+                                  ? "text-sm font-medium text-red-600"
+                                  : "text-sm font-medium text-slate-700"
+                            }
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
               <TablePagination
-                endIndex={variancePagination.endIndex}
-                itemLabel="projects"
-                onPageChange={variancePagination.setPage}
-                onPageSizeChange={variancePagination.setPageSize}
-                page={variancePagination.page}
-                pageSize={variancePagination.pageSize}
-                startIndex={variancePagination.startIndex}
-                totalCount={variancePagination.totalCount}
-                totalPages={variancePagination.totalPages}
+                endIndex={laborPagination.endIndex}
+                itemLabel="workers"
+                onPageChange={laborPagination.setPage}
+                onPageSizeChange={laborPagination.setPageSize}
+                page={laborPagination.page}
+                pageSize={laborPagination.pageSize}
+                startIndex={laborPagination.startIndex}
+                totalCount={laborPagination.totalCount}
+                totalPages={laborPagination.totalPages}
               />
             </>
           )}
         </SurfaceCard>
+      )}
+
+      {selectedCategory === "materials" && (
+        <SurfaceCard title="Material Purchase Report (Detailed)">
+          {loading ? (
+            <SkeletonTable rows={4} />
+          ) : filteredMaterial.length === 0 ? (
+            <EmptyState description="No material data available." title="No data" />
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="data-table min-w-[1120px]">
+                  <thead>
+                    <tr>
+                      <th>S/N</th>
+                      <th>Date</th>
+                      <th>Project / Site</th>
+                      <th>Material</th>
+                      <th>Supplier</th>
+                      <th>Qty Purchased</th>
+                      <th>Unit Cost</th>
+                      <th>Total Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materialPagination.paginatedRows.map((row, index) => (
+                      <tr key={`material-${row.purchaseId}`}>
+                        <td>{materialPagination.startIndex + index + 1}</td>
+                        <td>{formatDate(row.purchaseDate)}</td>
+                        <td className="font-medium text-slate-900">{row.projectName}</td>
+                        <td>{row.materialName}</td>
+                        <td>{row.supplierName}</td>
+                        <td>{row.quantityPurchased.toLocaleString("en-TZ")}</td>
+                        <td>{formatTzs(row.unitCost)}</td>
+                        <td className="font-medium text-amber-700">{formatTzs(row.totalCost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <TablePagination
+                endIndex={materialPagination.endIndex}
+                itemLabel="purchases"
+                onPageChange={materialPagination.setPage}
+                onPageSizeChange={materialPagination.setPageSize}
+                page={materialPagination.page}
+                pageSize={materialPagination.pageSize}
+                startIndex={materialPagination.startIndex}
+                totalCount={materialPagination.totalCount}
+                totalPages={materialPagination.totalPages}
+              />
+            </>
+          )}
+        </SurfaceCard>
+      )}
+
+      {selectedCategory === "expenses-by-category" && (
+        <div className="space-y-4">
+          <SurfaceCard title="Expenses by Project">
+            {loading ? (
+              <SkeletonTable rows={4} />
+            ) : filteredExpenseByProject.length === 0 ? (
+              <EmptyState description="No expense data available." title="No data" />
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="data-table min-w-[620px]">
+                    <thead>
+                      <tr>
+                        <th>S/N</th>
+                        <th>Project / Site</th>
+                        <th>Entries</th>
+                        <th>Total Expenses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expenseProjectPagination.paginatedRows.map((row, index) => (
+                        <tr key={`exp-project-${index}`}>
+                          <td>{expenseProjectPagination.startIndex + index + 1}</td>
+                          <td className="font-medium text-slate-900">{row.projectName}</td>
+                          <td>{row.expenseCount}</td>
+                          <td className="font-medium text-amber-700">{formatTzs(row.totalAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <TablePagination
+                  endIndex={expenseProjectPagination.endIndex}
+                  itemLabel="projects"
+                  onPageChange={expenseProjectPagination.setPage}
+                  onPageSizeChange={expenseProjectPagination.setPageSize}
+                  page={expenseProjectPagination.page}
+                  pageSize={expenseProjectPagination.pageSize}
+                  startIndex={expenseProjectPagination.startIndex}
+                  totalCount={expenseProjectPagination.totalCount}
+                  totalPages={expenseProjectPagination.totalPages}
+                />
+              </>
+            )}
+          </SurfaceCard>
+
+          <SurfaceCard title="Expense Categories">
+            {loading ? (
+              <SkeletonTable rows={4} />
+            ) : categorySummaryRows.length === 0 ? (
+              <EmptyState description="No category data available for selected filters." title="No data" />
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="data-table min-w-[520px]">
+                    <thead>
+                      <tr>
+                        <th>S/N</th>
+                        <th>Category</th>
+                        <th>Entries</th>
+                        <th>Total Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expenseCategoryPagination.paginatedRows.map((row, index) => (
+                        <tr key={`expense-category-${row.category}`}>
+                          <td>{expenseCategoryPagination.startIndex + index + 1}</td>
+                          <td className="font-medium text-slate-900">{row.category}</td>
+                          <td>{row.count}</td>
+                          <td className="font-medium text-amber-700">{formatTzs(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <TablePagination
+                  endIndex={expenseCategoryPagination.endIndex}
+                  itemLabel="categories"
+                  onPageChange={expenseCategoryPagination.setPage}
+                  onPageSizeChange={expenseCategoryPagination.setPageSize}
+                  page={expenseCategoryPagination.page}
+                  pageSize={expenseCategoryPagination.pageSize}
+                  startIndex={expenseCategoryPagination.startIndex}
+                  totalCount={expenseCategoryPagination.totalCount}
+                  totalPages={expenseCategoryPagination.totalPages}
+                />
+              </>
+            )}
+          </SurfaceCard>
+        </div>
       )}
     </div>
   );

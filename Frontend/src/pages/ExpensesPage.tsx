@@ -130,6 +130,26 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
     );
   }, [expenseRows, search]);
 
+  const expenseSummary = useMemo(() => {
+    return filteredExpenseRows.reduce(
+      (acc, row) => {
+        acc.totalRecords += 1;
+        acc.totalSpent += row.amount;
+        if (row.status === "Approved") acc.approvedAmount += row.amount;
+        if (row.status === "Pending") acc.pendingAmount += row.amount;
+        acc.projects.add(row.projectName);
+        return acc;
+      },
+      {
+        totalRecords: 0,
+        totalSpent: 0,
+        approvedAmount: 0,
+        pendingAmount: 0,
+        projects: new Set<string>(),
+      },
+    );
+  }, [filteredExpenseRows]);
+
   const expensePagination = useTablePagination(filteredExpenseRows);
 
   const monthTrendSummary = useMemo(() => {
@@ -210,7 +230,25 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
         />
       ) : null}
 
-      {/* Tab bar — above content */}
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <SurfaceCard title="Expense Records">
+          <p className="text-2xl font-bold text-slate-900">{expenseSummary.totalRecords}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Total Spent">
+          <p className="text-2xl font-bold text-[#0b2a53]">{formatTzs(expenseSummary.totalSpent)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Approved Amount">
+          <p className="text-2xl font-bold text-emerald-700">{formatTzs(expenseSummary.approvedAmount)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Pending Amount">
+          <p className="text-2xl font-bold text-amber-700">{formatTzs(expenseSummary.pendingAmount)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Projects Covered">
+          <p className="text-2xl font-bold text-slate-900">{expenseSummary.projects.size}</p>
+        </SurfaceCard>
+      </div>
+
       {tabBar}
 
       {/* Expense Categories */}

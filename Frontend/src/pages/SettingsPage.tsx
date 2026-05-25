@@ -59,7 +59,7 @@ const GalleryImageUploader = ({
       const result = await api.uploadGalleryImage(file);
       onChange(result.url);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Upload imeshindwa.");
+      setError(err instanceof ApiError ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
@@ -720,7 +720,7 @@ const WebsiteManagementSection = ({
                     onChange={(e) => setGalleryForm((p) => ({ ...p, isVisible: e.target.checked }))}
                     type="checkbox"
                   />
-                  Ionyeshe kwenye website
+                  Show on website
                 </label>
               </div>
             </form>
@@ -734,12 +734,12 @@ const WebsiteManagementSection = ({
             ) : galleryItems.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
                 <Image className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-                <p className="text-sm font-semibold text-slate-600">Hakuna picha bado</p>
-                <p className="mt-1 text-xs text-slate-400">Ongeza picha ya kwanza hapo juu</p>
+                <p className="text-sm font-semibold text-slate-600">No images yet</p>
+                <p className="mt-1 text-xs text-slate-400">Add your first image above</p>
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-500">{galleryItems.length} picha</p>
+                <p className="text-xs font-semibold text-slate-500">{galleryItems.length} images</p>
                 {galleryItems.map((item) => (
                   <div
                     className={`flex items-center gap-3 rounded-xl border p-3 transition ${

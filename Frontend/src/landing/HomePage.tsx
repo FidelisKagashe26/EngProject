@@ -195,7 +195,7 @@ export const HomePage = () => {
             </div>
           ) : (
             <div className="py-12 text-center text-slate-400">
-              <p className="text-sm">Picha za miradi zitaonekana hapa</p>
+              <p className="text-sm">Project images will appear here</p>
             </div>
           )}
         </div>

@@ -1,3 +1,5 @@
+import { pushTopToast } from "../components/topToast";
+
 export interface DashboardSummary {
   totalProjects: number;
   activeSites: number;
@@ -663,9 +665,38 @@ export interface ReportsResponse {
   projectCostSummary: ReportProjectCostRow[];
   laborByProject: Array<{ projectId: string | null; projectName: string; totalPaid: number; outstanding: number; workerCount: number }>;
   materialByProject: Array<{ projectId: string | null; projectName: string; totalCost: number; purchaseCount: number }>;
+  laborDetails: Array<{
+    workerId: string;
+    workerName: string;
+    projectId: string | null;
+    projectName: string;
+    paymentType: string;
+    rateAmount: number;
+    totalPaid: number;
+    outstandingAmount: number;
+    status: string;
+  }>;
+  materialPurchaseDetails: Array<{
+    purchaseId: string;
+    projectId: string | null;
+    projectName: string;
+    materialName: string;
+    quantityPurchased: number;
+    unitCost: number;
+    totalCost: number;
+    purchaseDate: string;
+    supplierName: string;
+  }>;
   expenseByProject: Array<{ projectId: string | null; projectName: string; totalAmount: number; expenseCount: number }>;
   paymentByProject: Array<{ projectId: string | null; projectName: string; totalExpected: number; totalReceived: number; totalBalance: number }>;
   expenseByCategory: Array<{ category: string; total: number; count: number }>;
+  expenseByCategoryByProject: Array<{
+    projectId: string | null;
+    projectName: string;
+    category: string;
+    total: number;
+    count: number;
+  }>;
   monthlyExpenseTrend: Array<{ month: string; total: number }>;
   budgetVariance: Array<{ projectName: string; contractValue: number; totalSpent: number; variance: number; variancePct: number }>;
 }
@@ -901,13 +932,60 @@ const parseContentDispositionFilename = (headerValue: string | null): string | n
   return null;
 };
 
+type ApiRequestOptions = RequestInit & {
+  notifyError?: boolean;
+  notifySuccess?: boolean;
+  successMessage?: string;
+  successTitle?: string;
+  errorTitle?: string;
+};
+
+const extractPayloadMessage = (payload: unknown): string | null => {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "message" in payload &&
+    typeof (payload as { message?: unknown }).message === "string"
+  ) {
+    return (payload as { message: string }).message;
+  }
+
+  return null;
+};
+
+const defaultSuccessMessage = (method: string): string => {
+  if (method === "POST") {
+    return "Saved successfully.";
+  }
+  if (method === "PUT" || method === "PATCH") {
+    return "Updated successfully.";
+  }
+  if (method === "DELETE") {
+    return "Deleted successfully.";
+  }
+  return "Operation completed successfully.";
+};
+
 const apiRequest = async <T>(
   path: string,
-  options?: RequestInit,
+  options?: ApiRequestOptions,
 ): Promise<T> => {
-  beginApiRequest();
+  const {
+    notifyError,
+    notifySuccess,
+    successMessage: customSuccessMessage,
+    successTitle: customSuccessTitle,
+    errorTitle,
+    ...requestOptions
+  } = options ?? {};
 
-  const headers = new Headers(options?.headers ?? {});
+  beginApiRequest();
+  const method = (requestOptions.method ?? "GET").toUpperCase();
+  const shouldNotifyError = notifyError ?? true;
+  const shouldNotifySuccess =
+    notifySuccess ?? (method !== "GET" && method !== "HEAD");
+
+  const headers = new Headers(requestOptions.headers ?? {});
   if (!headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -916,21 +994,34 @@ const apiRequest = async <T>(
   }
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
+      ...requestOptions,
       headers,
     });
 
     const payload = await parseJsonSafe(response);
 
     if (!response.ok) {
-      const message =
-        typeof payload === "object" &&
-        payload !== null &&
-        "message" in payload &&
-        typeof (payload as { message?: unknown }).message === "string"
-          ? (payload as { message: string }).message
-          : `Request failed with status ${response.status}`;
+      const message = extractPayloadMessage(payload) ?? `Request failed with status ${response.status}`;
+      if (shouldNotifyError) {
+        pushTopToast({
+          tone: "error",
+          title:
+            errorTitle ??
+            (method === "GET" || method === "HEAD" ? "Load Failed" : "Action Failed"),
+          message,
+        });
+      }
       throw new ApiError(message, response.status, payload);
+    }
+
+    if (shouldNotifySuccess) {
+      const successMessage =
+        customSuccessMessage ?? extractPayloadMessage(payload) ?? defaultSuccessMessage(method);
+      pushTopToast({
+        tone: "success",
+        title: customSuccessTitle ?? "Success",
+        message: successMessage,
+      });
     }
 
     return payload as T;
@@ -946,17 +1037,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  me: () => apiRequest<MeResponse>("/auth/me"),
+  me: () => apiRequest<MeResponse>("/auth/me", { notifyError: false }),
   updateMyProfile: (payload: UpdateMyProfilePayload) =>
     apiRequest<MeResponse>("/auth/me", {
       method: "PUT",
       body: JSON.stringify(payload),
+      notifyError: false,
+      notifySuccess: false,
     }),
-  logout: () => apiRequest<{ message: string }>("/auth/logout", { method: "POST" }),
+  logout: () =>
+    apiRequest<{ message: string }>("/auth/logout", {
+      method: "POST",
+      notifyError: false,
+      notifySuccess: false,
+    }),
   changePassword: (payload: { oldPassword: string; newPassword: string }) =>
     apiRequest<{ message: string }>("/auth/change-password", {
       method: "POST",
       body: JSON.stringify(payload),
+      notifyError: false,
+      notifySuccess: false,
     }),
   requestPasswordResetOtp: (payload: { email: string }) =>
     apiRequest<ForgotPasswordRequestResponse>("/auth/forgot-password/request-otp", {
@@ -973,17 +1073,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getSmtpStatus: () => apiRequest<SmtpStatusResponse>("/auth/smtp/status"),
+  getSmtpStatus: () => apiRequest<SmtpStatusResponse>("/auth/smtp/status", { notifyError: false }),
   sendSmtpTestEmail: (payload?: { to?: string }) =>
     apiRequest<SmtpTestResponse>("/auth/smtp/test", {
       method: "POST",
       body: JSON.stringify(payload ?? {}),
+      notifyError: false,
+      notifySuccess: false,
     }),
   getSettings: () => apiRequest<SettingsResponse>("/settings"),
   updateCompanyProfile: (payload: UpdateCompanyProfilePayload) =>
     apiRequest<CompanyProfile>("/settings/company", {
       method: "PUT",
       body: JSON.stringify(payload),
+      notifyError: false,
+      notifySuccess: false,
     }),
   getDashboard: () => apiRequest<DashboardResponse>("/dashboard"),
   getProjects: (params?: { search?: string; status?: string }) => {
@@ -1035,11 +1139,13 @@ export const api = {
     apiRequest<ProjectApiRecord>("/projects", {
       method: "POST",
       body: JSON.stringify(payload),
+      notifySuccess: false,
     }),
   updateProject: (projectId: string, payload: UpdateProjectPayload) =>
     apiRequest<ProjectApiRecord>(`/projects/${encodeURIComponent(projectId)}`, {
       method: "PUT",
       body: JSON.stringify(payload),
+      notifySuccess: false,
     }),
   getWorkers: () => apiRequest<WorkersResponse>("/workers"),
   createWorker: (payload: CreateWorkerPayload) =>
@@ -1072,10 +1178,12 @@ export const api = {
     apiRequest<DocumentApiRecord>("/documents", {
       method: "POST",
       body: JSON.stringify(payload),
+      notifySuccess: false,
     }),
   deleteDocument: (id: string) =>
     apiRequest<{ message: string }>(`/documents/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      notifySuccess: false,
     }),
   getNotifications: () => apiRequest<NotificationApiRecord[]>("/notifications"),
   remindNotification: (id: string) =>
@@ -1185,15 +1293,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   // Admin — quote requests management
-  getQuoteRequests: () => apiRequest<QuoteRequestApiRecord[]>("/quote-requests"),
+  getQuoteRequests: () => apiRequest<QuoteRequestApiRecord[]>("/quote-requests", { notifyError: false }),
   updateQuoteRequestStatus: (id: string, status: "New" | "Read" | "Replied") =>
     apiRequest<{ message: string; id: string }>(`/quote-requests/${encodeURIComponent(id)}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+      notifyError: false,
+      notifySuccess: false,
     }),
   deleteQuoteRequest: (id: string) =>
     apiRequest<{ message: string }>(`/quote-requests/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      notifyError: false,
+      notifySuccess: false,
     }),
   // Public — website settings (no auth)
   getPublicWebsiteSettings: () =>
@@ -1205,6 +1317,8 @@ export const api = {
     apiRequest<Partial<WebsiteSettings>>("/website-settings", {
       method: "PUT",
       body: JSON.stringify(payload),
+      notifyError: false,
+      notifySuccess: false,
     }),
   // Public — gallery (no auth)
   getPublicGallery: () =>
@@ -1240,11 +1354,22 @@ export const api = {
     });
     const payload = await response.json() as { url?: string; message?: string };
     if (!response.ok) {
+      const message = (payload as { message?: string }).message ?? "Upload failed";
+      pushTopToast({
+        tone: "error",
+        title: "Upload Failed",
+        message,
+      });
       throw new ApiError(
-        (payload as { message?: string }).message ?? "Upload failed",
+        message,
         response.status,
       );
     }
+    pushTopToast({
+      tone: "success",
+      title: "Success",
+      message: "Image uploaded successfully.",
+    });
     return { url: (payload as { url: string }).url };
   },
 };

@@ -268,7 +268,7 @@ export const ProjectFormPage = () => {
         setSubmitError(
           error instanceof Error
             ? error.message
-            : "Imeshindwa kupakia taarifa za mradi.",
+            : "Failed to load project details.",
         );
         baselineFingerprintRef.current = currentFingerprint;
         dirtyCheckReadyRef.current = true;
@@ -345,7 +345,7 @@ export const ProjectFormPage = () => {
 
     if (endDate < startDate) {
       setShowErrors(true);
-      setSubmitError("Tarehe ya kukamilika lazima iwe sawa au baada ya tarehe ya kuanza.");
+      setSubmitError("Completion date must be on or after the start date.");
       return;
     }
 
@@ -407,13 +407,13 @@ export const ProjectFormPage = () => {
         await attachInitialDocuments(savedProject.id);
       } catch (error) {
         attachmentSaveError =
-          error instanceof Error ? error.message : "Nyaraka za awali hazikuhifadhiwa.";
+          error instanceof Error ? error.message : "Initial documents were not saved.";
       }
       markSaved();
       setSaveMode(mode);
       if (attachmentSaveError.length > 0) {
         setSubmitError(
-          `${attachmentSaveError} Mradi umehifadhiwa, unaweza kuongeza nyaraka tena.`,
+          `${attachmentSaveError} Project was saved. You can upload the documents again.`,
         );
       }
       window.setTimeout(() => {
@@ -430,7 +430,7 @@ export const ProjectFormPage = () => {
       setSubmitError(
         error instanceof Error
           ? error.message
-          : "Imeshindwa kuhifadhi mradi.",
+          : "Failed to save project.",
       );
     } finally {
       setSubmitting(false);
@@ -443,8 +443,8 @@ export const ProjectFormPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Sajili miradi mipya pamoja na taarifa za mkataba, bajeti, na maelezo."
-        title={isEditMode ? "Hariri Mradi" : "Ongeza Mradi Mpya"}
+        subtitle="Create or update core project records."
+        title={isEditMode ? "Edit Project" : "Add New Project"}
       />
 
       {submitError && (
@@ -467,20 +467,20 @@ export const ProjectFormPage = () => {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {/* ── A. Basic Details ── */}
-        <SurfaceCard className="xl:col-span-2" title="A. Taarifa za Msingi za Mradi">
+        <SurfaceCard className="xl:col-span-2" title="A. Basic Project Details">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="form-field sm:col-span-2">
-              <span>Jina la Mradi <span className="text-red-600">*</span></span>
+              <span>Project Name <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(projectName)}`}
                 onChange={(e) => setProjectName(e.target.value)}
-                placeholder="mfano: Ujenzi wa Barabara ya Dodoma"
+                placeholder="Example: Dodoma Ring Road Construction"
                 value={projectName}
               />
             </label>
 
             <label className="form-field">
-              <span>Eneo / Site <span className="text-red-600">*</span></span>
+              <span>Site Location <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(siteLocation)}`}
                 onChange={(e) => setSiteLocation(e.target.value)}
@@ -490,17 +490,17 @@ export const ProjectFormPage = () => {
             </label>
 
             <label className="form-field">
-              <span>Jina la Mteja <span className="text-red-600">*</span></span>
+              <span>Client Name <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(clientName)}`}
                 onChange={(e) => setClientName(e.target.value)}
-                placeholder="Halmashauri ya Manispaa ya Dodoma"
+                placeholder="Dodoma Municipal Council"
                 value={clientName}
               />
             </label>
 
             <label className="form-field">
-              <span>Namba ya Mkataba / Tender <span className="text-red-600">*</span></span>
+              <span>Contract / Tender Number <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(contractNumber)}`}
                 onChange={(e) => setContractNumber(e.target.value)}
@@ -510,7 +510,7 @@ export const ProjectFormPage = () => {
             </label>
 
             <label className="form-field">
-              <span>Tarehe ya Kuanza <span className="text-red-600">*</span></span>
+              <span>Start Date <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(startDate)}`}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -520,7 +520,7 @@ export const ProjectFormPage = () => {
             </label>
 
             <label className="form-field">
-              <span>Tarehe ya Kukamilika <span className="text-red-600">*</span></span>
+              <span>Completion Date <span className="text-red-600">*</span></span>
               <input
                 className={`input-field ${err(endDate)}`}
                 onChange={(e) => setEndDate(e.target.value)}
@@ -530,23 +530,23 @@ export const ProjectFormPage = () => {
             </label>
 
             <label className="form-field sm:col-span-2">
-              <span>Maelezo ya Mradi</span>
+              <span>Project Description</span>
               <textarea
                 className="input-field min-h-24"
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Upeo wa kazi, matokeo yanayotarajiwa, hatua kuu..."
+                placeholder="Scope, expected outputs, and key milestones..."
                 value={description}
               />
             </label>
 
             <label className="form-field">
-              <span>Hali ya Sasa <span className="text-red-600">*</span></span>
+              <span>Current Status <span className="text-red-600">*</span></span>
               <GuiSelect
                 className={`input-field ${err(status)}`}
                 onChange={(e) => setStatus(e.target.value)}
                 value={status}
               >
-                <option disabled value="">Chagua hali</option>
+                <option disabled value="">Select status</option>
                 <option>Draft</option>
                 <option>Active</option>
                 <option>Pending</option>
@@ -561,12 +561,12 @@ export const ProjectFormPage = () => {
         </SurfaceCard>
 
         {/* ── B. Financial Details ── */}
-        <SurfaceCard title="B. Taarifa za Fedha">
+        <SurfaceCard title="B. Financial Details">
           <div className="space-y-3">
 
             {/* Manual: contract value — the only truly manual financial field */}
             <FinancialInput
-              label="Thamani ya Mkataba (TZS) *"
+              label="Contract Value (TZS) *"
               onChange={setContractValue}
               placeholder="120000000"
               required
@@ -577,13 +577,13 @@ export const ProjectFormPage = () => {
             {isEditMode ? (
               <AutoField
                 color="text-emerald-700"
-                hint="Inasasishwa kiotomatiki kila wakati malipo ya mteja yanapoingizwa kwenye moduli ya Malipo."
-                label="Kilichopokelewa (TZS)"
+                hint="Automatically updated from payments recorded in the Payments module."
+                label="Amount Received (TZS)"
                 value={formatTzs(liveAmountReceived)}
               />
             ) : (
               <FinancialInput
-                label="Malipo ya Awali / Advance (TZS)"
+                label="Initial Advance (TZS)"
                 onChange={setInitialAdvance}
                 placeholder="0"
                 value={initialAdvance}
@@ -592,59 +592,59 @@ export const ProjectFormPage = () => {
 
             {/* Auto: total spent — updated by labor, materials, expenses */}
             <AutoField
-              hint="Inajumlishwa kiotomatiki kutoka: malipo ya wafanyakazi, ununuzi wa vifaa, na matumizi mengine."
-              label="Jumla Iliyotumika (TZS)"
-              value={isEditMode ? formatTzs(liveTotalSpent) : "TZS 0 (itaanza baada ya shughuli)"}
+              hint="Automatically summed from labour, materials, and other expenses."
+              label="Total Spent (TZS)"
+              value={isEditMode ? formatTzs(liveTotalSpent) : "TZS 0 (starts after activity)"}
             />
 
             {/* Auto: remaining balance */}
             <AutoField
               color={remainingBalance >= 0 ? "text-emerald-700" : "text-red-700"}
-              hint="Hesabu: Thamani ya Mkataba − Jumla Iliyotumika"
-              label="Salio Linalobaki (TZS)"
+              hint="Formula: Contract Value - Total Spent"
+              label="Remaining Balance (TZS)"
               value={formatTzs(remainingBalance)}
             />
 
             {/* Auto: pending client payments */}
             <AutoField
               color="text-amber-700"
-              hint="Hesabu: Thamani ya Mkataba − Kilichopokelewa. Inasasishwa kila wakati malipo mapya yanapoingizwa."
-              label="Malipo Yanayosubiri (TZS)"
+              hint="Formula: Contract Value - Amount Received."
+              label="Pending Client Payments (TZS)"
               value={formatTzs(pendingPayments)}
             />
 
             {/* Auto: profit/loss estimate */}
             <AutoField
               color={profitLossEstimate >= 0 ? "text-emerald-700" : "text-red-700"}
-              hint="Hesabu: Kilichopokelewa − Jumla Iliyotumika"
-              label="Makadirio ya Faida / Hasara (TZS)"
+              hint="Formula: Amount Received - Total Spent"
+              label="Estimated Profit / Loss (TZS)"
               value={formatTzs(profitLossEstimate)}
             />
 
             <div className="border-t border-slate-100 pt-3 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Bajeti za Mipango
+                Planned Budgets
               </p>
               <FinancialInput
-                label="Bajeti ya Wafanyakazi"
+                label="Labour Budget"
                 onChange={setLaborBudget}
                 placeholder="32000000"
                 value={laborBudget}
               />
               <FinancialInput
-                label="Bajeti ya Vifaa"
+                label="Materials Budget"
                 onChange={setMaterialBudget}
                 placeholder="42000000"
                 value={materialBudget}
               />
               <FinancialInput
-                label="Bajeti ya Uendeshaji"
+                label="Operational Budget"
                 onChange={setOperationalBudget}
                 placeholder="18000000"
                 value={operationalBudget}
               />
               <label className="form-field">
-                <span>Kiwango cha Faida Kinachotarajiwa (%)</span>
+                <span>Expected Profit Margin (%)</span>
                 <input
                   className="input-field"
                   onChange={(e) => setProfitMargin(e.target.value)}
@@ -654,11 +654,11 @@ export const ProjectFormPage = () => {
                 />
               </label>
               <label className="form-field">
-                <span>Masharti ya Malipo</span>
+                <span>Payment Terms</span>
                 <textarea
                   className="input-field min-h-20"
                   onChange={(e) => setPaymentTerms(e.target.value)}
-                  placeholder="Advance 30%, malipo ya hatua kila siku 30..."
+                  placeholder="30% advance, milestone payments every 30 days..."
                   value={paymentTerms}
                 />
               </label>
@@ -668,21 +668,21 @@ export const ProjectFormPage = () => {
       </div>
 
       {/* ── C. Notes & Documents ── */}
-      <SurfaceCard title="C. Maelezo ya Ziada na Nyaraka za Awali">
+      <SurfaceCard title="C. Additional Notes and Initial Documents">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <label className="form-field">
-            <span>Maelezo</span>
+            <span>Notes</span>
             <textarea
               className="input-field min-h-24"
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Hatari, mawazo, utegemezi, maelezo mengine..."
+              placeholder="Risks, dependencies, and additional notes..."
               value={notes}
             />
           </label>
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-700">Ambatisha Nyaraka za Awali</p>
+            <p className="text-sm font-semibold text-slate-700">Attach Initial Documents</p>
             <p className="mt-1 text-xs text-slate-500">
-              Pakia rasimu ya mkataba, BOQ, michoro ya ubunifu, nukuu.
+              Upload draft contracts, BOQ, design drawings, or quotations.
             </p>
             <input
               className="hidden"
@@ -693,7 +693,7 @@ export const ProjectFormPage = () => {
             />
             <button className="btn-secondary mt-4" onClick={handlePickInitialDocuments} type="button">
               <Paperclip className="h-4 w-4" />
-              Pakia Faili
+              Upload File
             </button>
             {initialDocuments.length > 0 && (
               <div className="mt-3 space-y-2">
@@ -711,7 +711,7 @@ export const ProjectFormPage = () => {
                       onClick={() => removeInitialDocument(index)}
                       type="button"
                     >
-                      Ondoa
+                      Remove
                     </button>
                   </div>
                 ))}
@@ -725,7 +725,7 @@ export const ProjectFormPage = () => {
       <div className="sticky bottom-18 z-20 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_6px_24px_rgba(0,0,0,0.08)] lg:bottom-4">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button className="btn-secondary" onClick={() => navigate("/projects")} type="button">
-            Ghairi
+            Cancel
           </button>
           <button
             className="btn-secondary"
@@ -733,7 +733,7 @@ export const ProjectFormPage = () => {
             onClick={() => void triggerSave("draft")}
             type="button"
           >
-            Hifadhi Rasimu
+            Save Draft
           </button>
           <button
             className="btn-primary"
@@ -742,7 +742,7 @@ export const ProjectFormPage = () => {
             type="button"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {isEditMode ? "Sasisha Mradi" : "Hifadhi Mradi"}
+            {isEditMode ? "Update Project" : "Save Project"}
           </button>
         </div>
       </div>
@@ -750,17 +750,17 @@ export const ProjectFormPage = () => {
       <SuccessToast
         message={
           saveMode === "draft"
-            ? "Rasimu imehifadhiwa."
-            : "Taarifa za mradi zimehifadhiwa."
+            ? "Draft saved."
+            : "Project details saved."
         }
         onClose={() => setSaveMode(null)}
         open={saveMode !== null}
         title={
           saveMode === "draft"
-            ? "Rasimu Imesasishwa"
+            ? "Draft Updated"
             : isEditMode
-              ? "Mradi Umesasishwa"
-              : "Mradi Umehifadhiwa"
+              ? "Project Updated"
+              : "Project Saved"
         }
       />
     </div>

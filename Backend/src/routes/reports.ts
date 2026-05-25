@@ -24,9 +24,34 @@ type ReportProjectCostRow = {
 
 type ExpenseCategoryRow = {
   projectId: string | null;
+  projectName: string;
   category: string;
   total: number;
   count: number;
+};
+
+type LaborDetailRow = {
+  workerId: string;
+  workerName: string;
+  projectId: string | null;
+  projectName: string;
+  paymentType: string;
+  rateAmount: number;
+  totalPaid: number;
+  outstandingAmount: number;
+  status: string;
+};
+
+type MaterialPurchaseDetailRow = {
+  purchaseId: string;
+  projectId: string | null;
+  projectName: string;
+  materialName: string;
+  quantityPurchased: number;
+  unitCost: number;
+  totalCost: number;
+  purchaseDate: string;
+  supplierName: string;
 };
 
 type ReportsPayload = {
@@ -54,6 +79,8 @@ type ReportsPayload = {
     totalCost: number;
     purchaseCount: number;
   }>;
+  laborDetails: LaborDetailRow[];
+  materialPurchaseDetails: MaterialPurchaseDetailRow[];
   expenseByProject: Array<{
     projectId: string | null;
     projectName: string;
@@ -68,6 +95,13 @@ type ReportsPayload = {
     totalBalance: number;
   }>;
   expenseByCategory: Array<{
+    category: string;
+    total: number;
+    count: number;
+  }>;
+  expenseByCategoryByProject: Array<{
+    projectId: string | null;
+    projectName: string;
     category: string;
     total: number;
     count: number;
@@ -195,6 +229,13 @@ const toSafeFileToken = (value: string): string =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
 
+const sanitizePdfText = (value: string): string =>
+  value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+    .replace(/[�•·▪]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const parseMonthLabel = (label: string): Date | null => {
   const [monthToken, yearToken] = label.split(" ");
   const month = monthIndex[monthToken ?? ""];
@@ -274,6 +315,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
     projectSummaryResult,
     laborSummaryResult,
     materialSummaryResult,
+    laborDetailResult,
+    materialDetailResult,
     expenseSummaryResult,
     paymentSummaryResult,
     expenseByCategoryResult,
@@ -349,6 +392,64 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       [companyId],
     ),
     db.query<{
+      worker_id: string;
+      worker_name: string;
+      project_id: string | null;
+      project_name: string | null;
+      payment_type: string;
+      rate_amount: string;
+      total_paid: string;
+      outstanding_amount: string;
+      status: string;
+    }>(
+      `
+      SELECT
+        w.id AS worker_id,
+        w.full_name AS worker_name,
+        w.assigned_project_id AS project_id,
+        p.name AS project_name,
+        w.payment_type,
+        w.rate_amount::text AS rate_amount,
+        w.total_paid::text AS total_paid,
+        w.outstanding_amount::text AS outstanding_amount,
+        w.status
+      FROM engicost.workers w
+      LEFT JOIN engicost.projects p ON p.id = w.assigned_project_id
+      WHERE w.company_id = $1
+      ORDER BY w.full_name ASC
+      `,
+      [companyId],
+    ),
+    db.query<{
+      purchase_id: string;
+      project_id: string | null;
+      project_name: string | null;
+      material_name: string;
+      quantity_purchased: string;
+      unit_cost: string;
+      total_cost: string;
+      purchase_date: string;
+      supplier_name: string;
+    }>(
+      `
+      SELECT
+        mp.id AS purchase_id,
+        mp.project_id,
+        p.name AS project_name,
+        mp.material_name,
+        mp.quantity_purchased::text AS quantity_purchased,
+        mp.unit_cost::text AS unit_cost,
+        mp.total_cost::text AS total_cost,
+        mp.purchase_date::text AS purchase_date,
+        mp.supplier_name
+      FROM engicost.material_purchases mp
+      LEFT JOIN engicost.projects p ON p.id = mp.project_id
+      WHERE mp.company_id = $1
+      ORDER BY mp.purchase_date DESC, mp.created_at DESC
+      `,
+      [companyId],
+    ),
+    db.query<{
       project_id: string | null;
       project_name: string;
       total_amount: string;
@@ -390,17 +491,19 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       `,
       [companyId],
     ),
-    db.query<{ project_id: string | null; category: string; total: string; count: string }>(
+    db.query<{ project_id: string | null; project_name: string | null; category: string; total: string; count: string }>(
       `
       SELECT
-        project_id,
-        category,
-        COALESCE(SUM(amount), 0)::text AS total,
+        e.project_id,
+        p.name AS project_name,
+        e.category,
+        COALESCE(SUM(e.amount), 0)::text AS total,
         COUNT(*)::text AS count
-      FROM engicost.expenses
-      WHERE company_id = $1
-      GROUP BY project_id, category
-      ORDER BY SUM(amount) DESC
+      FROM engicost.expenses e
+      LEFT JOIN engicost.projects p ON p.id = e.project_id
+      WHERE e.company_id = $1
+      GROUP BY e.project_id, p.name, e.category
+      ORDER BY SUM(e.amount) DESC
       `,
       [companyId],
     ),
@@ -510,6 +613,7 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
 
   const expenseCategoryRows: ExpenseCategoryRow[] = expenseByCategoryResult.rows.map((row) => ({
     projectId: row.project_id,
+    projectName: row.project_name ?? "Unassigned",
     category: row.category,
     total: Number(row.total),
     count: Number(row.count),
@@ -542,6 +646,28 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       totalCost: Number(row.total_cost),
       purchaseCount: Number(row.purchase_count),
     })),
+    laborDetails: laborDetailResult.rows.map((row) => ({
+      workerId: row.worker_id,
+      workerName: row.worker_name,
+      projectId: row.project_id,
+      projectName: row.project_name ?? "Unassigned",
+      paymentType: row.payment_type,
+      rateAmount: Number(row.rate_amount),
+      totalPaid: Number(row.total_paid),
+      outstandingAmount: Number(row.outstanding_amount),
+      status: row.status,
+    })),
+    materialPurchaseDetails: materialDetailResult.rows.map((row) => ({
+      purchaseId: row.purchase_id,
+      projectId: row.project_id,
+      projectName: row.project_name ?? "Unassigned",
+      materialName: row.material_name,
+      quantityPurchased: Number(row.quantity_purchased),
+      unitCost: Number(row.unit_cost),
+      totalCost: Number(row.total_cost),
+      purchaseDate: row.purchase_date,
+      supplierName: row.supplier_name,
+    })),
     expenseByProject: expenseSummaryResult.rows.map((row) => ({
       projectId: row.project_id,
       projectName: row.project_name ?? "Unassigned",
@@ -562,6 +688,13 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
         count: totalsByCategory.count,
       }))
       .sort((a, b) => b.total - a.total),
+    expenseByCategoryByProject: expenseCategoryRows.map((row) => ({
+      projectId: row.projectId,
+      projectName: row.projectName,
+      category: row.category,
+      total: row.total,
+      count: row.count,
+    })),
     _expenseCategoryRows: expenseCategoryRows,
     monthlyExpenseTrend: monthlyExpenseResult.rows.map((row) => ({
       month: row.month,
@@ -654,6 +787,26 @@ const applyReportFilters = (
 
   const fromBoundary = filters.fromDate ? new Date(`${filters.fromDate}T00:00:00.000Z`) : null;
   const toBoundary = filters.toDate ? new Date(`${filters.toDate}T23:59:59.999Z`) : null;
+  const isWithinDateWindow = (dateText: string): boolean => {
+    if (!fromBoundary && !toBoundary) {
+      return true;
+    }
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(dateText)
+      ? `${dateText}T00:00:00.000Z`
+      : dateText;
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return true;
+    }
+    if (fromBoundary && parsed < fromBoundary) {
+      return false;
+    }
+    if (toBoundary && parsed > toBoundary) {
+      return false;
+    }
+    return true;
+  };
+
   const monthlyExpenseTrend = payload.monthlyExpenseTrend.filter((row) => {
     const monthDate = parseMonthLabel(row.month);
     if (!monthDate) {
@@ -675,11 +828,24 @@ const applyReportFilters = (
       matchProject(row.projectId, row.projectName)),
     materialByProject: payload.materialByProject.filter((row) =>
       matchProject(row.projectId, row.projectName)),
+    laborDetails: payload.laborDetails.filter((row) =>
+      matchProject(row.projectId, row.projectName)),
+    materialPurchaseDetails: payload.materialPurchaseDetails.filter((row) =>
+      matchProject(row.projectId, row.projectName) && isWithinDateWindow(row.purchaseDate)),
     expenseByProject: payload.expenseByProject.filter((row) =>
       matchProject(row.projectId, row.projectName)),
     paymentByProject: payload.paymentByProject.filter((row) =>
       matchProject(row.projectId, row.projectName)),
     expenseByCategory,
+    expenseByCategoryByProject: expenseByCategoryRows
+      .filter((row) => matchProject(row.projectId, row.projectName))
+      .map((row) => ({
+        projectId: row.projectId,
+        projectName: row.projectName,
+        category: row.category,
+        total: row.total,
+        count: row.count,
+      })),
     _expenseCategoryRows: expenseByCategoryRows,
     monthlyExpenseTrend,
     budgetVariance: payload.budgetVariance.filter((row) =>
@@ -712,6 +878,24 @@ const formatGeneratedAt = (value: Date): string =>
     hour12: false,
     timeZone: "Africa/Dar_es_Salaam",
   }).format(value);
+
+const formatDateForReport = (value: string): string => {
+  const raw = value.trim();
+  if (!raw) {
+    return "-";
+  }
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00.000Z` : raw;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    timeZone: "Africa/Dar_es_Salaam",
+  }).format(parsed);
+};
 
 const ensureRoom = (doc: PDFKit.PDFDocument, requiredHeight = 24): void => {
   if (doc.y + requiredHeight > getBottomLimit(doc)) {
@@ -809,7 +993,7 @@ const writeTable = <RowType>(
   const columnWidths = columns.map((column) => (tableWidth * column.widthRatio) / totalRatio);
   const headerHeight = 28;
   const rowHeight = 26;
-  const cellPaddingX = 6;
+  const cellPaddingX = 4;
 
   const drawHeader = (): void => {
     ensureRoom(doc, headerHeight + rowHeight + 4);
@@ -826,7 +1010,7 @@ const writeTable = <RowType>(
       const columnWidth = columnWidths[index];
       doc
         .font("Times-Bold")
-        .fontSize(PDF_BASE_FONT_SIZE)
+        .fontSize(11)
         .fillColor(REPORT_COLORS.white)
         .text(column.header, cursorX + cellPaddingX, headerY + 8, {
           width: columnWidth - (cellPaddingX * 2),
@@ -875,7 +1059,7 @@ const writeTable = <RowType>(
       );
       doc
         .font("Times-Roman")
-        .fontSize(PDF_BASE_FONT_SIZE)
+        .fontSize(11)
         .fillColor(REPORT_COLORS.slate900)
         .text(text, cursorX + cellPaddingX, rowY + 7, {
           width: columnWidth - (cellPaddingX * 2),
@@ -903,11 +1087,56 @@ const renderReportHeader = (
   const x = getContentLeft(doc);
   const width = getContentWidth(doc);
   const startY = doc.y;
-  const headerHeight = 130;
   const contentY = startY + 16;
   const logoWidth = 96;
   const textStartX = x + 16;
   const textWidth = width - 32 - logoWidth - 12;
+  const safeCompanyName = sanitizePdfText(branding.companyName) || "Company";
+  const safeReportTitle = sanitizePdfText(reportTypeTitle) || "Report";
+  const safeProjectScope = sanitizePdfText(projectScopeLabel) || "All Projects";
+  const safeCategory = filters.category ? sanitizePdfText(filters.category) : "";
+  const safeWebsite = sanitizePdfText(branding.websiteUrl.replace(/^https?:\/\//i, "")) || "-";
+
+  const contactLine = sanitizePdfText(
+    [
+      `Email: ${branding.email}`,
+      `Phone: ${branding.phone}`,
+      branding.whatsapp ? `WhatsApp: ${branding.whatsapp}` : "",
+    ]
+      .filter((part) => part.length > 0)
+      .join("  |  "),
+  );
+
+  const filterLines = [
+    `Generated on: ${formatGeneratedAt(generatedAt)}`,
+    `Project: ${safeProjectScope}`,
+    safeCategory ? `Category: ${safeCategory}` : "",
+    filters.fromDate || filters.toDate
+      ? `Date Range: ${filters.fromDate ?? "N/A"} to ${filters.toDate ?? "N/A"}`
+      : "",
+  ].filter((line) => line.length > 0);
+
+  const measureHeight = (
+    fontName: string,
+    fontSize: number,
+    text: string,
+    lineGap: number,
+  ): number => {
+    doc.font(fontName).fontSize(fontSize);
+    return doc.heightOfString(text, { width: textWidth, lineGap });
+  };
+
+  const dynamicTextHeight =
+    measureHeight("Times-Bold", 18, safeCompanyName, 2) +
+    measureHeight("Times-Bold", 12, `${safeReportTitle} Report`, 2) +
+    measureHeight("Times-Roman", PDF_BASE_FONT_SIZE, contactLine, PDF_LINE_GAP) +
+    measureHeight("Times-Roman", PDF_BASE_FONT_SIZE, `Website: ${safeWebsite}`, PDF_LINE_GAP) +
+    filterLines.reduce(
+      (sum, line) => sum + measureHeight("Times-Roman", PDF_BASE_FONT_SIZE, line, PDF_LINE_GAP),
+      0,
+    ) +
+    18;
+  const headerHeight = Math.max(154, Math.ceil(dynamicTextHeight + (contentY - startY) + 14));
 
   doc
     .save()
@@ -940,66 +1169,56 @@ const renderReportHeader = (
     }
   }
 
+  let cursorY = contentY;
   doc
     .font("Times-Bold")
     .fontSize(18)
     .fillColor(REPORT_COLORS.navy)
-    .text(branding.companyName, textStartX, contentY, {
+    .text(safeCompanyName, textStartX, cursorY, {
       width: textWidth,
       lineGap: 2,
     });
+  cursorY = doc.y + 2;
   doc
     .font("Times-Bold")
     .fontSize(12)
     .fillColor(REPORT_COLORS.slate700)
-    .text(`${reportTypeTitle} Report`, textStartX, doc.y + 2, {
+    .text(`${safeReportTitle} Report`, textStartX, cursorY, {
       width: textWidth,
       lineGap: 2,
     });
-
-  const contactLine = [
-    `Email: ${branding.email}`,
-    `Phone: ${branding.phone}`,
-    branding.whatsapp ? `WhatsApp: ${branding.whatsapp}` : "",
-  ].filter((part) => part.length > 0).join("  |  ");
+  cursorY = doc.y + 2;
 
   doc
     .font("Times-Roman")
     .fontSize(PDF_BASE_FONT_SIZE)
     .fillColor(REPORT_COLORS.slate700)
-    .text(contactLine, textStartX, doc.y + 4, {
+    .text(contactLine, textStartX, cursorY, {
       width: textWidth,
       lineGap: PDF_LINE_GAP,
     });
+  cursorY = doc.y + 1;
   doc
     .font("Times-Roman")
     .fontSize(PDF_BASE_FONT_SIZE)
     .fillColor(REPORT_COLORS.navy)
-    .text(`Website: ${branding.websiteUrl}`, textStartX, doc.y + 1, {
+    .text(`Website: ${safeWebsite}`, textStartX, cursorY, {
       width: textWidth,
       lineGap: PDF_LINE_GAP,
       underline: true,
     });
-
-  const filterLines = [
-    `Generated: ${formatGeneratedAt(generatedAt)}`,
-    `Project Scope: ${projectScopeLabel}`,
-    filters.category ? `Category Filter: ${filters.category}` : "",
-    filters.fromDate || filters.toDate
-      ? `Date Window: ${filters.fromDate ?? "N/A"} to ${filters.toDate ?? "N/A"}`
-      : "",
-    `Location: ${branding.location}`,
-  ].filter((line) => line.length > 0);
+  cursorY = doc.y + 1;
 
   filterLines.forEach((line) => {
     doc
       .font("Times-Roman")
       .fontSize(PDF_BASE_FONT_SIZE)
       .fillColor(REPORT_COLORS.slate700)
-      .text(line, textStartX, doc.y + 1, {
+      .text(line, textStartX, cursorY, {
         width: textWidth,
         lineGap: PDF_LINE_GAP,
       });
+    cursorY = doc.y + 1;
   });
 
   doc.y = startY + headerHeight + 8;
@@ -1032,12 +1251,11 @@ const renderProjectCostSummary = (doc: PDFKit.PDFDocument, payload: ReportsPaylo
     "Project Cost Summary",
     payload.projectCostSummary,
     [
-      { header: "Project", widthRatio: 0.28, value: (row) => `${row.projectName} (${row.id})` },
-      { header: "Income", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.amountReceived) },
-      { header: "Expenses", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.totalSpent) },
-      { header: "Profit/Loss", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
-      { header: "Status", widthRatio: 0.12, value: (row) => row.status },
-      { header: "Progress", widthRatio: 0.12, align: "right", value: (row) => `${row.progress}%` },
+      { header: "Project", widthRatio: 0.34, value: (row) => row.projectName },
+      { header: "Income", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.amountReceived) },
+      { header: "Expenses", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalSpent) },
+      { header: "Profit/Loss", widthRatio: 0.18, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
+      { header: "Status", widthRatio: 0.10, value: (row) => row.status },
     ],
   );
 };
@@ -1092,12 +1310,14 @@ const renderLabor = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => 
   writeTable(
     doc,
     "Labor Cost Report",
-    payload.laborByProject,
+    payload.laborDetails,
     [
-      { header: "Project", widthRatio: 0.34, value: (row) => row.projectName },
-      { header: "Workers", widthRatio: 0.13, align: "right", value: (row) => String(row.workerCount) },
-      { header: "Total Paid", widthRatio: 0.27, align: "right", value: (row) => formatCurrency(row.totalPaid) },
-      { header: "Outstanding", widthRatio: 0.26, align: "right", value: (row) => formatCurrency(row.outstanding) },
+      { header: "Worker", widthRatio: 0.23, value: (row) => row.workerName },
+      { header: "Project", widthRatio: 0.21, value: (row) => row.projectName },
+      { header: "Payment Type", widthRatio: 0.14, value: (row) => row.paymentType },
+      { header: "Rate", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.rateAmount) },
+      { header: "Paid", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.totalPaid) },
+      { header: "Outstanding", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.outstandingAmount) },
     ],
   );
 };
@@ -1106,11 +1326,14 @@ const renderMaterials = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void
   writeTable(
     doc,
     "Material Purchase Report",
-    payload.materialByProject,
+    payload.materialPurchaseDetails,
     [
-      { header: "Project", widthRatio: 0.42, value: (row) => row.projectName },
-      { header: "Purchases", widthRatio: 0.20, align: "right", value: (row) => String(row.purchaseCount) },
-      { header: "Total Cost", widthRatio: 0.38, align: "right", value: (row) => formatCurrency(row.totalCost) },
+      { header: "Date", widthRatio: 0.14, value: (row) => formatDateForReport(row.purchaseDate) },
+      { header: "Project", widthRatio: 0.18, value: (row) => row.projectName },
+      { header: "Material", widthRatio: 0.26, value: (row) => row.materialName },
+      { header: "Qty", widthRatio: 0.10, align: "right", value: (row) => row.quantityPurchased.toLocaleString("en-TZ") },
+      { header: "Unit Cost", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.unitCost) },
+      { header: "Total", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.totalCost) },
     ],
   );
 };
@@ -1175,7 +1398,7 @@ const buildPdfReport = (
     const dateToken = timestamp.toISOString().slice(0, 10);
     const reportToken = toSafeFileToken(getReportTypeTitle(reportType));
     const projectScopeLabel = filters.projectId
-      ? payload.projectCostSummary[0]?.projectName ?? filters.projectId
+      ? payload.projectCostSummary[0]?.projectName ?? "Selected Project"
       : "All Projects";
     const scopeToken = filters.projectId
       ? toSafeFileToken(projectScopeLabel)
@@ -1207,10 +1430,6 @@ const buildPdfReport = (
         timestamp,
         projectScopeLabel,
         filters,
-      );
-      writeParagraph(
-        doc,
-        "This report follows standard formatting with Times Roman typography, 12pt body text, 1.5 line spacing, and tabular financial presentation for easy review.",
       );
 
       renderSummaryBlock(doc, payload);

@@ -108,7 +108,7 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
               <span className="font-semibold text-[#0b2a53]">{formatTzs(totalGrand)}</span>
             </span>
             <span className="text-slate-500">
-              Faida:{" "}
+              Profit:{" "}
               <span className="font-semibold text-emerald-700">{formatTzs(totalProfit)}</span>
             </span>
           </div>
@@ -118,7 +118,7 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
             type="button"
           >
             <Plus className="h-4 w-4" />
-            Work Order Mpya
+            New Work Order
           </button>
         </div>
 
@@ -126,9 +126,9 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
           <SkeletonTable rows={3} />
         ) : orders.length === 0 ? (
           <EmptyState
-            actionLabel="Unda Work Order"
-            description="Hakuna work orders kwa mradi huu bado."
-            title="Hakuna Work Orders"
+            actionLabel="Create Work Order"
+            description="No work orders for this project yet."
+            title="No Work Orders"
           />
         ) : (
           <div className="overflow-x-auto">
@@ -136,15 +136,15 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
               <thead>
                 <tr>
                   <th>S/N</th>
-                  <th>Namba ya Order</th>
-                  <th>Tarehe</th>
-                  <th>Gharama Vifaa</th>
-                  <th>Gharama Wafanyakazi</th>
-                  <th>Jumla Gharama</th>
-                  <th>Faida</th>
+                  <th>Order Number</th>
+                  <th>Date</th>
+                  <th>Materials Cost</th>
+                  <th>Labour Cost</th>
+                  <th>Total Cost</th>
+                  <th>Profit</th>
                   <th>Grand Total</th>
-                  <th>Hali</th>
-                  <th>Vitendo</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -168,14 +168,14 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
                           onClick={() => { setEditingOrder(order); setShowModal(true); }}
                           type="button"
                         >
-                          Hariri
+                          Edit
                         </button>
                         <button
                           className="btn-danger py-1 px-3 text-xs"
                           onClick={() => setDeleteTarget(order)}
                           type="button"
                         >
-                          Futa
+                          Delete
                         </button>
                       </div>
                     </td>
@@ -203,18 +203,18 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
       )}
 
       <ConfirmModal
-        cancelLabel="Ghairi"
+        cancelLabel="Cancel"
         confirmClassName="btn-danger"
-        confirmLabel={deleting ? "Inafuta..." : "Futa"}
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
         description={
           deleteTarget
-            ? `Futa work order "${deleteTarget.orderNumber}"? Haiwezi kurudishwa.`
+            ? `Delete work order "${deleteTarget.orderNumber}"? This action cannot be undone.`
             : ""
         }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDelete()}
         open={deleteTarget !== null}
-        title="Futa Work Order"
+        title="Delete Work Order"
       />
     </>
   );
@@ -237,7 +237,7 @@ export function ProjectDetailPage() {
         const data = await api.getProjectById(projectId);
         if (mounted) { setProject(data); setError(""); }
       } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : "Imeshindwa kupakia mradi.");
+        if (mounted) setError(err instanceof Error ? err.message : "Failed to load project.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -253,10 +253,10 @@ export function ProjectDetailPage() {
     return (
       <div className="space-y-4">
         <Link className="btn-secondary inline-flex items-center gap-2" to="/projects">
-          <ArrowLeft className="h-4 w-4" /> Rudi kwa Miradi
+          <ArrowLeft className="h-4 w-4" /> Back to Projects
         </Link>
         <SurfaceCard>
-          <p className="text-sm text-red-700">{error || "Mradi haukupatikana."}</p>
+          <p className="text-sm text-red-700">{error || "Project not found."}</p>
         </SurfaceCard>
       </div>
     );
@@ -265,43 +265,43 @@ export function ProjectDetailPage() {
   const quickLinks: QuickLinkProps[] = [
     {
       icon: <Users className="h-5 w-5 text-emerald-700" />,
-      label: "Wafanyakazi",
+      label: "Labour",
       to: `/site-operations?tab=labor&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-emerald-50",
     },
     {
       icon: <Package className="h-5 w-5 text-amber-700" />,
-      label: "Vifaa",
+      label: "Materials",
       to: `/site-operations?tab=materials&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-amber-50",
     },
     {
       icon: <DollarSign className="h-5 w-5 text-purple-700" />,
-      label: "Malipo",
+      label: "Payments",
       to: `/payments?projectId=${encodeURIComponent(project.id)}`,
       color: "bg-purple-50",
     },
     {
       icon: <TrendingUp className="h-5 w-5 text-orange-700" />,
-      label: "Matumizi",
+      label: "Expenses",
       to: `/site-operations?tab=expenses&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-orange-50",
     },
     {
       icon: <HardHat className="h-5 w-5 text-slate-700" />,
-      label: "Vifaa vya Ujenzi",
+      label: "Equipment",
       to: `/site-operations?tab=equipment&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-slate-100",
     },
     {
       icon: <FileText className="h-5 w-5 text-indigo-700" />,
-      label: "Nyaraka",
+      label: "Documents",
       to: `/documents?projectId=${encodeURIComponent(project.id)}`,
       color: "bg-indigo-50",
     },
     {
       icon: <Briefcase className="h-5 w-5 text-[#0b2a53]" />,
-      label: "Work Orders (Zote)",
+      label: "All Work Orders",
       to: `/work-orders?projectId=${encodeURIComponent(project.id)}`,
       color: "bg-blue-50",
     },
@@ -312,18 +312,18 @@ export function ProjectDetailPage() {
       {/* Back + Edit */}
       <div className="flex items-center justify-between gap-3">
         <Link className="btn-secondary inline-flex items-center gap-2" to="/projects">
-          <ArrowLeft className="h-4 w-4" /> Rudi
+          <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <Link
           className="btn-primary"
           to={`/projects/${encodeURIComponent(project.id)}/edit`}
         >
-          Hariri Mradi
+          Edit Project
         </Link>
       </div>
 
       <SectionTitle
-        subtitle={`${project.siteLocation} · ${project.contractNumber}`}
+        subtitle={`${project.siteLocation} - ${project.contractNumber}`}
         title={project.name}
       />
 
@@ -332,15 +332,15 @@ export function ProjectDetailPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Taarifa za Mradi
+              Project Details
             </p>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <dt className="text-slate-500">Mteja</dt>
+                <dt className="text-slate-500">Client</dt>
                 <dd className="font-medium text-slate-900">{project.clientName}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-500">Hali</dt>
+                <dt className="text-slate-500">Status</dt>
                 <dd>
                   <span
                     className={
@@ -361,13 +361,13 @@ export function ProjectDetailPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500 flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5" /> Kuanza
+                  <Calendar className="h-3.5 w-3.5" /> Start
                 </dt>
                 <dd className="font-medium">{formatDate(project.startDate)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500 flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5" /> Kukamilika
+                  <Calendar className="h-3.5 w-3.5" /> Completion
                 </dt>
                 <dd className="font-medium">{formatDate(project.expectedCompletionDate)}</dd>
               </div>
@@ -375,7 +375,7 @@ export function ProjectDetailPage() {
           </div>
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Maendeleo
+              Progress
             </p>
             <ProgressBar value={project.progress} />
             {project.description && (
@@ -388,20 +388,20 @@ export function ProjectDetailPage() {
       {/* Financial Overview */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
         {[
-          { label: "Thamani ya Mkataba", value: project.contractValue, color: "text-slate-900" },
-          { label: "Kilichopokelewa", value: project.amountReceived, color: "text-emerald-700" },
-          { label: "Kilichotumika", value: project.totalSpent, color: "text-slate-900" },
+          { label: "Contract Value", value: project.contractValue, color: "text-slate-900" },
+          { label: "Amount Received", value: project.amountReceived, color: "text-emerald-700" },
+          { label: "Total Spent", value: project.totalSpent, color: "text-slate-900" },
           {
-            label: "Salio",
+            label: "Balance",
             value: project.remainingBalance,
             color: project.remainingBalance >= 0 ? "text-emerald-700" : "text-red-700",
           },
           {
-            label: "Faida / Hasara",
+            label: "Profit / Loss",
             value: project.profitLossEstimate,
             color: project.profitLossEstimate >= 0 ? "text-emerald-700" : "text-red-700",
           },
-          { label: "Malipo Yanayosubiri", value: project.pendingClientPayments, color: "text-amber-700" },
+          { label: "Pending Client Payments", value: project.pendingClientPayments, color: "text-amber-700" },
         ].map((card) => (
           <SurfaceCard key={card.label}>
             <p className="text-xs text-slate-500">{card.label}</p>
@@ -414,7 +414,7 @@ export function ProjectDetailPage() {
       <InlineWorkOrders project={project} />
 
       {/* Quick Access — other modules */}
-      <SurfaceCard title="Ufikiaji wa Haraka">
+      <SurfaceCard title="Quick Access">
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-7">
           {quickLinks.map((link) => (
             <QuickLink key={link.label} {...link} />
@@ -424,7 +424,7 @@ export function ProjectDetailPage() {
 
       {/* Notes */}
       {project.notes && (
-        <SurfaceCard title="Maelezo ya Ziada">
+        <SurfaceCard title="Additional Notes">
           <p className="whitespace-pre-wrap text-sm text-slate-700">{project.notes}</p>
         </SurfaceCard>
       )}

@@ -206,6 +206,28 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     return result;
   }, [listProjectFilter, search, tableRows]);
 
+  const materialsSummary = useMemo(() => {
+    return filteredRows.reduce(
+      (acc, row) => {
+        acc.totalRequirements += 1;
+        acc.totalNeeded += row.needed;
+        acc.totalPurchased += row.purchased;
+        acc.totalRemaining += row.remaining;
+        acc.totalValue += row.totalCost;
+        if (row.remaining <= 0) acc.completedRequirements += 1;
+        return acc;
+      },
+      {
+        totalRequirements: 0,
+        totalNeeded: 0,
+        totalPurchased: 0,
+        totalRemaining: 0,
+        totalValue: 0,
+        completedRequirements: 0,
+      },
+    );
+  }, [filteredRows]);
+
   const materialsPagination = useTablePagination(filteredRows);
 
   const purchaseTotal = useMemo(() => (Number(qtyPurchased) || 0) * (Number(unitCost) || 0), [qtyPurchased, unitCost]);
@@ -308,7 +330,30 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         />
       ) : null}
 
-      {/* Tab bar — above filter and table */}
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <SurfaceCard title="Requirements">
+          <p className="text-2xl font-bold text-slate-900">{materialsSummary.totalRequirements}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Total Qty Needed">
+          <p className="text-2xl font-bold text-slate-900">{formatNumber(materialsSummary.totalNeeded)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Total Qty Purchased">
+          <p className="text-2xl font-bold text-emerald-700">{formatNumber(materialsSummary.totalPurchased)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Remaining Qty">
+          <p className={`text-2xl font-bold ${materialsSummary.totalRemaining > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+            {formatNumber(materialsSummary.totalRemaining)}
+          </p>
+        </SurfaceCard>
+        <SurfaceCard title="Purchase Value">
+          <p className="text-2xl font-bold text-[#0b2a53]">{formatTzs(materialsSummary.totalValue)}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Completed: {materialsSummary.completedRequirements}/{materialsSummary.totalRequirements}
+          </p>
+        </SurfaceCard>
+      </div>
+
       {tabBar}
 
       {/* Filter and Add buttons - outside card, right aligned */}

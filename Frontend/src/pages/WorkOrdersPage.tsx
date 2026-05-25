@@ -134,7 +134,7 @@ export const WorkOrderModal = ({
       form.orderDate.trim().length === 0 ||
       form.description.trim().length < 2
     ) {
-      setError("Jaza: project, namba ya order, tarehe, na maelezo.");
+      setError("Please fill project, order number, date, and description.");
       return;
     }
 
@@ -149,7 +149,7 @@ export const WorkOrderModal = ({
       markSaved();
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Imeshindwa kuhifadhi work order.");
+      setError(err instanceof Error ? err.message : "Failed to save work order.");
     } finally {
       setSaving(false);
     }
@@ -161,7 +161,7 @@ export const WorkOrderModal = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <SurfaceCard
         className="w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-        title={editingOrder ? "Hariri Work Order" : "Work Order Mpya"}
+        title={editingOrder ? "Edit Work Order" : "New Work Order"}
       >
         {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
         <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -191,7 +191,7 @@ export const WorkOrderModal = ({
 
           {/* ── Order Number ── */}
           <label className="form-field">
-            <span>Namba ya Order <span className="text-red-500">*</span></span>
+            <span>Order Number <span className="text-red-500">*</span></span>
             <input
               className="input-field"
               onChange={(e) => setForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
@@ -202,18 +202,18 @@ export const WorkOrderModal = ({
 
           {/* ── Client Name — auto-filled, read-only ── */}
           <label className="form-field">
-            <span>Jina la Mteja</span>
+            <span>Client Name</span>
             <input
               className="input-field bg-slate-50 text-slate-600"
               readOnly
-              title="Inajaza kiotomatiki kutoka kwa mradi"
+              title="Auto-filled from the selected project"
               value={form.clientName}
             />
           </label>
 
           {/* ── Order Date — defaults to today ── */}
           <label className="form-field">
-            <span>Tarehe ya Order <span className="text-red-500">*</span></span>
+            <span>Order Date <span className="text-red-500">*</span></span>
             <input
               className="input-field"
               onChange={(e) => setForm((prev) => ({ ...prev, orderDate: e.target.value }))}
@@ -224,7 +224,7 @@ export const WorkOrderModal = ({
 
           {/* ── Description ── */}
           <label className="form-field sm:col-span-2">
-            <span>Maelezo ya Kazi <span className="text-red-500">*</span></span>
+            <span>Work Description <span className="text-red-500">*</span></span>
             <textarea
               className="input-field min-h-16"
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
@@ -236,11 +236,11 @@ export const WorkOrderModal = ({
           {/* ── Materials ── */}
           <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Vifaa (Materials)
+              Materials
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <FinancialInput
-                label="Gharama ya Vifaa"
+                label="Materials Cost"
                 onChange={(val) => {
                   setMaterialsCostStr(val);
                   setForm((prev) => ({ ...prev, materialsCost: Number(val) || 0 }));
@@ -249,7 +249,7 @@ export const WorkOrderModal = ({
                 value={materialsCostStr}
               />
               <label className="form-field">
-                <span>Faida % ya Vifaa</span>
+                <span>Materials Profit %</span>
                 <input
                   className="input-field"
                   max="100"
@@ -266,7 +266,7 @@ export const WorkOrderModal = ({
                 />
               </label>
               <label className="form-field">
-                <span>Faida ya Vifaa (Auto)</span>
+                <span>Materials Profit (Auto)</span>
                 <input
                   className="input-field bg-slate-100 text-emerald-700 font-semibold"
                   readOnly
@@ -279,11 +279,11 @@ export const WorkOrderModal = ({
           {/* ── Labour ── */}
           <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Wafanyakazi (Labour)
+              Labour
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <FinancialInput
-                label="Gharama ya Wafanyakazi"
+                label="Labour Cost"
                 onChange={(val) => {
                   setLabourCostStr(val);
                   setForm((prev) => ({ ...prev, labourCost: Number(val) || 0 }));
@@ -292,7 +292,7 @@ export const WorkOrderModal = ({
                 value={labourCostStr}
               />
               <label className="form-field">
-                <span>Faida % ya Wafanyakazi</span>
+                <span>Labour Profit %</span>
                 <input
                   className="input-field"
                   max="100"
@@ -309,7 +309,7 @@ export const WorkOrderModal = ({
                 />
               </label>
               <label className="form-field">
-                <span>Faida ya Wafanyakazi (Auto)</span>
+                <span>Labour Profit (Auto)</span>
                 <input
                   className="input-field bg-slate-100 text-emerald-700 font-semibold"
                   readOnly
@@ -322,19 +322,19 @@ export const WorkOrderModal = ({
           {/* ── Order Summary ── */}
           <div className="sm:col-span-2 rounded-xl border border-[#0b2a53]/20 bg-[#0b2a53]/5 p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#0b2a53]">
-              Muhtasari wa Order
+              Order Summary
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div>
-                <p className="text-xs text-slate-500">Jumla ya Gharama</p>
+                <p className="text-xs text-slate-500">Total Cost</p>
                 <p className="text-base font-bold text-slate-900">{formatTzs(totalCost)}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Jumla ya Faida</p>
+                <p className="text-xs text-slate-500">Total Profit</p>
                 <p className="text-base font-bold text-emerald-700">{formatTzs(totalProfit)}</p>
               </div>
               <div className="sm:col-span-2">
-                <p className="text-xs text-slate-500">Grand Total (Kuchajiwa Mteja)</p>
+                <p className="text-xs text-slate-500">Grand Total (Client Charge)</p>
                 <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(grandTotal)}</p>
               </div>
             </div>
@@ -342,7 +342,7 @@ export const WorkOrderModal = ({
 
           {/* ── Status ── */}
           <label className="form-field">
-            <span>Hali (Status)</span>
+            <span>Status</span>
             <GuiSelect
               className="input-field"
               onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
@@ -358,18 +358,18 @@ export const WorkOrderModal = ({
 
           {/* ── Notes ── */}
           <label className="form-field sm:col-span-2">
-            <span>Maelezo ya Ziada</span>
+            <span>Additional Notes</span>
             <textarea
               className="input-field min-h-16"
               onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              placeholder="Maelezo ya ziada..."
+              placeholder="Additional notes..."
               value={form.notes}
             />
           </label>
 
           <div className="sm:col-span-2 flex justify-end gap-2">
             <button className="btn-secondary" onClick={onClose} type="button">
-              Ghairi
+              Cancel
             </button>
             <button
               className="btn-primary"
@@ -377,7 +377,7 @@ export const WorkOrderModal = ({
               onClick={() => void handleSave()}
               type="button"
             >
-              {saving ? "Inahifadhi..." : editingOrder ? "Sasisha Order" : "Hifadhi Order"}
+              {saving ? "Saving..." : editingOrder ? "Update Order" : "Save Order"}
             </button>
           </div>
         </form>
@@ -417,7 +417,7 @@ export const WorkOrdersPage = () => {
         setError("");
       } catch (err) {
         if (!mounted) return;
-        setError(err instanceof Error ? err.message : "Imeshindwa kupakia work orders.");
+        setError(err instanceof Error ? err.message : "Failed to load work orders.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -450,7 +450,7 @@ export const WorkOrdersPage = () => {
       await refreshOrders();
       setDeleteTarget(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Imeshindwa kufuta work order.");
+      setError(err instanceof Error ? err.message : "Failed to delete work order.");
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -460,7 +460,7 @@ export const WorkOrdersPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Simamia work orders — gharama za vifaa, wafanyakazi, na hesabu za faida."
+        subtitle="Track work orders, costs, and profit."
         title="Work Orders"
       />
 
@@ -468,13 +468,13 @@ export const WorkOrdersPage = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
         <div className="w-full sm:w-56">
           <label className="form-field">
-            <span className="text-sm">Chuja kwa Mradi</span>
+            <span className="text-sm">Filter by Project</span>
             <GuiSelect
               className="input-field"
               onChange={(e) => setProjectFilter(e.target.value)}
               value={projectFilter}
             >
-              <option value="All">Miradi Yote</option>
+              <option value="All">All Projects</option>
               {projects.map((p) => (
                 <option key={`wo-filter-${p.id}`} value={p.id}>
                   {p.name}
@@ -488,13 +488,13 @@ export const WorkOrdersPage = () => {
           onClick={() => { setEditingOrder(null); setShowModal(true); }}
           type="button"
         >
-          + Work Order Mpya
+          + New Work Order
         </button>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SurfaceCard title="Jumla ya Orders">
+        <SurfaceCard title="Total Orders">
           <p className="text-2xl font-bold text-slate-900">{filteredOrders.length}</p>
         </SurfaceCard>
         <SurfaceCard title="Grand Total">
@@ -502,7 +502,7 @@ export const WorkOrdersPage = () => {
             {formatTzs(filteredOrders.reduce((s, o) => s + o.grandTotal, 0))}
           </p>
         </SurfaceCard>
-        <SurfaceCard title="Jumla ya Faida">
+        <SurfaceCard title="Total Profit">
           <p className="text-2xl font-bold text-[#0b2a53]">
             {formatTzs(filteredOrders.reduce((s, o) => s + o.totalProfit, 0))}
           </p>
@@ -510,15 +510,15 @@ export const WorkOrdersPage = () => {
       </div>
 
       {/* Table */}
-      <SurfaceCard title="Orodha ya Work Orders">
+      <SurfaceCard title="Work Orders List">
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
         {loading ? (
           <SkeletonTable rows={5} />
         ) : filteredOrders.length === 0 ? (
           <EmptyState
-            description="Hakuna work orders. Unda work order yako ya kwanza."
-            title="Hakuna work orders"
+            description="No work orders yet. Create your first work order."
+            title="No work orders"
           />
         ) : (
           <>
@@ -527,19 +527,19 @@ export const WorkOrdersPage = () => {
                 <thead>
                   <tr>
                     <th>S/N</th>
-                    <th>Namba ya Order</th>
-                    <th>Mradi</th>
-                    <th>Mteja</th>
-                    <th>Tarehe</th>
-                    <th>Gharama Vifaa</th>
-                    <th>Faida Vifaa</th>
-                    <th>Gharama Wafanyakazi</th>
-                    <th>Faida Wafanyakazi</th>
-                    <th>Jumla Gharama</th>
-                    <th>Jumla Faida</th>
+                    <th>Order Number</th>
+                    <th>Project</th>
+                    <th>Client</th>
+                    <th>Date</th>
+                    <th>Materials Cost</th>
+                    <th>Materials Profit</th>
+                    <th>Labour Cost</th>
+                    <th>Labour Profit</th>
+                    <th>Total Cost</th>
+                    <th>Total Profit</th>
                     <th>Grand Total</th>
-                    <th>Hali</th>
-                    <th>Vitendo</th>
+                    <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -585,14 +585,14 @@ export const WorkOrdersPage = () => {
                             onClick={() => { setEditingOrder(order); setShowModal(true); }}
                             type="button"
                           >
-                            Hariri
+                            Edit
                           </button>
                           <button
                             className="btn-danger py-1 px-3 text-xs"
                             onClick={() => setDeleteTarget(order)}
                             type="button"
                           >
-                            Futa
+                            Delete
                           </button>
                         </div>
                       </td>
@@ -632,19 +632,20 @@ export const WorkOrdersPage = () => {
 
       {/* Confirm Delete */}
       <ConfirmModal
-        cancelLabel="Ghairi"
+        cancelLabel="Cancel"
         confirmClassName="btn-danger"
-        confirmLabel={deleting ? "Inafuta..." : "Futa"}
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
         description={
           deleteTarget
-            ? `Futa work order "${deleteTarget.orderNumber}"? Haiwezi kurudishwa.`
+            ? `Delete work order "${deleteTarget.orderNumber}"? This action cannot be undone.`
             : ""
         }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDelete()}
         open={deleteTarget !== null}
-        title="Futa Work Order"
+        title="Delete Work Order"
       />
     </div>
   );
 };
+

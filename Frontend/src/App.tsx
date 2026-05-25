@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ProtectedRoute, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
+import { TopToastHost } from "./components/TopToastHost";
 import { UnsavedChangesProvider } from "./guards/UnsavedChangesGuard";
 import { AboutPage } from "./landing/AboutPage";
 import { ContactPage } from "./landing/ContactPage";
@@ -32,6 +33,24 @@ import { SuppliersPage } from "./pages/SuppliersPage";
 import { UsersRolesPage } from "./pages/UsersRolesPage";
 import { WorkOrdersPage } from "./pages/WorkOrdersPage";
 
+const THEME_STORAGE_KEY = "engpm:theme";
+
+const readInitialDarkMode = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (storedTheme === "dark") {
+    return true;
+  }
+  if (storedTheme === "light") {
+    return false;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+};
+
 const ScrollToTop = () => {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -50,14 +69,12 @@ const LegacyOperationsRedirect = ({ tab }: { tab: string }) => {
 const ProtectedAppLayout = () => {
   const { user, logout } = useAuth();
   const { company } = useCompanySettings();
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(readInitialDarkMode);
 
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", darkMode);
-    return () => {
-      root.classList.remove("dark");
-    };
+    window.localStorage.setItem(THEME_STORAGE_KEY, darkMode ? "dark" : "light");
   }, [darkMode]);
 
   return (
@@ -82,6 +99,7 @@ function App() {
   return (
     <>
       <GlobalLoader />
+      <TopToastHost />
       <ScrollToTop />
       <Routes>
         {/* ── Public landing routes ── */}

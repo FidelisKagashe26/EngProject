@@ -78,7 +78,7 @@ export const GalleryPage = () => {
       canvas.height = height;
       const context = canvas.getContext("2d");
       if (!context) {
-        throw new Error("Canvas haijapatikana.");
+        throw new Error("Canvas context is not available.");
       }
 
       context.drawImage(baseImage, 0, 0, width, height);
@@ -119,7 +119,7 @@ export const GalleryPage = () => {
         canvas.toBlob(
           (fileBlob) => {
             if (!fileBlob) {
-              reject(new Error("Imeshindikana kuandaa picha ya download."));
+              reject(new Error("Failed to prepare image for download."));
               return;
             }
             resolve(fileBlob);
@@ -142,8 +142,8 @@ export const GalleryPage = () => {
     } catch (error) {
       setDownloadError(
         error instanceof Error
-          ? `Download imeshindikana: ${error.message}`
-          : "Download imeshindikana. Jaribu tena.",
+          ? `Download failed: ${error.message}`
+          : "Download failed. Please try again.",
       );
     } finally {
       setDownloadingItemId(null);
@@ -217,7 +217,7 @@ export const GalleryPage = () => {
               <p className="text-base font-semibold text-slate-500">No images available right now</p>
               <p className="mt-1 text-sm text-slate-400">
                 {filter !== "All"
-                  ? `Hakuna picha katika kategoria "${filter}"`
+                  ? `No images in "${filter}" category`
                   : "Project images will appear here"}
               </p>
             </div>

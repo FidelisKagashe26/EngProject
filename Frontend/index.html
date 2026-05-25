@@ -13,6 +13,19 @@
       name="description"
       content="DREGGAM Engineering is Tanzania's leading engineering and construction firm, delivering electrical, plumbing, security, and high-end building solutions across East Africa."
     />
+    <script>
+      (() => {
+        try {
+          const key = "engpm:theme";
+          const stored = window.localStorage.getItem(key);
+          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          const isDark = stored === "dark" || (stored === null && prefersDark);
+          document.documentElement.classList.toggle("dark", isDark);
+        } catch {
+          // Ignore storage access issues and keep default theme.
+        }
+      })();
+    </script>
     <title>DREGGAM</title>
   </head>
   <body>

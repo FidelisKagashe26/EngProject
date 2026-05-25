@@ -15,7 +15,6 @@ import { WebsiteSettingsProvider } from "./landing/WebsiteSettingsContext";
 import { AppShell } from "./layout/AppShell";
 import { ActivityLogPage } from "./pages/ActivityLogPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { DocumentsPage } from "./pages/DocumentsPage";
 import { ForgotPasswordOtpPage } from "./pages/ForgotPasswordOtpPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -40,12 +39,16 @@ const readInitialDarkMode = (): boolean => {
     return false;
   }
 
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (storedTheme === "dark") {
-    return true;
-  }
-  if (storedTheme === "light") {
-    return false;
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === "dark") {
+      return true;
+    }
+    if (storedTheme === "light") {
+      return false;
+    }
+  } catch {
+    // Fall back to system preference.
   }
 
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -74,7 +77,12 @@ const ProtectedAppLayout = () => {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", darkMode);
-    window.localStorage.setItem(THEME_STORAGE_KEY, darkMode ? "dark" : "light");
+    root.style.colorScheme = darkMode ? "dark" : "light";
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, darkMode ? "dark" : "light");
+    } catch {
+      // Ignore storage write errors.
+    }
   }, [darkMode]);
 
   return (
@@ -151,7 +159,7 @@ function App() {
             <Route element={<LegacyOperationsRedirect tab="materials" />} path="/materials" />
             <Route element={<LegacyOperationsRedirect tab="expenses" />} path="/expenses" />
             <Route element={<PaymentsPage />} path="/payments" />
-            <Route element={<DocumentsPage />} path="/documents" />
+            <Route element={<Navigate replace to="/projects" />} path="/documents" />
             <Route element={<ReportsPage />} path="/reports" />
             <Route element={<SuppliersPage />} path="/suppliers" />
             <Route element={<LegacyOperationsRedirect tab="equipment" />} path="/equipment" />

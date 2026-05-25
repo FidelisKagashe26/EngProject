@@ -194,6 +194,18 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  await db.query(`
+    ALTER TABLE engicost.client_payments
+    ADD COLUMN IF NOT EXISTS attachment_url TEXT
+  `);
+  await db.query(`
+    ALTER TABLE engicost.client_payments
+    ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255)
+  `);
+  await db.query(`
+    ALTER TABLE engicost.client_payments
+    ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(120)
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.workers (

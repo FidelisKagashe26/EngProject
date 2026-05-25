@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   EmptyState,
@@ -80,6 +80,7 @@ export const PaymentsPage = () => {
   const [referenceNumber, setReferenceNumber] = useState("");
   const [status, setStatus] = useState("Received");
   const [notes, setNotes] = useState("");
+  const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -163,6 +164,7 @@ export const PaymentsPage = () => {
     setReferenceNumber("");
     setStatus("Received");
     setNotes("");
+    setPaymentAttachmentFile(null);
   };
 
   const openAddModal = () => {
@@ -181,6 +183,12 @@ export const PaymentsPage = () => {
     if (p) setClientName(p.clientName);
   };
 
+  const handlePaymentAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setPaymentAttachmentFile(file);
+    event.target.value = "";
+  };
+
   const handleSavePayment = async () => {
     if (
       projectId.trim().length === 0 ||
@@ -195,6 +203,21 @@ export const PaymentsPage = () => {
     setSaving(true);
     setError("");
     try {
+      const attachmentFields: {
+        attachmentUrl?: string;
+        attachmentName?: string;
+        attachmentType?: string;
+      } = {};
+
+      if (paymentAttachmentFile) {
+        const uploaded = await api.uploadDocumentFile(paymentAttachmentFile, {
+          notifySuccess: false,
+        });
+        attachmentFields.attachmentUrl = uploaded.url;
+        attachmentFields.attachmentName = paymentAttachmentFile.name;
+        attachmentFields.attachmentType = paymentAttachmentFile.type || uploaded.mimetype;
+      }
+
       await api.createPayment({
         projectId,
         clientName: clientName.trim(),
@@ -207,6 +230,7 @@ export const PaymentsPage = () => {
         referenceNumber: referenceNumber.trim(),
         status,
         notes: notes.trim(),
+        ...attachmentFields,
       });
       await refreshPayments();
       markSaved();
@@ -299,6 +323,7 @@ export const PaymentsPage = () => {
                     <th>Balance</th>
                     <th>Payment Method</th>
                     <th>Reference</th>
+                    <th>Attachment</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -316,6 +341,20 @@ export const PaymentsPage = () => {
                       <td>{formatTzs(payment.balance)}</td>
                       <td>{payment.paymentMethod}</td>
                       <td>{payment.referenceNumber || "-"}</td>
+                      <td>
+                        {payment.attachmentUrl ? (
+                          <a
+                            className="text-sm font-semibold text-[#0b2a53] hover:underline"
+                            href={payment.attachmentUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {payment.attachmentName || "View"}
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
                       <td>
                         <span className={
                           payment.status === "Received"
@@ -439,6 +478,18 @@ export const PaymentsPage = () => {
                   <option value="Pending">Pending</option>
                   <option value="Partial">Partial</option>
                 </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Receipt / Bank Slip (Optional)</span>
+                <input
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  className="input-field"
+                  onChange={handlePaymentAttachmentChange}
+                  type="file"
+                />
+                {paymentAttachmentFile && (
+                  <span className="mt-1 text-xs text-slate-500">{paymentAttachmentFile.name}</span>
+                )}
               </label>
               <label className="form-field sm:col-span-2">
                 <span>Notes</span>

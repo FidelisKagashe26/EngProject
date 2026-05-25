@@ -19,6 +19,9 @@ const paymentSchema = z.object({
   referenceNumber: z.string().optional().default(""),
   status: z.string().optional().default("Pending"),
   notes: z.string().optional().default(""),
+  attachmentUrl: z.string().optional().default(""),
+  attachmentName: z.string().optional().default(""),
+  attachmentType: z.string().optional().default(""),
 });
 
 router.get(
@@ -41,6 +44,9 @@ router.get(
         reference_number: string | null;
         status: string;
         notes: string | null;
+        attachment_url: string | null;
+        attachment_name: string | null;
+        attachment_type: string | null;
       }>(
         `
         SELECT
@@ -56,7 +62,10 @@ router.get(
           cp.payment_method,
           cp.reference_number,
           cp.status,
-          cp.notes
+          cp.notes,
+          cp.attachment_url,
+          cp.attachment_name,
+          cp.attachment_type
         FROM engicost.client_payments cp
         JOIN engicost.projects p ON p.id = cp.project_id
         WHERE cp.company_id = $1
@@ -122,6 +131,9 @@ router.get(
         referenceNumber: row.reference_number ?? "",
         status: row.status,
         notes: row.notes ?? "",
+        attachmentUrl: row.attachment_url ?? "",
+        attachmentName: row.attachment_name ?? "",
+        attachmentType: row.attachment_type ?? "",
       })),
       cashFlow: {
         incomeVsOutflow: {
@@ -151,10 +163,12 @@ router.post(
       `
       INSERT INTO engicost.client_payments (
         id, company_id, project_id, client_name, payment_type, milestone, amount_expected,
-        amount_received, payment_date, payment_method, reference_number, status, notes
+        amount_received, payment_date, payment_method, reference_number, status, notes,
+        attachment_url, attachment_name, attachment_type
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13
+        $8, $9, $10, $11, $12, $13,
+        NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, '')
       )
       RETURNING
         id,
@@ -168,7 +182,10 @@ router.post(
         payment_method,
         reference_number,
         status,
-        notes
+        notes,
+        attachment_url,
+        attachment_name,
+        attachment_type
       `,
       [
         makeId("PAY"),
@@ -184,6 +201,9 @@ router.post(
         parsed.referenceNumber,
         parsed.status,
         parsed.notes,
+        parsed.attachmentUrl,
+        parsed.attachmentName,
+        parsed.attachmentType,
       ],
     );
 
@@ -226,6 +246,9 @@ router.post(
       referenceNumber: row.reference_number ?? "",
       status: row.status,
       notes: row.notes ?? "",
+      attachmentUrl: row.attachment_url ?? "",
+      attachmentName: row.attachment_name ?? "",
+      attachmentType: row.attachment_type ?? "",
     });
   }),
 );

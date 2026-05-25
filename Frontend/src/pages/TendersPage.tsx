@@ -368,7 +368,7 @@ export const TendersPage = () => {
                           </Link>
                           <Link
                             className="btn-primary py-1 px-3 text-xs"
-                            to={`/documents#upload-document`}
+                            to={`/projects/${encodeURIComponent(item.projectId)}`}
                           >
                             Docs
                           </Link>
@@ -514,4 +514,3 @@ export const TendersPage = () => {
     </div>
   );
 };
-

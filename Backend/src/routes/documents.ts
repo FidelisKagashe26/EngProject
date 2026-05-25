@@ -1,4 +1,6 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
 import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
@@ -8,7 +10,7 @@ import { handleAsync } from "./utils";
 const router = Router();
 
 const documentSchema = z.object({
-  projectId: z.string().optional().default(""),
+  projectId: z.string().min(3),
   category: z.string().min(2),
   documentName: z.string().min(2),
   fileType: z.string().optional().default(""),
@@ -20,8 +22,20 @@ const documentSchema = z.object({
 
 router.get(
   "/",
-  handleAsync(async (_req, res) => {
+  handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
+    const projectId =
+      typeof req.query.projectId === "string" && req.query.projectId.trim().length >= 3
+        ? req.query.projectId.trim()
+        : null;
+
+    const whereClauses = ["d.company_id = $1", "d.project_id IS NOT NULL"];
+    const params: Array<number | string> = [companyId];
+    if (projectId) {
+      params.push(projectId);
+      whereClauses.push(`d.project_id = $${params.length}`);
+    }
+
     const result = await db.query<{
       id: string;
       project_id: string | null;
@@ -50,17 +64,17 @@ router.get(
         d.created_at::text
       FROM engicost.documents d
       LEFT JOIN engicost.projects p ON p.id = d.project_id
-      WHERE d.company_id = $1
+      WHERE ${whereClauses.join(" AND ")}
       ORDER BY d.created_at DESC
       `,
-      [companyId],
+      params,
     );
 
     res.json(
       result.rows.map((row) => ({
         id: row.id,
         projectId: row.project_id,
-        projectName: row.project_name ?? "General",
+        projectName: row.project_name ?? "Unknown Project",
         category: row.category,
         documentName: row.document_name,
         fileType: row.file_type ?? "",
@@ -80,13 +94,28 @@ router.post(
     const companyId = await getSingleTenantCompanyId();
     const parsed = documentSchema.parse(req.body);
 
+    const projectExists = await db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM engicost.projects
+      WHERE company_id = $1 AND id = $2
+      LIMIT 1
+      `,
+      [companyId, parsed.projectId],
+    );
+
+    if (projectExists.rowCount === 0) {
+      res.status(400).json({ message: "Project not found for this document." });
+      return;
+    }
+
     const inserted = await db.query(
       `
       INSERT INTO engicost.documents (
         id, company_id, project_id, category, document_name, file_type, file_size,
         file_reference, uploaded_by, notes
       ) VALUES (
-        $1, $2, NULLIF($3, ''), $4, $5, $6, $7,
+        $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10
       )
       RETURNING
@@ -135,11 +164,11 @@ router.delete(
   "/:id",
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
-    const deleted = await db.query(
+    const deleted = await db.query<{ id: string; file_reference: string | null }>(
       `
       DELETE FROM engicost.documents
       WHERE company_id = $1 AND id = $2
-      RETURNING id
+      RETURNING id, file_reference
       `,
       [companyId, req.params.id],
     );
@@ -147,6 +176,17 @@ router.delete(
     if (deleted.rowCount === 0) {
       res.status(404).json({ message: "Document not found." });
       return;
+    }
+
+    const fileReference = deleted.rows[0].file_reference ?? "";
+    const publicPrefix = "/uploads/documents/";
+    if (fileReference.startsWith(publicPrefix)) {
+      const relativePath = fileReference.replace(/^\/+/, "");
+      const uploadRoot = path.resolve(process.cwd(), "uploads", "documents");
+      const absolutePath = path.resolve(process.cwd(), relativePath);
+      if (absolutePath.startsWith(uploadRoot) && fs.existsSync(absolutePath)) {
+        fs.unlinkSync(absolutePath);
+      }
     }
 
     res.json({ message: "Document deleted successfully." });

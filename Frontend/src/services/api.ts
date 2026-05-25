@@ -1,4 +1,4 @@
-import { pushTopToast } from "../components/topToast";
+﻿import { pushTopToast } from "../components/topToast";
 
 export interface DashboardSummary {
   totalProjects: number;
@@ -371,6 +371,9 @@ export interface PaymentApiRecord {
   referenceNumber: string;
   status: string;
   notes: string;
+  attachmentUrl: string;
+  attachmentName: string;
+  attachmentType: string;
 }
 
 export interface PaymentsResponse {
@@ -412,6 +415,9 @@ export interface CreatePaymentPayload {
   referenceNumber: string;
   status: string;
   notes: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  attachmentType?: string;
 }
 
 export interface CreatePaymentResponse {
@@ -427,6 +433,9 @@ export interface CreatePaymentResponse {
   referenceNumber: string;
   status: string;
   notes: string;
+  attachmentUrl: string;
+  attachmentName: string;
+  attachmentType: string;
 }
 
 export interface EquipmentApiRecord {
@@ -1030,6 +1039,76 @@ const apiRequest = async <T>(
   }
 };
 
+type UploadFileResponse = {
+  url: string;
+  filename: string;
+  originalName: string;
+  size: number;
+  mimetype: string;
+};
+
+const uploadSingleFile = async (
+  endpointPath: string,
+  fieldName: "image" | "file",
+  file: File,
+  options?: {
+    notifySuccess?: boolean;
+    successMessage?: string;
+  },
+): Promise<UploadFileResponse> => {
+  beginApiRequest();
+  try {
+    const formData = new FormData();
+    formData.append(fieldName, file);
+
+    const headers = new Headers();
+    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+
+    const response = await fetch(`${API_BASE_URL}${endpointPath}`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    const payload = (await parseJsonSafe(response)) as {
+      url?: string;
+      filename?: string;
+      originalName?: string;
+      size?: number;
+      mimetype?: string;
+      message?: string;
+    };
+
+    if (!response.ok) {
+      const message = payload.message ?? "Upload failed";
+      pushTopToast({
+        tone: "error",
+        title: "Upload Failed",
+        message,
+      });
+      throw new ApiError(message, response.status, payload);
+    }
+
+    if (options?.notifySuccess !== false) {
+      pushTopToast({
+        tone: "success",
+        title: "Success",
+        message: options?.successMessage ?? "File uploaded successfully.",
+      });
+    }
+
+    return {
+      url: payload.url ?? "",
+      filename: payload.filename ?? "",
+      originalName: payload.originalName ?? "",
+      size: payload.size ?? 0,
+      mimetype: payload.mimetype ?? "",
+    };
+  } finally {
+    endApiRequest();
+  }
+};
+
 export const api = {
   health: () => apiRequest<{ message: string; db: string; timestamp: string }>("/health"),
   login: (payload: { email: string; password: string }) =>
@@ -1173,7 +1252,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getDocuments: () => apiRequest<DocumentApiRecord[]>("/documents"),
+  getDocuments: (params?: { projectId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.projectId && params.projectId.trim().length > 0) {
+      query.set("projectId", params.projectId.trim());
+    }
+    const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
+    return apiRequest<DocumentApiRecord[]>(`/documents${suffix}`);
+  },
   createDocument: (payload: CreateDocumentPayload) =>
     apiRequest<DocumentApiRecord>("/documents", {
       method: "POST",
@@ -1286,13 +1372,13 @@ export const api = {
     apiRequest<{ message: string }>(`/work-orders/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  // Public — no auth required
+  // Public â€” no auth required
   submitQuoteRequest: (payload: SubmitQuoteRequestPayload) =>
     apiRequest<{ message: string; id: string }>("/public/quote-requests", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  // Admin — quote requests management
+  // Admin â€” quote requests management
   getQuoteRequests: () => apiRequest<QuoteRequestApiRecord[]>("/quote-requests", { notifyError: false }),
   updateQuoteRequestStatus: (id: string, status: "New" | "Read" | "Replied") =>
     apiRequest<{ message: string; id: string }>(`/quote-requests/${encodeURIComponent(id)}/status`, {
@@ -1307,10 +1393,10 @@ export const api = {
       notifyError: false,
       notifySuccess: false,
     }),
-  // Public — website settings (no auth)
+  // Public â€” website settings (no auth)
   getPublicWebsiteSettings: () =>
     apiRequest<Partial<WebsiteSettings>>("/public/website-settings"),
-  // Admin — website settings
+  // Admin â€” website settings
   getWebsiteSettings: () =>
     apiRequest<Partial<WebsiteSettings>>("/website-settings"),
   saveWebsiteSettings: (payload: Partial<WebsiteSettings>) =>
@@ -1320,10 +1406,10 @@ export const api = {
       notifyError: false,
       notifySuccess: false,
     }),
-  // Public — gallery (no auth)
+  // Public â€” gallery (no auth)
   getPublicGallery: () =>
     apiRequest<GalleryResponse>("/public/gallery"),
-  // Admin — gallery management
+  // Admin â€” gallery management
   getGallery: () =>
     apiRequest<GalleryResponse>("/gallery"),
   createGalleryItem: (payload: CreateGalleryItemPayload) =>
@@ -1340,36 +1426,18 @@ export const api = {
     apiRequest<{ message: string }>(`/gallery/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  // Upload image file
   uploadGalleryImage: async (file: File): Promise<{ url: string }> => {
-    const formData = new FormData();
-    formData.append("image", file);
-    // Use fetch directly (no Content-Type header — browser sets multipart boundary)
-    const headers = new Headers();
-    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
-    const response = await fetch(`${API_BASE_URL}/upload/gallery`, {
-      method: "POST",
-      headers,
-      body: formData,
+    const uploaded = await uploadSingleFile("/upload/gallery", "image", file, {
+      successMessage: "Image uploaded successfully.",
     });
-    const payload = await response.json() as { url?: string; message?: string };
-    if (!response.ok) {
-      const message = (payload as { message?: string }).message ?? "Upload failed";
-      pushTopToast({
-        tone: "error",
-        title: "Upload Failed",
-        message,
-      });
-      throw new ApiError(
-        message,
-        response.status,
-      );
-    }
-    pushTopToast({
-      tone: "success",
-      title: "Success",
-      message: "Image uploaded successfully.",
-    });
-    return { url: (payload as { url: string }).url };
+    return { url: uploaded.url };
   },
+  uploadDocumentFile: async (
+    file: File,
+    options?: { notifySuccess?: boolean },
+  ): Promise<UploadFileResponse> =>
+    uploadSingleFile("/upload/document", "file", file, {
+      notifySuccess: options?.notifySuccess,
+      successMessage: "Document uploaded successfully.",
+    }),
 };

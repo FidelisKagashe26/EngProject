@@ -318,15 +318,24 @@ export const ProjectFormPage = () => {
   const attachInitialDocuments = async (savedProjectId: string) => {
     if (initialDocuments.length === 0) return;
     const uploadedBy = user?.fullName?.trim().length ? user.fullName : "Project Manager";
-    await Promise.all(
+    const uploadedFiles = await Promise.all(
       initialDocuments.map((file) =>
+        api.uploadDocumentFile(file, { notifySuccess: false }).then((uploaded) => ({
+          file,
+          uploaded,
+        })),
+      ),
+    );
+
+    await Promise.all(
+      uploadedFiles.map(({ file, uploaded }) =>
         api.createDocument({
           projectId: savedProjectId,
           category: "Other Documents",
           documentName: file.name,
           fileType: toFileType(file),
           fileSize: formatBytes(file.size),
-          fileReference: file.name,
+          fileReference: uploaded.url,
           uploadedBy,
           notes: "Uploaded from Project Form initial documents.",
         }),

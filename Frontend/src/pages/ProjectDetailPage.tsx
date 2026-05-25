@@ -3,15 +3,18 @@ import {
   Briefcase,
   Calendar,
   DollarSign,
-  FileText,
   HardHat,
   Package,
+  Paperclip,
   Plus,
+  Trash2,
   TrendingUp,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useAuth } from "../auth";
+import { pushTopToast } from "../components/topToast";
 import {
   ConfirmModal,
   EmptyState,
@@ -21,7 +24,7 @@ import {
   SkeletonTable,
   SurfaceCard,
 } from "../components/ui";
-import { api, type ProjectApiRecord, type WorkOrderApiRecord } from "../services/api";
+import { api, type DocumentApiRecord, type ProjectApiRecord, type WorkOrderApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
 import { WorkOrderModal } from "./WorkOrdersPage";
 
@@ -222,7 +225,293 @@ const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
 
 // ─── Project Detail Page ──────────────────────────────────────────────────────
 
+const projectDocumentCategories = [
+  "Project Documents",
+  "Worker Documents",
+  "Contracts",
+  "Invoices",
+  "Receipts",
+  "Drawings",
+  "Other Documents",
+];
+
+type InlineProjectDocumentsProps = {
+  project: ProjectApiRecord;
+  uploadedByName: string;
+};
+
+const InlineProjectDocuments = ({ project, uploadedByName }: InlineProjectDocumentsProps) => {
+  const [documents, setDocuments] = useState<DocumentApiRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+  const [category, setCategory] = useState("Project Documents");
+  const [notes, setNotes] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadDocuments = async () => {
+    setLoading(true);
+    try {
+      const rows = await api.getDocuments({ projectId: project.id });
+      setDocuments(rows);
+    } catch (error) {
+      pushTopToast({
+        tone: "error",
+        title: "Load Failed",
+        message: error instanceof Error ? error.message : "Failed to load project documents.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFilesSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+
+    setPendingFiles((previousFiles) => {
+      const unique = new Map(
+        previousFiles.map((file) => [`${file.name}:${file.size}:${file.lastModified}`, file]),
+      );
+      for (const file of files) {
+        unique.set(`${file.name}:${file.size}:${file.lastModified}`, file);
+      }
+      return Array.from(unique.values());
+    });
+
+    event.target.value = "";
+  };
+
+  const handleRemovePendingFile = (indexToRemove: number) => {
+    setPendingFiles((previousFiles) =>
+      previousFiles.filter((_, currentIndex) => currentIndex !== indexToRemove),
+    );
+  };
+
+  const handleUploadDocuments = async () => {
+    if (pendingFiles.length === 0) {
+      pushTopToast({
+        tone: "info",
+        title: "No Files Selected",
+        message: "Choose at least one file before uploading.",
+      });
+      return;
+    }
+
+    const filesToUpload = [...pendingFiles];
+    setUploading(true);
+    try {
+      await Promise.all(
+        filesToUpload.map(async (file) => {
+          const uploaded = await api.uploadDocumentFile(file, { notifySuccess: false });
+          await api.createDocument({
+            projectId: project.id,
+            category: category.trim().length > 0 ? category.trim() : "Project Documents",
+            documentName: file.name,
+            fileType: file.type || uploaded.mimetype,
+            fileSize: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+            fileReference: uploaded.url,
+            uploadedBy: uploadedByName,
+            notes: notes.trim(),
+          });
+        }),
+      );
+
+      setPendingFiles([]);
+      setNotes("");
+      await loadDocuments();
+      pushTopToast({
+        tone: "success",
+        title: "Success",
+        message: `${filesToUpload.length} document${filesToUpload.length === 1 ? "" : "s"} uploaded successfully.`,
+      });
+    } catch (error) {
+      pushTopToast({
+        tone: "error",
+        title: "Upload Failed",
+        message: error instanceof Error ? error.message : "Failed to upload one or more documents.",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (documentRow: DocumentApiRecord) => {
+    const confirmed = window.confirm(
+      `Delete "${documentRow.documentName}" from this project documents list?`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(documentRow.id);
+    try {
+      await api.deleteDocument(documentRow.id);
+      await loadDocuments();
+      pushTopToast({
+        tone: "success",
+        title: "Success",
+        message: "Document deleted successfully.",
+      });
+    } catch (error) {
+      pushTopToast({
+        tone: "error",
+        title: "Delete Failed",
+        message: error instanceof Error ? error.message : "Failed to delete document.",
+      });
+    } finally {
+      setDeletingId("");
+    }
+  };
+
+  return (
+    <SurfaceCard title={`Project Documents (${documents.length})`}>
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+        <label className="form-field">
+          <span>Category</span>
+          <select
+            className="input-field"
+            onChange={(event) => setCategory(event.target.value)}
+            value={category}
+          >
+            {projectDocumentCategories.map((option) => (
+              <option key={`doc-category-${option}`} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Notes (Optional)</span>
+          <input
+            className="input-field"
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="E.g. worker contracts, approvals, receipts."
+            value={notes}
+          />
+        </label>
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+          <input
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
+            className="hidden"
+            multiple
+            onChange={handleFilesSelected}
+            ref={fileInputRef}
+            type="file"
+          />
+          <button
+            className="btn-secondary inline-flex items-center gap-2"
+            onClick={() => fileInputRef.current?.click()}
+            type="button"
+          >
+            <Paperclip className="h-4 w-4" />
+            Select Documents
+          </button>
+          <button
+            className="btn-primary"
+            disabled={uploading || pendingFiles.length === 0}
+            onClick={() => void handleUploadDocuments()}
+            type="button"
+          >
+            {uploading ? "Uploading..." : "Upload Selected"}
+          </button>
+        </div>
+        {pendingFiles.length > 0 && (
+          <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Ready to Upload ({pendingFiles.length})
+            </p>
+            <ul className="mt-2 space-y-2">
+              {pendingFiles.map((file, index) => (
+                <li className="flex items-center justify-between text-sm text-slate-700" key={`${file.name}:${file.size}:${file.lastModified}`}>
+                  <span>{file.name}</span>
+                  <button
+                    className="text-xs font-semibold text-red-600 hover:text-red-700"
+                    onClick={() => handleRemovePendingFile(index)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4">
+        {loading ? (
+          <SkeletonTable rows={3} />
+        ) : documents.length === 0 ? (
+          <EmptyState
+            description="No documents uploaded for this project yet."
+            title="No Project Documents"
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table min-w-[900px]">
+              <thead>
+                <tr>
+                  <th>S/N</th>
+                  <th>Document</th>
+                  <th>Category</th>
+                  <th>Uploaded By</th>
+                  <th>Date</th>
+                  <th>Size</th>
+                  <th>File</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map((documentRow, index) => (
+                  <tr key={documentRow.id}>
+                    <td>{index + 1}</td>
+                    <td className="font-medium text-slate-900">{documentRow.documentName}</td>
+                    <td>{documentRow.category}</td>
+                    <td>{documentRow.uploadedBy}</td>
+                    <td>{formatDate(documentRow.createdAt)}</td>
+                    <td>{documentRow.fileSize || "-"}</td>
+                    <td>
+                      {documentRow.fileReference ? (
+                        <a
+                          className="text-sm font-semibold text-[#0b2a53] hover:underline"
+                          href={documentRow.fileReference}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          View File
+                        </a>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 hover:text-red-700"
+                        disabled={deletingId === documentRow.id}
+                        onClick={() => void handleDeleteDocument(documentRow)}
+                        type="button"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deletingId === documentRow.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </SurfaceCard>
+  );
+};
+
 export function ProjectDetailPage() {
+  const { user } = useAuth();
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<ProjectApiRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -262,6 +551,8 @@ export function ProjectDetailPage() {
     );
   }
 
+  const uploadedByName = user?.fullName?.trim().length ? user.fullName : "Project Manager";
+
   const quickLinks: QuickLinkProps[] = [
     {
       icon: <Users className="h-5 w-5 text-emerald-700" />,
@@ -292,12 +583,6 @@ export function ProjectDetailPage() {
       label: "Equipment",
       to: `/site-operations?tab=equipment&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-slate-100",
-    },
-    {
-      icon: <FileText className="h-5 w-5 text-indigo-700" />,
-      label: "Documents",
-      to: `/documents?projectId=${encodeURIComponent(project.id)}`,
-      color: "bg-indigo-50",
     },
     {
       icon: <Briefcase className="h-5 w-5 text-[#0b2a53]" />,
@@ -412,10 +697,11 @@ export function ProjectDetailPage() {
 
       {/* ── Work Orders — inline ── */}
       <InlineWorkOrders project={project} />
+      <InlineProjectDocuments project={project} uploadedByName={uploadedByName} />
 
       {/* Quick Access — other modules */}
       <SurfaceCard title="Quick Access">
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-6">
           {quickLinks.map((link) => (
             <QuickLink key={link.label} {...link} />
           ))}

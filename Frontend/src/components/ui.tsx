@@ -128,7 +128,7 @@ export const KpiCard = ({
     }
   >
     <div className="mb-2.5 flex items-start justify-between gap-2 sm:mb-3">
-      <span className={accent ? "block max-w-[82%] break-words text-[10px] font-semibold uppercase leading-4 tracking-wide text-blue-100 sm:max-w-none sm:text-xs" : "block max-w-[82%] break-words text-[10px] font-semibold uppercase leading-4 tracking-wide text-slate-500 sm:max-w-none sm:text-xs"}>
+      <span className={accent ? "block max-w-[82%] wrap-break-word text-[10px] font-semibold uppercase leading-4 tracking-wide text-blue-100 sm:max-w-none sm:text-xs" : "block max-w-[82%] wrap-break-word text-[10px] font-semibold uppercase leading-4 tracking-wide text-slate-500 sm:max-w-none sm:text-xs"}>
         {label}
       </span>
       <span className={accent ? "shrink-0 text-blue-100 [&_svg]:h-3.5 [&_svg]:w-3.5 sm:[&_svg]:h-4 sm:[&_svg]:w-4" : "shrink-0 text-[#0b2a53]/60 [&_svg]:h-3.5 [&_svg]:w-3.5 sm:[&_svg]:h-4 sm:[&_svg]:w-4"}>{icon}</span>
@@ -136,14 +136,14 @@ export const KpiCard = ({
     <p
       className={
         accent
-          ? `${isMonetary ? "break-words text-[0.95rem] [overflow-wrap:anywhere] sm:text-2xl" : "break-words text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-white`
-          : `${isMonetary ? "break-words text-[0.95rem] [overflow-wrap:anywhere] sm:text-2xl" : "break-words text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-slate-900`
+          ? `${isMonetary ? "wrap-anywhere text-[0.95rem] sm:text-2xl" : "wrap-break-word text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-white`
+          : `${isMonetary ? "wrap-anywhere text-[0.95rem] sm:text-2xl" : "wrap-break-word text-[1.1rem] sm:text-2xl"} font-semibold leading-tight tracking-tight text-slate-900`
       }
     >
       <span className="sm:hidden">{value}</span>
       <span className="hidden sm:inline">{desktopValue ?? value}</span>
     </p>
-    {meta && <p className={accent ? "mt-1.5 break-words text-[10px] leading-4 text-blue-100 sm:text-xs" : "mt-1.5 break-words text-[10px] leading-4 text-slate-500 sm:text-xs"}>{meta}</p>}
+    {meta && <p className={accent ? "mt-1.5 wrap-break-word text-[10px] leading-4 text-blue-100 sm:text-xs" : "mt-1.5 wrap-break-word text-[10px] leading-4 text-slate-500 sm:text-xs"}>{meta}</p>}
   </article>
 );
 

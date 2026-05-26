@@ -30,7 +30,6 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SiteOperationsPage } from "./pages/SiteOperationsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { UsersRolesPage } from "./pages/UsersRolesPage";
-import { WorkOrdersPage } from "./pages/WorkOrdersPage";
 
 const THEME_STORAGE_KEY = "engpm:theme";
 
@@ -67,6 +66,16 @@ const LegacyOperationsRedirect = ({ tab }: { tab: string }) => {
   const params = new URLSearchParams(location.search);
   params.set("tab", tab);
   return <Navigate replace to={`/site-operations?${params.toString()}`} />;
+};
+
+const PublicThemeEnforcer = ({ children }: { children: React.ReactNode }) => {
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("dark");
+    root.style.colorScheme = "light";
+  }, []);
+
+  return <>{children}</>;
 };
 
 const ProtectedAppLayout = () => {
@@ -111,7 +120,15 @@ function App() {
       <ScrollToTop />
       <Routes>
         {/* ── Public landing routes ── */}
-        <Route element={<WebsiteSettingsProvider><LandingLayout /></WebsiteSettingsProvider>}>
+        <Route
+          element={
+            <PublicThemeEnforcer>
+              <WebsiteSettingsProvider>
+                <LandingLayout />
+              </WebsiteSettingsProvider>
+            </PublicThemeEnforcer>
+          }
+        >
           <Route element={<HomePage />} path="/" />
           <Route element={<ServicesPage />} path="/services" />
           <Route element={<AboutPage />} path="/about" />
@@ -121,21 +138,51 @@ function App() {
 
         {/* ── Auth routes ── */}
         <Route
-          element={isAuthenticated ? <Navigate replace to="/dashboard" /> : <LoginPage />}
+          element={
+            isAuthenticated ? (
+              <Navigate replace to="/dashboard" />
+            ) : (
+              <PublicThemeEnforcer>
+                <LoginPage />
+              </PublicThemeEnforcer>
+            )
+          }
           path="/login"
         />
         <Route
-          element={isAuthenticated ? <Navigate replace to="/dashboard" /> : <ForgotPasswordPage />}
+          element={
+            isAuthenticated ? (
+              <Navigate replace to="/dashboard" />
+            ) : (
+              <PublicThemeEnforcer>
+                <ForgotPasswordPage />
+              </PublicThemeEnforcer>
+            )
+          }
           path="/forgot-password"
         />
         <Route
           element={
-            isAuthenticated ? <Navigate replace to="/dashboard" /> : <ForgotPasswordOtpPage />
+            isAuthenticated ? (
+              <Navigate replace to="/dashboard" />
+            ) : (
+              <PublicThemeEnforcer>
+                <ForgotPasswordOtpPage />
+              </PublicThemeEnforcer>
+            )
           }
           path="/forgot-password/verify"
         />
         <Route
-          element={isAuthenticated ? <Navigate replace to="/dashboard" /> : <ResetPasswordPage />}
+          element={
+            isAuthenticated ? (
+              <Navigate replace to="/dashboard" />
+            ) : (
+              <PublicThemeEnforcer>
+                <ResetPasswordPage />
+              </PublicThemeEnforcer>
+            )
+          }
           path="/forgot-password/reset"
         />
 
@@ -153,7 +200,6 @@ function App() {
             <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
             <Route element={<ProjectFormPage />} path="/projects/:projectId/edit" />
             <Route element={<Navigate replace to="/projects" />} path="/tenders" />
-            <Route element={<WorkOrdersPage />} path="/work-orders" />
             <Route element={<SiteOperationsPage />} path="/site-operations" />
             <Route element={<LegacyOperationsRedirect tab="labor" />} path="/labor" />
             <Route element={<LegacyOperationsRedirect tab="materials" />} path="/materials" />

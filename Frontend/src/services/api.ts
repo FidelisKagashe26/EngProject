@@ -1,4 +1,4 @@
-﻿import { pushTopToast } from "../components/topToast";
+import { pushTopToast } from "../components/topToast";
 
 export interface DashboardSummary {
   totalProjects: number;
@@ -153,43 +153,6 @@ export interface NotificationApiRecord {
   createdAt: string;
 }
 
-export interface WorkOrderApiRecord {
-  id: string;
-  projectId: string;
-  projectName: string;
-  orderNumber: string;
-  clientName: string;
-  orderDate: string;
-  description: string;
-  materialsCost: number;
-  materialsProfitPct: number;
-  materialsProfitAmount: number;
-  labourCost: number;
-  labourProfitPct: number;
-  labourProfitAmount: number;
-  totalCost: number;
-  totalProfit: number;
-  grandTotal: number;
-  status: string;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateWorkOrderPayload {
-  projectId: string;
-  orderNumber: string;
-  clientName: string;
-  orderDate: string;
-  description: string;
-  materialsCost: number;
-  materialsProfitPct: number;
-  labourCost: number;
-  labourProfitPct: number;
-  status: string;
-  notes: string;
-}
-
 export interface ActivityApiRecord {
   id: string;
   actorName: string;
@@ -214,6 +177,9 @@ export interface WorkerApiRecord {
   totalPaid: number;
   outstandingAmount: number;
   status: string;
+  payCycleStartDate: string;
+  nextPaymentDueDate: string | null;
+  lastPaymentCoveredDate: string | null;
   notes: string;
 }
 
@@ -232,16 +198,18 @@ export interface CreateWorkerPayload {
   paymentType: "Hourly" | "Daily" | "Weekly" | "Monthly" | "Contract";
   rateAmount: number;
   assignedProjectId: string;
+  employmentStartDate: string;
   notes: string;
 }
 
 export interface LaborPaymentPayload {
   projectId: string;
   workerId: string;
-  workStart: string;
-  workEnd: string;
-  daysWorked: number;
-  hoursWorked: number;
+  workStart?: string;
+  workEnd?: string;
+  daysWorked?: number;
+  hoursWorked?: number;
+  cycleCount?: number;
   rateAmount: number;
   amountPaid: number;
   paymentMethod: string;
@@ -257,6 +225,9 @@ export interface LaborPaymentApiRecord {
   workStart: string;
   workEnd: string;
   daysWorked: number;
+  unitsWorked: number;
+  payCycleType: string;
+  payCycleCount: number;
   rateAmount: number;
   totalPayable: number;
   amountPaid: number;
@@ -264,6 +235,7 @@ export interface LaborPaymentApiRecord {
   paymentMethod: string;
   notes: string;
   createdAt: string;
+  nextPaymentDueDate: string | null;
 }
 
 export interface MaterialRequirementApiRecord {
@@ -1241,6 +1213,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  getLaborPayments: () => apiRequest<LaborPaymentApiRecord[]>("/workers/payments"),
   getMaterials: () => apiRequest<MaterialsResponse>("/materials"),
   createMaterialRequirement: (payload: CreateMaterialRequirementPayload) =>
     apiRequest<MaterialRequirementApiRecord>("/materials/requirements", {
@@ -1350,35 +1323,13 @@ export const api = {
     apiRequest<{ message: string }>(`/users/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  getWorkOrders: (params?: { projectId?: string }) => {
-    const query = new URLSearchParams();
-    if (params?.projectId && params.projectId !== "All") query.set("projectId", params.projectId);
-    const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
-    return apiRequest<WorkOrderApiRecord[]>(`/work-orders${suffix}`);
-  },
-  getWorkOrderById: (id: string) =>
-    apiRequest<WorkOrderApiRecord>(`/work-orders/${encodeURIComponent(id)}`),
-  createWorkOrder: (payload: CreateWorkOrderPayload) =>
-    apiRequest<WorkOrderApiRecord>("/work-orders", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  updateWorkOrder: (id: string, payload: Partial<CreateWorkOrderPayload>) =>
-    apiRequest<WorkOrderApiRecord>(`/work-orders/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-  deleteWorkOrder: (id: string) =>
-    apiRequest<{ message: string }>(`/work-orders/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
-  // Public â€” no auth required
+  // Public — no auth required
   submitQuoteRequest: (payload: SubmitQuoteRequestPayload) =>
     apiRequest<{ message: string; id: string }>("/public/quote-requests", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  // Admin â€” quote requests management
+  // Admin — quote requests management
   getQuoteRequests: () => apiRequest<QuoteRequestApiRecord[]>("/quote-requests", { notifyError: false }),
   updateQuoteRequestStatus: (id: string, status: "New" | "Read" | "Replied") =>
     apiRequest<{ message: string; id: string }>(`/quote-requests/${encodeURIComponent(id)}/status`, {
@@ -1393,10 +1344,10 @@ export const api = {
       notifyError: false,
       notifySuccess: false,
     }),
-  // Public â€” website settings (no auth)
+  // Public — website settings (no auth)
   getPublicWebsiteSettings: () =>
     apiRequest<Partial<WebsiteSettings>>("/public/website-settings"),
-  // Admin â€” website settings
+  // Admin — website settings
   getWebsiteSettings: () =>
     apiRequest<Partial<WebsiteSettings>>("/website-settings"),
   saveWebsiteSettings: (payload: Partial<WebsiteSettings>) =>
@@ -1406,10 +1357,10 @@ export const api = {
       notifyError: false,
       notifySuccess: false,
     }),
-  // Public â€” gallery (no auth)
+  // Public — gallery (no auth)
   getPublicGallery: () =>
     apiRequest<GalleryResponse>("/public/gallery"),
-  // Admin â€” gallery management
+  // Admin — gallery management
   getGallery: () =>
     apiRequest<GalleryResponse>("/gallery"),
   createGalleryItem: (payload: CreateGalleryItemPayload) =>
@@ -1441,3 +1392,4 @@ export const api = {
       successMessage: "Document uploaded successfully.",
     }),
 };
+

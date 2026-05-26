@@ -1,12 +1,10 @@
 import {
   ArrowLeft,
-  Briefcase,
   Calendar,
   DollarSign,
   HardHat,
   Package,
   Paperclip,
-  Plus,
   Trash2,
   TrendingUp,
   Users,
@@ -16,7 +14,6 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../auth";
 import { pushTopToast } from "../components/topToast";
 import {
-  ConfirmModal,
   EmptyState,
   ProgressBar,
   SectionTitle,
@@ -24,9 +21,8 @@ import {
   SkeletonTable,
   SurfaceCard,
 } from "../components/ui";
-import { api, type DocumentApiRecord, type ProjectApiRecord, type WorkOrderApiRecord } from "../services/api";
+import { api, type DocumentApiRecord, type ProjectApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
-import { WorkOrderModal } from "./WorkOrdersPage";
 
 // ─── Quick Link tile ──────────────────────────────────────────────────────────
 
@@ -48,182 +44,6 @@ const QuickLink = ({ icon, label, to, color }: QuickLinkProps) => (
 );
 
 // ─── Status badge helper ──────────────────────────────────────────────────────
-
-const woStatusClass = (status: string) => {
-  if (status === "Completed") return "text-sm font-medium text-emerald-700";
-  if (status === "Approved" || status === "In Progress") return "text-sm font-medium text-blue-700";
-  if (status === "Cancelled") return "text-sm font-medium text-red-600";
-  return "text-sm font-medium text-slate-500";
-};
-
-// ─── Inline Work Orders section ───────────────────────────────────────────────
-
-type InlineWorkOrdersProps = {
-  project: ProjectApiRecord;
-};
-
-const InlineWorkOrders = ({ project }: InlineWorkOrdersProps) => {
-  const [orders, setOrders] = useState<WorkOrderApiRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<WorkOrderApiRecord | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<WorkOrderApiRecord | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const rows = await api.getWorkOrders({ projectId: project.id });
-      setOrders(rows);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { void load(); }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await api.deleteWorkOrder(deleteTarget.id);
-      await load();
-      setDeleteTarget(null);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  // Summary totals
-  const totalGrand = orders.reduce((s, o) => s + o.grandTotal, 0);
-  const totalProfit = orders.reduce((s, o) => s + o.totalProfit, 0);
-
-  return (
-    <>
-      <SurfaceCard
-        title={`Work Orders (${orders.length})`}
-      >
-        {/* Mini summary + Add button */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-4 text-sm">
-            <span className="text-slate-500">
-              Grand Total:{" "}
-              <span className="font-semibold text-[#0b2a53]">{formatTzs(totalGrand)}</span>
-            </span>
-            <span className="text-slate-500">
-              Profit:{" "}
-              <span className="font-semibold text-emerald-700">{formatTzs(totalProfit)}</span>
-            </span>
-          </div>
-          <button
-            className="btn-primary flex items-center gap-1 text-sm"
-            onClick={() => { setEditingOrder(null); setShowModal(true); }}
-            type="button"
-          >
-            <Plus className="h-4 w-4" />
-            New Work Order
-          </button>
-        </div>
-
-        {loading ? (
-          <SkeletonTable rows={3} />
-        ) : orders.length === 0 ? (
-          <EmptyState
-            actionLabel="Create Work Order"
-            description="No work orders for this project yet."
-            title="No Work Orders"
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="data-table min-w-[900px]">
-              <thead>
-                <tr>
-                  <th>S/N</th>
-                  <th>Order Number</th>
-                  <th>Date</th>
-                  <th>Materials Cost</th>
-                  <th>Labour Cost</th>
-                  <th>Total Cost</th>
-                  <th>Profit</th>
-                  <th>Grand Total</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order, idx) => (
-                  <tr key={order.id}>
-                    <td>{idx + 1}</td>
-                    <td className="font-medium">{order.orderNumber}</td>
-                    <td>{formatDate(order.orderDate)}</td>
-                    <td>{formatTzs(order.materialsCost)}</td>
-                    <td>{formatTzs(order.labourCost)}</td>
-                    <td>{formatTzs(order.totalCost)}</td>
-                    <td className="font-semibold text-emerald-700">{formatTzs(order.totalProfit)}</td>
-                    <td className="font-bold text-[#0b2a53]">{formatTzs(order.grandTotal)}</td>
-                    <td>
-                      <span className={woStatusClass(order.status)}>{order.status}</span>
-                    </td>
-                    <td>
-                      <div className="flex gap-2">
-                        <button
-                          className="btn-secondary py-1 px-3 text-xs"
-                          onClick={() => { setEditingOrder(order); setShowModal(true); }}
-                          type="button"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="btn-danger py-1 px-3 text-xs"
-                          onClick={() => setDeleteTarget(order)}
-                          type="button"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SurfaceCard>
-
-      {/* Work Order Modal — project locked to this project */}
-      {showModal && (
-        <WorkOrderModal
-          editingOrder={editingOrder}
-          lockedProjectId={project.id}
-          onClose={() => { setShowModal(false); setEditingOrder(null); }}
-          onSaved={async () => {
-            setShowModal(false);
-            setEditingOrder(null);
-            await load();
-          }}
-          projects={[project]}
-        />
-      )}
-
-      <ConfirmModal
-        cancelLabel="Cancel"
-        confirmClassName="btn-danger"
-        confirmLabel={deleting ? "Deleting..." : "Delete"}
-        description={
-          deleteTarget
-            ? `Delete work order "${deleteTarget.orderNumber}"? This action cannot be undone.`
-            : ""
-        }
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={() => void handleDelete()}
-        open={deleteTarget !== null}
-        title="Delete Work Order"
-      />
-    </>
-  );
-};
-
-// ─── Project Detail Page ──────────────────────────────────────────────────────
 
 const projectDocumentCategories = [
   "Project Documents",
@@ -584,12 +404,6 @@ export function ProjectDetailPage() {
       to: `/site-operations?tab=equipment&projectId=${encodeURIComponent(project.id)}`,
       color: "bg-slate-100",
     },
-    {
-      icon: <Briefcase className="h-5 w-5 text-[#0b2a53]" />,
-      label: "All Work Orders",
-      to: `/work-orders?projectId=${encodeURIComponent(project.id)}`,
-      color: "bg-blue-50",
-    },
   ];
 
   return (
@@ -695,8 +509,6 @@ export function ProjectDetailPage() {
         ))}
       </div>
 
-      {/* ── Work Orders — inline ── */}
-      <InlineWorkOrders project={project} />
       <InlineProjectDocuments project={project} uploadedByName={uploadedByName} />
 
       {/* Quick Access — other modules */}
@@ -717,3 +529,4 @@ export function ProjectDetailPage() {
     </div>
   );
 }
+

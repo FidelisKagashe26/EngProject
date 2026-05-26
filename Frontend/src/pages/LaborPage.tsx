@@ -14,16 +14,60 @@ import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
+  type LaborPaymentApiRecord,
   type ProjectApiRecord,
   type WorkerApiRecord,
 } from "../services/api";
-import { formatTzs } from "../utils/format";
+import { formatDate, formatTzs } from "../utils/format";
 
 type LaborPageProps = {
   embedded?: boolean;
   search?: string;
   tabBar?: ReactNode;
 };
+
+const todayStr = (): string => new Date().toISOString().slice(0, 10);
+
+const parseIsoDate = (value: string): Date | null => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  if (
+    parsed.getUTCFullYear() !== y ||
+    parsed.getUTCMonth() + 1 !== m ||
+    parsed.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return parsed;
+};
+
+const formatIsoDate = (value: Date): string =>
+  `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    value.getUTCDate(),
+  ).padStart(2, "0")}`;
+
+const addDays = (date: Date, days: number): Date => {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+};
+
+const addMonthsClamped = (date: Date, months: number): Date => {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+
+  const firstOfMonth = new Date(Date.UTC(year, month + months, 1));
+  const maxDay = new Date(
+    Date.UTC(firstOfMonth.getUTCFullYear(), firstOfMonth.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  firstOfMonth.setUTCDate(Math.min(day, maxDay));
+  return firstOfMonth;
+};
+
+const dayDiffInclusive = (start: Date, end: Date): number =>
+  Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
 export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPageProps) => {
   const { markSaved } = useUnsavedChanges();
@@ -34,6 +78,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [workers, setWorkers] = useState<WorkerApiRecord[]>([]);
+  const [laborPayments, setLaborPayments] = useState<LaborPaymentApiRecord[]>([]);
 
   const [listProjectFilter, setListProjectFilter] = useState(
     projectFromQuery || "All",
@@ -56,6 +101,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [workerAssignedProjectId, setWorkerAssignedProjectId] = useState(
     projectFromQuery,
   );
+  const [workerEmploymentStartDate, setWorkerEmploymentStartDate] = useState(todayStr());
   const [workerNotes, setWorkerNotes] = useState("");
   const [savingWorker, setSavingWorker] = useState(false);
 
@@ -64,6 +110,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [workStart, setWorkStart] = useState("");
   const [workEnd, setWorkEnd] = useState("");
   const [hoursWorked, setHoursWorked] = useState("8");
+  const [paymentCycleCount, setPaymentCycleCount] = useState("1");
   const [rate, setRate] = useState("45000");
   const [amountPaid, setAmountPaid] = useState("180000");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
@@ -75,9 +122,10 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
 
     const load = async () => {
       try {
-        const [projectRows, workerResponse] = await Promise.all([
+        const [projectRows, workerResponse, paymentRows] = await Promise.all([
           api.getProjects(),
           api.getWorkers(),
+          api.getLaborPayments(),
         ]);
         if (!mounted) {
           return;
@@ -85,6 +133,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
 
         setProjects(projectRows);
         setWorkers(workerResponse.rows);
+        setLaborPayments(paymentRows);
         setError("");
       } catch (loadError) {
         if (!mounted) {
@@ -154,29 +203,82 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
 
   const workersPagination = useTablePagination(filteredWorkers);
 
+  const filteredLaborPayments = useMemo(() => {
+    let result = laborPayments;
+    if (listProjectFilter !== "All") {
+      result = result.filter((payment) => payment.projectId === listProjectFilter);
+    }
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (payment) =>
+          payment.workerName.toLowerCase().includes(q) ||
+          payment.projectName.toLowerCase().includes(q) ||
+          payment.payCycleType.toLowerCase().includes(q) ||
+          payment.paymentMethod.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [laborPayments, listProjectFilter, search]);
+
+  const paymentsPagination = useTablePagination(filteredLaborPayments);
+
+  const isRecurringWorker = useMemo(() => {
+    if (!selectedWorkerForPayment) return false;
+    return ["Daily", "Weekly", "Monthly"].includes(selectedWorkerForPayment.paymentType);
+  }, [selectedWorkerForPayment]);
+
+  const resolvedCycleCount = useMemo(
+    () => Math.max(Number(paymentCycleCount) || 1, 1),
+    [paymentCycleCount],
+  );
+
+  const computedRecurringEndDate = useMemo(() => {
+    if (!selectedWorkerForPayment || !isRecurringWorker) return "";
+    const startDate = parseIsoDate(workStart);
+    if (!startDate) return "";
+
+    if (selectedWorkerForPayment.paymentType === "Daily") {
+      return formatIsoDate(addDays(startDate, resolvedCycleCount - 1));
+    }
+    if (selectedWorkerForPayment.paymentType === "Weekly") {
+      return formatIsoDate(addDays(startDate, (resolvedCycleCount * 7) - 1));
+    }
+    return formatIsoDate(addDays(addMonthsClamped(startDate, resolvedCycleCount), -1));
+  }, [isRecurringWorker, resolvedCycleCount, selectedWorkerForPayment, workStart]);
+
+  const nextRecurringDueDate = useMemo(() => {
+    const endDate = parseIsoDate(computedRecurringEndDate);
+    if (!endDate) return "";
+    return formatIsoDate(addDays(endDate, 1));
+  }, [computedRecurringEndDate]);
+
   const computedDaysWorked = useMemo(() => {
-    if (workStart.trim().length === 0 || workEnd.trim().length === 0 || workEnd < workStart) {
-      return 0;
-    }
-
-    const [sy, sm, sd] = workStart.split("-").map(Number);
-    const [ey, em, ed] = workEnd.split("-").map(Number);
-    if ([sy, sm, sd, ey, em, ed].some((value) => !Number.isFinite(value))) {
-      return 0;
-    }
-
-    const startUtc = Date.UTC(sy, sm - 1, sd);
-    const endUtc = Date.UTC(ey, em - 1, ed);
-    return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
-  }, [workEnd, workStart]);
+    const startDate = parseIsoDate(workStart);
+    const endDate = parseIsoDate(
+      isRecurringWorker ? computedRecurringEndDate : workEnd,
+    );
+    if (!startDate || !endDate || endDate < startDate) return 0;
+    return dayDiffInclusive(startDate, endDate);
+  }, [computedRecurringEndDate, isRecurringWorker, workEnd, workStart]);
 
   const totalPayable = useMemo(() => {
     const workerRate = Number(rate) || 0;
     if (selectedWorkerForPayment?.paymentType === "Hourly") {
       return (Number(hoursWorked) || 0) * workerRate;
     }
+    if (isRecurringWorker) {
+      return resolvedCycleCount * workerRate;
+    }
     return computedDaysWorked * workerRate;
-  }, [computedDaysWorked, hoursWorked, rate, selectedWorkerForPayment]);
+  }, [
+    computedDaysWorked,
+    hoursWorked,
+    isRecurringWorker,
+    rate,
+    resolvedCycleCount,
+    selectedWorkerForPayment,
+  ]);
 
   const balance = Math.max(totalPayable - (Number(amountPaid) || 0), 0);
 
@@ -239,8 +341,12 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   }, [paymentWorkerId, paymentWorkers]);
 
   const refreshWorkers = async () => {
-    const workerResponse = await api.getWorkers();
+    const [workerResponse, paymentRows] = await Promise.all([
+      api.getWorkers(),
+      api.getLaborPayments(),
+    ]);
     setWorkers(workerResponse.rows);
+    setLaborPayments(paymentRows);
   };
 
   const resetWorkerForm = () => {
@@ -249,6 +355,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     setWorkerSkillRole("");
     setWorkerPaymentType("Daily");
     setWorkerRateAmount("");
+    setWorkerEmploymentStartDate(todayStr());
     setWorkerNotes("");
   };
 
@@ -263,12 +370,18 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   };
 
   const openPaymentModal = (worker: WorkerApiRecord) => {
+    const recurringType = ["Daily", "Weekly", "Monthly"].includes(worker.paymentType);
+    const startDate = recurringType
+      ? worker.nextPaymentDueDate || worker.payCycleStartDate || todayStr()
+      : "";
+
     setSelectedWorkerForPayment(worker);
     setPaymentWorkerId(worker.id);
     setRate(String(worker.rateAmount));
-    setWorkStart("");
+    setWorkStart(startDate);
     setWorkEnd("");
     setHoursWorked("8");
+    setPaymentCycleCount("1");
     setAmountPaid("");
     setPaymentNotes("");
     setShowPaymentModal(true);
@@ -300,6 +413,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         paymentType: workerPaymentType,
         rateAmount: Number(workerRateAmount) || 0,
         assignedProjectId: workerAssignedProjectId,
+        employmentStartDate: workerEmploymentStartDate,
         notes: workerNotes.trim(),
       });
       await refreshWorkers();
@@ -315,16 +429,42 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   };
 
   const handleRecordPayment = async () => {
-    if (
-      !selectedWorkerForPayment ||
-      workStart.trim().length === 0 ||
-      workEnd.trim().length === 0
-    ) {
-      setError("Please fill work date range.");
+    if (!selectedWorkerForPayment) {
+      setError("Please select worker.");
       return;
     }
-    if (workEnd < workStart || (selectedWorkerForPayment.paymentType !== "Hourly" && computedDaysWorked <= 0)) {
-      setError("Work end date must be on or after start date.");
+
+    if (selectedWorkerForPayment.paymentType === "Hourly") {
+      if (
+        workStart.trim().length === 0 ||
+        workEnd.trim().length === 0 ||
+        workEnd < workStart
+      ) {
+        setError("Please provide valid work start/end dates for hourly payment.");
+        return;
+      }
+    } else if (isRecurringWorker) {
+      if (workStart.trim().length === 0 || computedRecurringEndDate.length === 0) {
+        setError("Please provide valid recurring payment start date.");
+        return;
+      }
+      if (resolvedCycleCount <= 0) {
+        setError("Cycle count must be at least 1.");
+        return;
+      }
+    } else {
+      if (
+        workStart.trim().length === 0 ||
+        workEnd.trim().length === 0 ||
+        workEnd < workStart
+      ) {
+        setError("Please provide valid work start/end dates.");
+        return;
+      }
+    }
+
+    if (computedDaysWorked <= 0) {
+      setError("Computed working period is invalid.");
       return;
     }
 
@@ -337,9 +477,10 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         projectId,
         workerId: selectedWorkerForPayment.id,
         workStart,
-        workEnd,
+        workEnd: isRecurringWorker ? computedRecurringEndDate : workEnd,
         daysWorked: computedDaysWorked,
         hoursWorked: Number(hoursWorked) || 0,
+        cycleCount: isRecurringWorker ? resolvedCycleCount : undefined,
         rateAmount: Number(rate) || 0,
         amountPaid: Number(amountPaid) || 0,
         paymentMethod,
@@ -468,6 +609,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                     <th>Skill/Role</th>
                     <th>Site</th>
                     <th>Wage Type</th>
+                    <th>Next Due</th>
                     <th>Rate</th>
                     <th>Total Paid</th>
                     <th>Outstanding</th>
@@ -484,6 +626,13 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                       <td>{worker.skillRole}</td>
                       <td>{worker.assignedProjectName || "Unassigned"}</td>
                       <td>{worker.paymentType}</td>
+                      <td>
+                        {worker.nextPaymentDueDate
+                          ? worker.nextPaymentDueDate
+                          : worker.paymentType === "Hourly" || worker.paymentType === "Contract"
+                            ? "-"
+                            : worker.payCycleStartDate}
+                      </td>
                       <td>{formatTzs(worker.rateAmount)}</td>
                       <td>{formatTzs(worker.totalPaid)}</td>
                       <td
@@ -512,6 +661,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                         <div className="flex gap-2">
                           <button
                             className="btn-primary py-1 px-3 text-xs"
+                            disabled={worker.status === "Inactive"}
                             onClick={() => openPaymentModal(worker)}
                           >
                             Pay
@@ -539,6 +689,72 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
               startIndex={workersPagination.startIndex}
               totalCount={workersPagination.totalCount}
               totalPages={workersPagination.totalPages}
+            />
+          </>
+        )}
+      </SurfaceCard>
+
+      <SurfaceCard title="Recent Labor Payments">
+        {loading ? (
+          <SkeletonTable rows={4} />
+        ) : filteredLaborPayments.length === 0 ? (
+          <EmptyState
+            description="No labor payments recorded for the selected site."
+            title="No payments"
+          />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="data-table min-w-[1050px]">
+                <thead>
+                  <tr>
+                    <th>S/N</th>
+                    <th>Worker</th>
+                    <th>Site</th>
+                    <th>Period</th>
+                    <th>Cycle</th>
+                    <th>Rate</th>
+                    <th>Total Payable</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Method</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paymentsPagination.paginatedRows.map((payment, index) => (
+                    <tr key={payment.id}>
+                      <td>{paymentsPagination.startIndex + index + 1}</td>
+                      <td>{payment.workerName}</td>
+                      <td>{payment.projectName || "Unassigned"}</td>
+                      <td>
+                        {formatDate(payment.workStart)} - {formatDate(payment.workEnd)}
+                      </td>
+                      <td>
+                        {payment.payCycleType}
+                        {payment.payCycleCount > 0 ? ` x ${payment.payCycleCount}` : ""}
+                      </td>
+                      <td>{formatTzs(payment.rateAmount)}</td>
+                      <td>{formatTzs(payment.totalPayable)}</td>
+                      <td className="text-emerald-700">{formatTzs(payment.amountPaid)}</td>
+                      <td className={payment.balance > 0 ? "text-amber-700" : "text-emerald-700"}>
+                        {formatTzs(payment.balance)}
+                      </td>
+                      <td>{payment.paymentMethod}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              endIndex={paymentsPagination.endIndex}
+              itemLabel="payments"
+              onPageChange={paymentsPagination.setPage}
+              onPageSizeChange={paymentsPagination.setPageSize}
+              page={paymentsPagination.page}
+              pageSize={paymentsPagination.pageSize}
+              startIndex={paymentsPagination.startIndex}
+              totalCount={paymentsPagination.totalCount}
+              totalPages={paymentsPagination.totalPages}
             />
           </>
         )}
@@ -616,6 +832,15 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                   ))}
                 </GuiSelect>
               </label>
+              <label className="form-field">
+                <span>Employment Start Date</span>
+                <input
+                  className="input-field"
+                  onChange={(event) => setWorkerEmploymentStartDate(event.target.value)}
+                  type="date"
+                  value={workerEmploymentStartDate}
+                />
+              </label>
               <label className="form-field sm:col-span-2">
                 <span>Notes</span>
                 <textarea
@@ -652,29 +877,83 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <SurfaceCard className="w-full max-w-2xl m-4" title={`Record Payment - ${selectedWorkerForPayment.fullName}`}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="form-field">
-                <span>Work Start Date</span>
-                <input
-                  className="input-field"
-                  onChange={(event) => setWorkStart(event.target.value)}
-                  type="date"
-                  value={workStart}
-                />
-              </label>
-              <label className="form-field">
-                <span>Work End Date</span>
-                <input
-                  className="input-field"
-                  onChange={(event) => setWorkEnd(event.target.value)}
-                  type="date"
-                  value={workEnd}
-                />
-              </label>
-              {workStart.trim().length > 0 && workEnd.trim().length > 0 && workEnd < workStart ? (
+              {isRecurringWorker ? (
+                <>
+                  <label className="form-field">
+                    <span>Cycle Start Date</span>
+                    <input
+                      className="input-field"
+                      onChange={(event) => setWorkStart(event.target.value)}
+                      type="date"
+                      value={workStart}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>
+                      Cycles to Pay (
+                      {selectedWorkerForPayment.paymentType === "Daily"
+                        ? "days"
+                        : selectedWorkerForPayment.paymentType === "Weekly"
+                          ? "weeks"
+                          : "months"}
+                      )
+                    </span>
+                    <input
+                      className="input-field"
+                      min="1"
+                      onChange={(event) => setPaymentCycleCount(event.target.value)}
+                      type="number"
+                      value={paymentCycleCount}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Coverage End Date</span>
+                    <input
+                      className="input-field bg-slate-50"
+                      readOnly
+                      type="date"
+                      value={computedRecurringEndDate}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Next Due Date</span>
+                    <input
+                      className="input-field bg-slate-50"
+                      readOnly
+                      type="date"
+                      value={nextRecurringDueDate}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="form-field">
+                    <span>Work Start Date</span>
+                    <input
+                      className="input-field"
+                      onChange={(event) => setWorkStart(event.target.value)}
+                      type="date"
+                      value={workStart}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>Work End Date</span>
+                    <input
+                      className="input-field"
+                      onChange={(event) => setWorkEnd(event.target.value)}
+                      type="date"
+                      value={workEnd}
+                    />
+                  </label>
+                </>
+              )}
+
+              {!isRecurringWorker && workStart.trim().length > 0 && workEnd.trim().length > 0 && workEnd < workStart ? (
                 <p className="text-xs text-red-600 sm:col-span-2">
                   Work end date must be the same day or after start date.
                 </p>
               ) : null}
+
               {selectedWorkerForPayment.paymentType === "Hourly" ? (
                 <label className="form-field sm:col-span-2">
                   <span>Hours Worked</span>
@@ -687,7 +966,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                 </label>
               ) : (
                 <label className="form-field sm:col-span-2">
-                  <span>Days Worked</span>
+                  <span>Days Covered</span>
                   <input
                     className="input-field bg-slate-50"
                     readOnly
@@ -696,15 +975,29 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                   />
                 </label>
               )}
-              <FinancialInput label="Rate" onChange={setRate} placeholder="45000" value={rate} />
+
+              <FinancialInput
+                label={
+                  selectedWorkerForPayment.paymentType === "Hourly"
+                    ? "Hourly Rate"
+                    : isRecurringWorker
+                      ? `${selectedWorkerForPayment.paymentType} Rate`
+                      : "Rate"
+                }
+                onChange={setRate}
+                placeholder="45000"
+                value={rate}
+              />
               <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Auto Calculated</p>
                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <p className="text-sm text-slate-700">
                     {selectedWorkerForPayment.paymentType === "Hourly"
-                      ? `${hoursWorked} hrs × ${formatTzs(Number(rate))}`
-                      : `${computedDaysWorked} days × ${formatTzs(Number(rate))}`}
-                    {" → "}Total Payable: <span className="font-semibold">{formatTzs(totalPayable)}</span>
+                      ? `${hoursWorked || 0} hrs * ${formatTzs(Number(rate))}`
+                      : isRecurringWorker
+                        ? `${resolvedCycleCount} cycle(s) * ${formatTzs(Number(rate))}`
+                        : `${computedDaysWorked} days * ${formatTzs(Number(rate))}`}
+                    {" -> "}Total Payable: <span className="font-semibold">{formatTzs(totalPayable)}</span>
                   </p>
                   <p className="text-sm text-slate-700">
                     Amount Paid: <span className="font-semibold">{formatTzs(Number(amountPaid) || 0)}</span>

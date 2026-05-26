@@ -1,6 +1,5 @@
 import {
   BriefcaseBusiness,
-  ClipboardList,
   Cog,
   CreditCard,
   Gauge,
@@ -17,7 +16,6 @@ export interface NavItem {
 export const mainNavItems: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: Gauge },
   { label: "Projects / Sites", path: "/projects", icon: BriefcaseBusiness },
-  { label: "Work Orders", path: "/work-orders", icon: ClipboardList },
   { label: "Site Operations", path: "/site-operations", icon: Wrench },
   { label: "Payments & Cash Flow", path: "/payments", icon: CreditCard },
   { label: "Reports", path: "/reports", icon: PieChart },
@@ -28,6 +26,5 @@ export const utilityNavItems: NavItem[] = [];
 
 export const quickAddActions = [
   { label: "New Project", path: "/projects/new" },
-  { label: "New Work Order", path: "/work-orders" },
   { label: "Record Payment", path: "/payments#add-payment-form" },
 ];

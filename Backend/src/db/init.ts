@@ -73,6 +73,7 @@ const seedProjects = [
 
 export const initializeDatabase = async (): Promise<void> => {
   await db.query("CREATE SCHEMA IF NOT EXISTS engicost");
+  await db.query("DROP TABLE IF EXISTS engicost.work_orders");
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.companies (
@@ -220,9 +221,24 @@ export const initializeDatabase = async (): Promise<void> => {
       total_paid NUMERIC(16, 2) NOT NULL DEFAULT 0,
       outstanding_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
       status VARCHAR(40) NOT NULL DEFAULT 'Active',
+      pay_cycle_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      next_payment_due_date DATE,
+      last_payment_covered_date DATE,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+  await db.query(`
+    ALTER TABLE engicost.workers
+    ADD COLUMN IF NOT EXISTS pay_cycle_start_date DATE NOT NULL DEFAULT CURRENT_DATE
+  `);
+  await db.query(`
+    ALTER TABLE engicost.workers
+    ADD COLUMN IF NOT EXISTS next_payment_due_date DATE
+  `);
+  await db.query(`
+    ALTER TABLE engicost.workers
+    ADD COLUMN IF NOT EXISTS last_payment_covered_date DATE
   `);
 
   await db.query(`
@@ -234,6 +250,9 @@ export const initializeDatabase = async (): Promise<void> => {
       work_start DATE NOT NULL,
       work_end DATE NOT NULL,
       days_worked INTEGER NOT NULL,
+      units_worked NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      pay_cycle_type VARCHAR(20) NOT NULL DEFAULT 'Manual',
+      pay_cycle_count INTEGER NOT NULL DEFAULT 0,
       rate_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
       total_payable NUMERIC(16, 2) NOT NULL DEFAULT 0,
       amount_paid NUMERIC(16, 2) NOT NULL DEFAULT 0,
@@ -242,6 +261,18 @@ export const initializeDatabase = async (): Promise<void> => {
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+  await db.query(`
+    ALTER TABLE engicost.labor_payments
+    ADD COLUMN IF NOT EXISTS units_worked NUMERIC(12, 2) NOT NULL DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE engicost.labor_payments
+    ADD COLUMN IF NOT EXISTS pay_cycle_type VARCHAR(20) NOT NULL DEFAULT 'Manual'
+  `);
+  await db.query(`
+    ALTER TABLE engicost.labor_payments
+    ADD COLUMN IF NOT EXISTS pay_cycle_count INTEGER NOT NULL DEFAULT 0
   `);
 
   await db.query(`
@@ -390,32 +421,6 @@ export const initializeDatabase = async (): Promise<void> => {
       status VARCHAR(30) NOT NULL DEFAULT 'Pending',
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-  `);
-
-  // Work Orders table
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS engicost.work_orders (
-      id VARCHAR(40) PRIMARY KEY,
-      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
-      project_id VARCHAR(40) NOT NULL REFERENCES engicost.projects(id) ON DELETE CASCADE,
-      order_number VARCHAR(80) NOT NULL,
-      client_name VARCHAR(200) NOT NULL,
-      order_date DATE NOT NULL,
-      description TEXT NOT NULL,
-      materials_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      materials_profit_pct NUMERIC(6, 2) NOT NULL DEFAULT 0,
-      materials_profit_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      labour_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      labour_profit_pct NUMERIC(6, 2) NOT NULL DEFAULT 0,
-      labour_profit_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      total_cost NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      total_profit NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      grand_total NUMERIC(16, 2) NOT NULL DEFAULT 0,
-      status VARCHAR(40) NOT NULL DEFAULT 'Draft',
-      notes TEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
 

@@ -20,7 +20,6 @@ import tendersRouter from "./tenders";
 import usersRouter from "./users";
 import websiteSettingsRouter from "./websiteSettings";
 import workersRouter from "./workers";
-import workOrdersRouter from "./workOrders";
 import { sendQuoteNotificationEmail } from "../services/mailer";
 import { handleAsync } from "./utils";
 import { getSingleTenantCompanyId } from "../db/init";
@@ -162,11 +161,9 @@ apiRouter.use("/notifications", notificationsRouter);
 apiRouter.use("/petty-cash", pettyCashRouter);
 apiRouter.use("/reports", reportsRouter);
 apiRouter.use("/users", usersRouter);
-apiRouter.use("/work-orders", workOrdersRouter);
 apiRouter.use("/quote-requests", quoteRequestsRouter);
 apiRouter.use("/website-settings", websiteSettingsRouter);
 apiRouter.use("/gallery", galleryRouter);
 apiRouter.use("/upload", uploadRouter);
 
 export default apiRouter;
-

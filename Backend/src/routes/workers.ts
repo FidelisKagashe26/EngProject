@@ -7,6 +7,10 @@ import { handleAsync, toInteger, toMoney } from "./utils";
 
 const router = Router();
 
+const recurringPaymentTypes = new Set(["Daily", "Weekly", "Monthly"]);
+
+const getTodayIsoDate = (): string => new Date().toISOString().slice(0, 10);
+
 const workerSchema = z.object({
   fullName: z.string().min(2),
   phone: z.string().min(7),
@@ -14,16 +18,18 @@ const workerSchema = z.object({
   paymentType: z.enum(["Hourly", "Daily", "Weekly", "Monthly", "Contract"]),
   rateAmount: z.number().nonnegative(),
   assignedProjectId: z.string().optional().default(""),
+  employmentStartDate: z.string().date().optional().default(() => getTodayIsoDate()),
   notes: z.string().optional().default(""),
 });
 
 const laborPaymentSchema = z.object({
   projectId: z.string().min(3),
   workerId: z.string().min(3),
-  workStart: z.string().date(),
-  workEnd: z.string().date(),
-  daysWorked: z.number().int().min(0),
+  workStart: z.string().date().optional(),
+  workEnd: z.string().date().optional(),
+  daysWorked: z.number().int().min(0).optional().default(0),
   hoursWorked: z.number().min(0).optional().default(0),
+  cycleCount: z.number().int().min(1).optional().default(1),
   rateAmount: z.number().nonnegative(),
   amountPaid: z.number().nonnegative(),
   paymentMethod: z.string().min(2),
@@ -40,6 +46,92 @@ type WorkerLookup = {
   full_name: string;
   assigned_project_id: string | null;
   payment_type: string;
+  pay_cycle_start_date: string;
+  next_payment_due_date: string | null;
+};
+
+const isRecurringPaymentType = (paymentType: string): boolean =>
+  recurringPaymentTypes.has(paymentType);
+
+const parseIsoDateUtc = (value: string): Date | null => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+  const [y, m, d] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  if (
+    parsed.getUTCFullYear() !== y ||
+    parsed.getUTCMonth() + 1 !== m ||
+    parsed.getUTCDate() !== d
+  ) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const formatIsoDateUtc = (value: Date): string =>
+  `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    value.getUTCDate(),
+  ).padStart(2, "0")}`;
+
+const addDaysUtc = (date: Date, days: number): Date => {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+};
+
+const addMonthsUtcClamped = (date: Date, months: number): Date => {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+
+  const firstOfMonth = new Date(Date.UTC(year, month + months, 1));
+  const lastDayInTarget = new Date(
+    Date.UTC(firstOfMonth.getUTCFullYear(), firstOfMonth.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+
+  firstOfMonth.setUTCDate(Math.min(day, lastDayInTarget));
+  return firstOfMonth;
+};
+
+const daysBetweenUtcInclusive = (start: Date, end: Date): number =>
+  Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+const getRecurringEndDate = (
+  paymentType: "Daily" | "Weekly" | "Monthly",
+  startDate: Date,
+  cycleCount: number,
+): Date => {
+  if (paymentType === "Daily") {
+    return addDaysUtc(startDate, cycleCount - 1);
+  }
+
+  if (paymentType === "Weekly") {
+    return addDaysUtc(startDate, (cycleCount * 7) - 1);
+  }
+
+  return addDaysUtc(addMonthsUtcClamped(startDate, cycleCount), -1);
+};
+
+const getCycleCountFromRange = (
+  paymentType: "Daily" | "Weekly" | "Monthly",
+  startDate: Date,
+  endDate: Date,
+): number => {
+  const days = daysBetweenUtcInclusive(startDate, endDate);
+  if (paymentType === "Daily") return Math.max(1, days);
+  if (paymentType === "Weekly") return Math.max(1, Math.ceil(days / 7));
+
+  const startYear = startDate.getUTCFullYear();
+  const startMonth = startDate.getUTCMonth();
+  const startDay = startDate.getUTCDate();
+  const endYear = endDate.getUTCFullYear();
+  const endMonth = endDate.getUTCMonth();
+  const endDay = endDate.getUTCDate();
+
+  let months = ((endYear - startYear) * 12) + (endMonth - startMonth) + 1;
+  if (endDay < startDay) months -= 1;
+  return Math.max(1, months);
 };
 
 const getProjectById = async (
@@ -64,7 +156,7 @@ const getWorkerById = async (
 ): Promise<WorkerLookup | null> => {
   const result = await db.query<WorkerLookup>(
     `
-    SELECT id, full_name, assigned_project_id, payment_type
+    SELECT id, full_name, assigned_project_id, payment_type, pay_cycle_start_date::text, next_payment_due_date::text
     FROM engicost.workers
     WHERE company_id = $1 AND id = $2
     LIMIT 1
@@ -107,6 +199,9 @@ router.get(
         total_paid: string;
         outstanding_amount: string;
         status: string;
+        pay_cycle_start_date: string;
+        next_payment_due_date: string | null;
+        last_payment_covered_date: string | null;
         notes: string | null;
       }>(
         `
@@ -122,6 +217,9 @@ router.get(
           w.total_paid::text,
           w.outstanding_amount::text,
           w.status,
+          w.pay_cycle_start_date::text,
+          w.next_payment_due_date::text,
+          w.last_payment_covered_date::text,
           w.notes
         FROM engicost.workers w
         LEFT JOIN engicost.projects p ON p.id = w.assigned_project_id
@@ -131,15 +229,22 @@ router.get(
         [companyId],
       ),
       db.query<{
-        total_paid: string;
+        total_paid_month: string;
         outstanding: string;
       }>(
         `
         SELECT
-          COALESCE(SUM(total_paid), 0)::text AS total_paid,
-          COALESCE(SUM(outstanding_amount), 0)::text AS outstanding
-        FROM engicost.workers
-        WHERE company_id = $1
+          (
+            SELECT COALESCE(SUM(lp.amount_paid), 0)::text
+            FROM engicost.labor_payments lp
+            WHERE lp.company_id = $1
+              AND DATE_TRUNC('month', lp.work_end) = DATE_TRUNC('month', CURRENT_DATE)
+          ) AS total_paid_month,
+          (
+            SELECT COALESCE(SUM(w.outstanding_amount), 0)::text
+            FROM engicost.workers w
+            WHERE w.company_id = $1
+          ) AS outstanding
         `,
         [companyId],
       ),
@@ -147,7 +252,7 @@ router.get(
 
     res.json({
       summary: {
-        totalLaborPaidThisMonth: Number(summaryResult.rows[0]?.total_paid ?? 0),
+        totalLaborPaidThisMonth: Number(summaryResult.rows[0]?.total_paid_month ?? 0),
         outstandingLaborPayments: Number(summaryResult.rows[0]?.outstanding ?? 0),
       },
       rows: workersResult.rows.map((row) => ({
@@ -162,6 +267,9 @@ router.get(
         totalPaid: Number(row.total_paid),
         outstandingAmount: Number(row.outstanding_amount),
         status: row.status,
+        payCycleStartDate: row.pay_cycle_start_date,
+        nextPaymentDueDate: row.next_payment_due_date,
+        lastPaymentCoveredDate: row.last_payment_covered_date,
         notes: row.notes ?? "",
       })),
     });
@@ -175,7 +283,14 @@ router.post(
     const parsed = workerSchema.parse({
       ...req.body,
       rateAmount: toMoney(req.body.rateAmount),
+      employmentStartDate: req.body.employmentStartDate || getTodayIsoDate(),
     });
+
+    const startDate = parseIsoDateUtc(parsed.employmentStartDate);
+    if (!startDate) {
+      res.status(400).json({ message: "Employment start date must be in YYYY-MM-DD format." });
+      return;
+    }
 
     let assignedProjectName = "";
     if (parsed.assignedProjectId.trim().length > 0) {
@@ -189,14 +304,18 @@ router.post(
       assignedProjectName = project.name;
     }
 
+    const recurringType = isRecurringPaymentType(parsed.paymentType);
+    const payCycleStartDate = formatIsoDateUtc(startDate);
+    const nextPaymentDueDate = recurringType ? payCycleStartDate : null;
+
     const inserted = await db.query(
       `
       INSERT INTO engicost.workers (
         id, company_id, full_name, phone, skill_role, payment_type,
-        rate_amount, assigned_project_id, notes
+        rate_amount, assigned_project_id, pay_cycle_start_date, next_payment_due_date, notes
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, NULLIF($8, ''), $9
+        $7, NULLIF($8, ''), $9, $10, $11
       )
       RETURNING
         id,
@@ -209,6 +328,9 @@ router.post(
         total_paid::text,
         outstanding_amount::text,
         status,
+        pay_cycle_start_date::text,
+        next_payment_due_date::text,
+        last_payment_covered_date::text,
         notes
       `,
       [
@@ -220,6 +342,8 @@ router.post(
         parsed.paymentType,
         parsed.rateAmount,
         parsed.assignedProjectId,
+        payCycleStartDate,
+        nextPaymentDueDate,
         parsed.notes,
       ],
     );
@@ -247,8 +371,90 @@ router.post(
       totalPaid: Number(row.total_paid),
       outstandingAmount: Number(row.outstanding_amount),
       status: row.status,
+      payCycleStartDate: row.pay_cycle_start_date,
+      nextPaymentDueDate: row.next_payment_due_date,
+      lastPaymentCoveredDate: row.last_payment_covered_date,
       notes: row.notes ?? "",
     });
+  }),
+);
+
+router.get(
+  "/payments",
+  handleAsync(async (_req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+
+    const result = await db.query<{
+      id: string;
+      project_id: string;
+      project_name: string | null;
+      worker_id: string;
+      worker_name: string;
+      work_start: string;
+      work_end: string;
+      days_worked: number;
+      units_worked: string;
+      pay_cycle_type: string;
+      pay_cycle_count: number;
+      rate_amount: string;
+      total_payable: string;
+      amount_paid: string;
+      balance: string;
+      payment_method: string;
+      notes: string | null;
+      created_at: string;
+    }>(
+      `
+      SELECT
+        lp.id,
+        lp.project_id,
+        p.name AS project_name,
+        lp.worker_id,
+        w.full_name AS worker_name,
+        lp.work_start::text,
+        lp.work_end::text,
+        lp.days_worked,
+        lp.units_worked::text,
+        lp.pay_cycle_type,
+        lp.pay_cycle_count,
+        lp.rate_amount::text,
+        lp.total_payable::text,
+        lp.amount_paid::text,
+        lp.balance::text,
+        lp.payment_method,
+        lp.notes,
+        lp.created_at::text
+      FROM engicost.labor_payments lp
+      INNER JOIN engicost.workers w ON w.id = lp.worker_id
+      LEFT JOIN engicost.projects p ON p.id = lp.project_id
+      WHERE lp.company_id = $1
+      ORDER BY lp.created_at DESC
+      LIMIT 200
+      `,
+      [companyId],
+    );
+
+    res.json(result.rows.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      projectName: row.project_name ?? "",
+      workerId: row.worker_id,
+      workerName: row.worker_name,
+      workStart: row.work_start,
+      workEnd: row.work_end,
+      daysWorked: row.days_worked,
+      unitsWorked: Number(row.units_worked),
+      payCycleType: row.pay_cycle_type,
+      payCycleCount: row.pay_cycle_count,
+      rateAmount: Number(row.rate_amount),
+      totalPayable: Number(row.total_payable),
+      amountPaid: Number(row.amount_paid),
+      balance: Number(row.balance),
+      paymentMethod: row.payment_method,
+      notes: row.notes ?? "",
+      createdAt: row.created_at,
+      nextPaymentDueDate: null,
+    })));
   }),
 );
 
@@ -260,49 +466,16 @@ router.post(
       ...req.body,
       daysWorked: toInteger(req.body.daysWorked),
       hoursWorked: Number(req.body.hoursWorked) || 0,
+      cycleCount: Math.max(toInteger(req.body.cycleCount || 1), 1),
       rateAmount: toMoney(req.body.rateAmount),
       amountPaid: toMoney(req.body.amountPaid),
     });
 
-    if (parsed.workEnd < parsed.workStart) {
-      res
-        .status(400)
-        .json({ message: "Work end date must be on or after work start date." });
-      return;
-    }
-
-    // For hourly workers, use hoursWorked; otherwise use daysWorked
     const worker = await getWorkerById(companyId, parsed.workerId);
     if (!worker) {
       res.status(400).json({ message: "Selected worker does not exist." });
       return;
     }
-
-    const isHourly = worker.payment_type === "Hourly";
-    const start = new Date(parsed.workStart);
-    const end = new Date(parsed.workEnd);
-    const computedDaysWorked =
-      Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const effectiveUnits = isHourly ? (parsed.hoursWorked ?? 0) : computedDaysWorked;
-
-    if (effectiveUnits <= 0) {
-      res.status(400).json({
-        message: isHourly
-          ? "Hours worked must be greater than zero."
-          : "Days worked must be greater than zero.",
-      });
-      return;
-    }
-
-    const totalPayable = effectiveUnits * parsed.rateAmount;
-    if (parsed.amountPaid > totalPayable) {
-      res.status(400).json({
-        message: "Amount paid cannot exceed total payable for this record.",
-      });
-      return;
-    }
-
-    const balance = Math.max(totalPayable - parsed.amountPaid, 0);
 
     const project = await getProjectById(companyId, parsed.projectId);
     if (!project) {
@@ -321,6 +494,155 @@ router.post(
       return;
     }
 
+    const isHourly = worker.payment_type === "Hourly";
+    const isRecurring = isRecurringPaymentType(worker.payment_type);
+
+    let workStartDate: Date;
+    let workEndDate: Date;
+    let unitsWorked = 0;
+    let daysWorked = 0;
+    let cycleCount = 0;
+    let payCycleType = "Manual";
+
+    if (isHourly) {
+      if (!parsed.workStart || !parsed.workEnd) {
+        res.status(400).json({
+          message: "Hourly payments require work start and end dates.",
+        });
+        return;
+      }
+
+      const startDate = parseIsoDateUtc(parsed.workStart);
+      const endDate = parseIsoDateUtc(parsed.workEnd);
+      if (!startDate || !endDate) {
+        res.status(400).json({
+          message: "Work dates must be in YYYY-MM-DD format.",
+        });
+        return;
+      }
+
+      if (endDate < startDate) {
+        res.status(400).json({
+          message: "Work end date must be on or after work start date.",
+        });
+        return;
+      }
+
+      const hoursWorked = Number(parsed.hoursWorked) || 0;
+      if (hoursWorked <= 0) {
+        res.status(400).json({ message: "Hours worked must be greater than zero." });
+        return;
+      }
+
+      workStartDate = startDate;
+      workEndDate = endDate;
+      unitsWorked = hoursWorked;
+      daysWorked = daysBetweenUtcInclusive(startDate, endDate);
+      payCycleType = "Hourly";
+    } else if (
+      worker.payment_type === "Daily" ||
+      worker.payment_type === "Weekly" ||
+      worker.payment_type === "Monthly"
+    ) {
+      const configuredStart =
+        parsed.workStart?.trim() ||
+        worker.next_payment_due_date ||
+        worker.pay_cycle_start_date ||
+        getTodayIsoDate();
+
+      const startDate = parseIsoDateUtc(configuredStart);
+      if (!startDate) {
+        res.status(400).json({
+          message: "Unable to resolve recurring payment start date.",
+        });
+        return;
+      }
+
+      let resolvedCycleCount = parsed.cycleCount;
+      if (!req.body.cycleCount && parsed.workEnd) {
+        const endFromBody = parseIsoDateUtc(parsed.workEnd);
+        if (endFromBody && endFromBody >= startDate) {
+          resolvedCycleCount = getCycleCountFromRange(
+            worker.payment_type,
+            startDate,
+            endFromBody,
+          );
+        }
+      }
+
+      const cycleCountSafe = Math.max(1, resolvedCycleCount);
+      const endDate = getRecurringEndDate(
+        worker.payment_type,
+        startDate,
+        cycleCountSafe,
+      );
+
+      workStartDate = startDate;
+      workEndDate = endDate;
+      cycleCount = cycleCountSafe;
+      unitsWorked = cycleCountSafe;
+      daysWorked = daysBetweenUtcInclusive(startDate, endDate);
+      payCycleType = worker.payment_type;
+    } else {
+      if (!parsed.workStart || !parsed.workEnd) {
+        res.status(400).json({
+          message: "Contract payments require work start and end dates.",
+        });
+        return;
+      }
+
+      const startDate = parseIsoDateUtc(parsed.workStart);
+      const endDate = parseIsoDateUtc(parsed.workEnd);
+      if (!startDate || !endDate) {
+        res.status(400).json({
+          message: "Work dates must be in YYYY-MM-DD format.",
+        });
+        return;
+      }
+
+      if (endDate < startDate) {
+        res.status(400).json({
+          message: "Work end date must be on or after work start date.",
+        });
+        return;
+      }
+
+      const rangeDays = daysBetweenUtcInclusive(startDate, endDate);
+      const unitsFromRequest = toInteger(parsed.daysWorked);
+      const effectiveUnits = unitsFromRequest > 0 ? unitsFromRequest : rangeDays;
+      if (effectiveUnits <= 0) {
+        res.status(400).json({
+          message: "Days worked must be greater than zero for contract payment.",
+        });
+        return;
+      }
+
+      workStartDate = startDate;
+      workEndDate = endDate;
+      unitsWorked = effectiveUnits;
+      daysWorked = rangeDays;
+      payCycleType = "Contract";
+    }
+
+    const totalPayable = unitsWorked * parsed.rateAmount;
+    if (totalPayable <= 0) {
+      res.status(400).json({ message: "Total payable must be greater than zero." });
+      return;
+    }
+
+    if (parsed.amountPaid > totalPayable) {
+      res.status(400).json({
+        message: "Amount paid cannot exceed total payable for this record.",
+      });
+      return;
+    }
+
+    const balance = Math.max(totalPayable - parsed.amountPaid, 0);
+    const nextPaymentDueDate =
+      isRecurring && !isHourly ? formatIsoDateUtc(addDaysUtc(workEndDate, 1)) : null;
+    const lastPaymentCoveredDate =
+      isRecurring && !isHourly ? formatIsoDateUtc(workEndDate) : null;
+
     const client = await db.connect();
     let insertedRow:
       | {
@@ -330,6 +652,9 @@ router.post(
           work_start: string;
           work_end: string;
           days_worked: number;
+          units_worked: string;
+          pay_cycle_type: string;
+          pay_cycle_count: number;
           rate_amount: string;
           total_payable: string;
           amount_paid: string;
@@ -350,6 +675,9 @@ router.post(
         work_start: string;
         work_end: string;
         days_worked: number;
+        units_worked: string;
+        pay_cycle_type: string;
+        pay_cycle_count: number;
         rate_amount: string;
         total_payable: string;
         amount_paid: string;
@@ -361,10 +689,12 @@ router.post(
         `
         INSERT INTO engicost.labor_payments (
           id, company_id, project_id, worker_id, work_start, work_end, days_worked,
+          units_worked, pay_cycle_type, pay_cycle_count,
           rate_amount, total_payable, amount_paid, balance, payment_method, notes
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
-          $8, $9, $10, $11, $12, $13
+          $8, $9, $10,
+          $11, $12, $13, $14, $15, $16
         )
         RETURNING
           id,
@@ -373,6 +703,9 @@ router.post(
           work_start::text,
           work_end::text,
           days_worked,
+          units_worked::text,
+          pay_cycle_type,
+          pay_cycle_count,
           rate_amount::text,
           total_payable::text,
           amount_paid::text,
@@ -386,9 +719,12 @@ router.post(
           companyId,
           parsed.projectId,
           parsed.workerId,
-          parsed.workStart,
-          parsed.workEnd,
-          computedDaysWorked,
+          formatIsoDateUtc(workStartDate),
+          formatIsoDateUtc(workEndDate),
+          daysWorked,
+          unitsWorked,
+          payCycleType,
+          cycleCount,
           parsed.rateAmount,
           totalPayable,
           parsed.amountPaid,
@@ -410,6 +746,19 @@ router.post(
         `,
         [companyId, parsed.workerId, parsed.amountPaid, balance],
       );
+
+      if (nextPaymentDueDate && lastPaymentCoveredDate) {
+        await client.query(
+          `
+          UPDATE engicost.workers
+          SET
+            next_payment_due_date = $3,
+            last_payment_covered_date = $4
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, parsed.workerId, nextPaymentDueDate, lastPaymentCoveredDate],
+        );
+      }
 
       if (!worker.assigned_project_id) {
         await client.query(
@@ -440,7 +789,7 @@ router.post(
           makeId("ACT"),
           companyId,
           parsed.projectId,
-          `Recorded labor payment for ${worker.full_name}: TZS ${parsed.amountPaid.toLocaleString("en-TZ")}.`,
+          `Recorded ${payCycleType} labor payment for ${worker.full_name}: TZS ${parsed.amountPaid.toLocaleString("en-TZ")}.`,
         ],
       );
 
@@ -465,6 +814,9 @@ router.post(
       workStart: row.work_start,
       workEnd: row.work_end,
       daysWorked: row.days_worked,
+      unitsWorked: Number(row.units_worked),
+      payCycleType: row.pay_cycle_type,
+      payCycleCount: row.pay_cycle_count,
       rateAmount: Number(row.rate_amount),
       totalPayable: Number(row.total_payable),
       amountPaid: Number(row.amount_paid),
@@ -474,6 +826,7 @@ router.post(
       createdAt: row.created_at,
       projectName: project.name,
       workerName: worker.full_name,
+      nextPaymentDueDate,
     });
   }),
 );

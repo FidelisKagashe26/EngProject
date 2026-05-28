@@ -31,19 +31,25 @@ router.get(
               AND is_deleted = FALSE
               AND approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
             GROUP BY project_id
+          ),
+          project_financials AS (
+            SELECT
+              p.*,
+              GREATEST(p.amount_received, COALESCE(pt.amount_received, 0)) AS effective_amount_received
+            FROM engicost.projects p
+            LEFT JOIN payment_totals pt ON pt.project_id = p.id
+            WHERE p.company_id = $1
           )
           SELECT
             COUNT(p.id)::text AS total_projects,
             COUNT(p.id) FILTER (WHERE p.status = 'Active')::text AS active_sites,
             COALESCE(SUM(p.contract_value), 0)::text AS total_contract_value,
-            COALESCE(SUM(pt.amount_received), 0)::text AS total_amount_received,
+            COALESCE(SUM(p.effective_amount_received), 0)::text AS total_amount_received,
             COALESCE(SUM(p.total_spent), 0)::text AS total_expenses,
-            (COALESCE(SUM(pt.amount_received), 0) - COALESCE(SUM(p.total_spent), 0))::text AS estimated_profit,
+            (COALESCE(SUM(p.effective_amount_received), 0) - COALESCE(SUM(p.total_spent), 0))::text AS estimated_profit,
             COALESCE(SUM(p.pending_client_payments), 0)::text AS pending_client_payments,
             COUNT(p.id) FILTER (WHERE p.status = 'Over Budget' OR p.total_spent > p.contract_value)::text AS over_budget_projects
-          FROM engicost.projects p
-          LEFT JOIN payment_totals pt ON pt.project_id = p.id
-          WHERE p.company_id = $1
+          FROM project_financials p
           `,
           [companyId],
         ),
@@ -55,73 +61,131 @@ router.get(
           `
           WITH months AS (
             SELECT
-              DATE_TRUNC('month', CURRENT_DATE) - (INTERVAL '1 month' * month_offset) AS month_start
-            FROM generate_series(11, 0, -1) AS month_offset
+              DATE_TRUNC('year', CURRENT_DATE) + (INTERVAL '1 month' * month_offset) AS month_start
+            FROM generate_series(0, 11) AS month_offset
           ),
-          income_by_month AS (
+          year_bounds AS (
             SELECT
-              DATE_TRUNC('month', cp.payment_date) AS month_start,
+              DATE_TRUNC('year', CURRENT_DATE) AS year_start,
+              DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year' AS year_end
+          ),
+          detailed_income_by_project AS (
+            SELECT
+              cp.project_id,
               COALESCE(SUM(cp.amount_received), 0) AS income
-            FROM engicost.client_payments cp
+            FROM engicost.client_payments cp, year_bounds yb
             WHERE cp.company_id = $1
               AND cp.is_deleted = FALSE
               AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-              AND cp.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND cp.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-            GROUP BY DATE_TRUNC('month', cp.payment_date)
+              AND cp.payment_date >= yb.year_start
+              AND cp.payment_date < yb.year_end
+            GROUP BY cp.project_id
           ),
-          expense_entries AS (
-            SELECT DATE_TRUNC('month', e.expense_date) AS month_start, e.amount AS amount
-            FROM engicost.expenses e
-            WHERE e.company_id = $1
-              AND e.is_deleted = FALSE
-              AND e.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-              AND e.expense_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND e.expense_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT DATE_TRUNC('month', mp.purchase_date) AS month_start, mp.total_cost AS amount
-            FROM engicost.material_purchases mp
-            WHERE mp.company_id = $1
-              AND mp.is_deleted = FALSE
-              AND mp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-              AND mp.purchase_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND mp.purchase_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT DATE_TRUNC('month', lp.work_end) AS month_start, lp.amount_paid AS amount
-            FROM engicost.labor_payments lp
-            WHERE lp.company_id = $1
-              AND lp.is_deleted = FALSE
-              AND lp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-              AND lp.work_end >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND lp.work_end < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT DATE_TRUNC('month', eu.end_date) AS month_start, eu.total_cost AS amount
-            FROM engicost.equipment_usage eu
-            WHERE eu.company_id = $1
-              AND eu.is_deleted = FALSE
-              AND eu.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-              AND eu.end_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND eu.end_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          income_entries AS (
+            SELECT
+              DATE_TRUNC('month', cp.payment_date) AS month_start,
+              cp.amount_received AS amount
+            FROM engicost.client_payments cp, year_bounds yb
+            WHERE cp.company_id = $1
+              AND cp.is_deleted = FALSE
+              AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+              AND cp.payment_date >= yb.year_start
+              AND cp.payment_date < yb.year_end
 
             UNION ALL
 
             SELECT
+              DATE_TRUNC('month', p.start_date) AS month_start,
+              GREATEST(p.amount_received - COALESCE(dibp.income, 0), 0) AS amount
+            FROM engicost.projects p
+            LEFT JOIN detailed_income_by_project dibp ON dibp.project_id = p.id
+            CROSS JOIN year_bounds yb
+            WHERE p.company_id = $1
+              AND p.start_date >= yb.year_start
+              AND p.start_date < yb.year_end
+              AND p.amount_received > COALESCE(dibp.income, 0)
+          ),
+          income_by_month AS (
+            SELECT month_start, COALESCE(SUM(amount), 0) AS income
+            FROM income_entries
+            GROUP BY month_start
+          ),
+          expense_entries AS (
+            SELECT e.project_id, DATE_TRUNC('month', e.expense_date) AS month_start, e.amount AS amount
+            FROM engicost.expenses e, year_bounds yb
+            WHERE e.company_id = $1
+              AND e.is_deleted = FALSE
+              AND e.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+              AND e.expense_date >= yb.year_start
+              AND e.expense_date < yb.year_end
+
+            UNION ALL
+
+            SELECT mp.project_id, DATE_TRUNC('month', mp.purchase_date) AS month_start, mp.total_cost AS amount
+            FROM engicost.material_purchases mp, year_bounds yb
+            WHERE mp.company_id = $1
+              AND mp.is_deleted = FALSE
+              AND mp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+              AND mp.purchase_date >= yb.year_start
+              AND mp.purchase_date < yb.year_end
+
+            UNION ALL
+
+            SELECT lp.project_id, DATE_TRUNC('month', lp.work_end) AS month_start, lp.amount_paid AS amount
+            FROM engicost.labor_payments lp, year_bounds yb
+            WHERE lp.company_id = $1
+              AND lp.is_deleted = FALSE
+              AND lp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+              AND lp.work_end >= yb.year_start
+              AND lp.work_end < yb.year_end
+
+            UNION ALL
+
+            SELECT eu.project_id, DATE_TRUNC('month', eu.end_date) AS month_start, eu.total_cost AS amount
+            FROM engicost.equipment_usage eu, year_bounds yb
+            WHERE eu.company_id = $1
+              AND eu.is_deleted = FALSE
+              AND eu.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+              AND eu.end_date >= yb.year_start
+              AND eu.end_date < yb.year_end
+
+            UNION ALL
+
+            SELECT
+              pc.project_id,
               DATE_TRUNC('month', pc.transaction_date) AS month_start,
               CASE WHEN pc.transaction_type = 'Cash Out' THEN pc.amount ELSE 0 END AS amount
-            FROM engicost.petty_cash_transactions pc
+            FROM engicost.petty_cash_transactions pc, year_bounds yb
             WHERE pc.company_id = $1
-              AND pc.transaction_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-              AND pc.transaction_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              AND pc.transaction_date >= yb.year_start
+              AND pc.transaction_date < yb.year_end
+          ),
+          detailed_expenses_by_project AS (
+            SELECT project_id, COALESCE(SUM(amount), 0) AS expenses
+            FROM expense_entries
+            WHERE project_id IS NOT NULL
+            GROUP BY project_id
+          ),
+          expense_entries_with_fallback AS (
+            SELECT month_start, amount
+            FROM expense_entries
+
+            UNION ALL
+
+            SELECT
+              DATE_TRUNC('month', p.start_date) AS month_start,
+              GREATEST(p.total_spent - COALESCE(debp.expenses, 0), 0) AS amount
+            FROM engicost.projects p
+            LEFT JOIN detailed_expenses_by_project debp ON debp.project_id = p.id
+            CROSS JOIN year_bounds yb
+            WHERE p.company_id = $1
+              AND p.start_date >= yb.year_start
+              AND p.start_date < yb.year_end
+              AND p.total_spent > COALESCE(debp.expenses, 0)
           ),
           expenses_by_month AS (
             SELECT month_start, COALESCE(SUM(amount), 0) AS expenses
-            FROM expense_entries
+            FROM expense_entries_with_fallback
             GROUP BY month_start
           )
           SELECT

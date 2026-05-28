@@ -583,7 +583,7 @@ export const GuiSelect = ({
                 }}
                 type="button"
               >
-                <span className="truncate">{option.label}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words text-left">{option.label}</span>
                 {selected && <Check className="h-4 w-4 shrink-0" />}
               </button>
             );

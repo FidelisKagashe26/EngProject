@@ -28,7 +28,6 @@ export const APP_PERMISSIONS = [
   "settings.manage",
   "users.manage",
   "audit.view",
-  "mobile.supervisor",
 ] as const;
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
@@ -53,7 +52,6 @@ export const PERMISSION_LABELS: Record<AppPermission, string> = {
   "settings.manage": "Manage company, website and system settings",
   "users.manage": "Manage users and roles",
   "audit.view": "View activity log/audit trail",
-  "mobile.supervisor": "Use mobile supervisor view",
 };
 
 export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
@@ -74,7 +72,6 @@ export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
     "documents.view",
     "documents.manage",
     "notifications.view",
-    "mobile.supervisor",
   ],
   Accountant: [
     "dashboard.view",
@@ -112,7 +109,6 @@ export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
     "documents.view",
     "documents.manage",
     "notifications.view",
-    "mobile.supervisor",
   ],
 };
 

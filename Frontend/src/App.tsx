@@ -18,7 +18,6 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { ForgotPasswordOtpPage } from "./pages/ForgotPasswordOtpPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
-import { MobileSupervisorPage } from "./pages/MobileSupervisorPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
@@ -355,14 +354,6 @@ function App() {
                 </PermissionOnly>
               }
               path="/notifications"
-            />
-            <Route
-              element={
-                <PermissionOnly permissions={["mobile.supervisor"]}>
-                  <MobileSupervisorPage />
-                </PermissionOnly>
-              }
-              path="/mobile-supervisor"
             />
             <Route
               element={

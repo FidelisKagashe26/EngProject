@@ -6,7 +6,6 @@ import {
   CreditCard,
   Gauge,
   PieChart,
-  Smartphone,
   Truck,
   UserCog,
   Wrench,
@@ -34,7 +33,6 @@ export const mainNavItems: NavItem[] = [
   { label: "Reports", path: "/reports", icon: PieChart, permissions: ["reports.view"] },
   { label: "Suppliers", path: "/suppliers", icon: Truck, permissions: ["suppliers.view"] },
   { label: "Notifications", path: "/notifications", icon: Bell, permissions: ["notifications.view"] },
-  { label: "Mobile Supervisor", path: "/mobile-supervisor", icon: Smartphone, permissions: ["mobile.supervisor"] },
 ];
 
 export const utilityNavItems: NavItem[] = [

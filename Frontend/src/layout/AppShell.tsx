@@ -35,7 +35,6 @@ const routeTitles: Record<string, string> = {
   "/users": "Users & Roles",
   "/settings": "Settings",
   "/notifications": "Notifications / Alerts",
-  "/mobile-supervisor": "Mobile Supervisor View",
   "/activity-log": "Activity Log / Audit Trail",
 };
 
@@ -196,7 +195,7 @@ export const AppShell = ({
               />
             </div>
             <GuiSelect
-              className="hidden w-auto! py-2! text-sm lg:block"
+              className="hidden w-auto! py-2! text-sm lg:flex"
               fullWidth={false}
               onChange={(event) => handleProjectJumpChange(event.target.value)}
               value={projectJump}

@@ -319,7 +319,24 @@ router.patch(
     const oldPayment = result.rows[0];
     const oldAmountReceived = Number(oldPayment.amount_received);
     const newAmountReceived = parsed.amountReceived ?? oldAmountReceived;
+    const newProjectId = parsed.projectId ?? oldPayment.project_id;
     const amountDifference = newAmountReceived - oldAmountReceived;
+
+    if (parsed.projectId) {
+      const projectResult = await db.query<{ id: string }>(
+        `
+        SELECT id
+        FROM engicost.projects
+        WHERE company_id = $1 AND id = $2
+        LIMIT 1
+        `,
+        [companyId, parsed.projectId],
+      );
+      if (projectResult.rowCount === 0) {
+        res.status(400).json({ message: "Selected project/site does not exist." });
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {
@@ -329,6 +346,10 @@ router.patch(
       const params: unknown[] = [companyId, paymentId];
       let paramIndex = 3;
 
+      if (parsed.projectId) {
+        setClauses.push(`project_id = $${paramIndex++}`);
+        params.push(parsed.projectId);
+      }
       if (parsed.amountReceived !== undefined) {
         setClauses.push(`amount_received = $${paramIndex++}`);
         params.push(parsed.amountReceived);
@@ -345,6 +366,22 @@ router.patch(
         setClauses.push(`payment_type = $${paramIndex++}`);
         params.push(parsed.paymentType);
       }
+      if (parsed.milestone !== undefined) {
+        setClauses.push(`milestone = $${paramIndex++}`);
+        params.push(parsed.milestone);
+      }
+      if (parsed.paymentDate) {
+        setClauses.push(`payment_date = $${paramIndex++}`);
+        params.push(parsed.paymentDate);
+      }
+      if (parsed.paymentMethod) {
+        setClauses.push(`payment_method = $${paramIndex++}`);
+        params.push(parsed.paymentMethod);
+      }
+      if (parsed.referenceNumber !== undefined) {
+        setClauses.push(`reference_number = $${paramIndex++}`);
+        params.push(parsed.referenceNumber);
+      }
       if (parsed.status) {
         setClauses.push(`status = $${paramIndex++}`);
         params.push(parsed.status);
@@ -352,6 +389,18 @@ router.patch(
       if (parsed.notes !== undefined) {
         setClauses.push(`notes = $${paramIndex++}`);
         params.push(parsed.notes);
+      }
+      if (parsed.attachmentUrl !== undefined) {
+        setClauses.push(`attachment_url = NULLIF($${paramIndex++}, '')`);
+        params.push(parsed.attachmentUrl);
+      }
+      if (parsed.attachmentName !== undefined) {
+        setClauses.push(`attachment_name = NULLIF($${paramIndex++}, '')`);
+        params.push(parsed.attachmentName);
+      }
+      if (parsed.attachmentType !== undefined) {
+        setClauses.push(`attachment_type = NULLIF($${paramIndex++}, '')`);
+        params.push(parsed.attachmentType);
       }
 
       if (setClauses.length > 0) {
@@ -361,18 +410,43 @@ router.patch(
         );
       }
 
-      if (amountDifference !== 0 && isAppliedApprovalStatus(oldPayment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET 
-            amount_received = amount_received + $3,
-            pending_client_payments = GREATEST(pending_client_payments - $3, 0),
-            updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, oldPayment.project_id, amountDifference],
-        );
+      if (isAppliedApprovalStatus(oldPayment.approval_status)) {
+        if (newProjectId !== oldPayment.project_id) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET
+              amount_received = GREATEST(amount_received - $3, 0),
+              pending_client_payments = pending_client_payments + $3,
+              updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldPayment.project_id, oldAmountReceived],
+          );
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET
+              amount_received = amount_received + $3,
+              pending_client_payments = GREATEST(pending_client_payments - $3, 0),
+              updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, newProjectId, newAmountReceived],
+          );
+        } else if (amountDifference !== 0) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET 
+              amount_received = amount_received + $3,
+              pending_client_payments = GREATEST(pending_client_payments - $3, 0),
+              updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldPayment.project_id, amountDifference],
+          );
+        }
       }
 
       await client.query(
@@ -384,7 +458,7 @@ router.patch(
           makeId("ACT"),
           companyId,
           "Rehema Sululu",
-          oldPayment.project_id,
+          newProjectId,
           `Updated payment - Amount change: ${amountDifference > 0 ? "+" : ""}TZS ${amountDifference.toLocaleString("en-TZ")}`,
         ],
       );

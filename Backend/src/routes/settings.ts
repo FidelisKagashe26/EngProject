@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { db } from "../db/pool";
+import { requireAdmin } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
@@ -72,6 +73,7 @@ router.get(
 
 router.put(
   "/company",
+  requireAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const parsed = companySchema.parse(req.body);

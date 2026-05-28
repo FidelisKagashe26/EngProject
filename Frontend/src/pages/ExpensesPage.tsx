@@ -2,6 +2,7 @@ import { BarChart2, PieChart, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ConfirmModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
@@ -53,6 +54,9 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState("");
+  const [expenseToDelete, setExpenseToDelete] = useState<ExpenseApiRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Form state
   const [projectId, setProjectId] = useState(projectFromQuery);
@@ -165,6 +169,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
   }, [charts.monthlyTrend]);
 
   const resetForm = () => {
+    setEditingExpenseId("");
     setDescription("");
     setAmount("");
     setDate("");
@@ -184,6 +189,21 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
     resetForm();
   };
 
+  const openEditModal = (expense: ExpenseApiRecord) => {
+    setEditingExpenseId(expense.id);
+    setProjectId(expense.projectId);
+    setCategory(expense.category);
+    setDescription(expense.description);
+    setAmount(String(expense.amount));
+    setDate(expense.date);
+    setPaidBy(expense.paidBy);
+    setPaymentMethod(expense.paymentMethod);
+    setReceiptRef(expense.receiptRef);
+    setStatus(expense.status);
+    setNotes(expense.notes);
+    setShowAddModal(true);
+  };
+
   const handleSaveExpense = async () => {
     if (
       projectId.trim().length === 0 ||
@@ -199,7 +219,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
     setSaving(true);
     setError("");
     try {
-      await api.createExpense({
+      const payload = {
         projectId,
         date,
         category,
@@ -210,7 +230,12 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
         receiptRef: receiptRef.trim(),
         status,
         notes: notes.trim(),
-      });
+      };
+      if (editingExpenseId) {
+        await api.updateExpense(editingExpenseId, payload);
+      } else {
+        await api.createExpense(payload);
+      }
       await refreshExpenses();
       markSaved();
       closeAddModal();
@@ -218,6 +243,23 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
       setError(saveError instanceof Error ? saveError.message : "Failed to save expense.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!expenseToDelete) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await api.deleteExpense(expenseToDelete.id);
+      await refreshExpenses();
+      markSaved();
+      setExpenseToDelete(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete expense.");
+      setExpenseToDelete(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -299,6 +341,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
                     <th>Payment Method</th>
                     <th>Receipt</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -325,6 +368,16 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
                         >
                           {item.status}
                         </span>
+                      </td>
+                      <td>
+                        <div className="flex gap-2">
+                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => openEditModal(item)} type="button">
+                            Edit
+                          </button>
+                          <button className="btn-danger py-1 px-3 text-xs" onClick={() => setExpenseToDelete(item)} type="button">
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -384,7 +437,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
       {/* Add Expense Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Expense">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title={editingExpenseId ? "Edit Expense" : "Add Expense"}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project/Site</span>
@@ -439,13 +492,23 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
               <div className="sm:col-span-2 flex justify-end gap-2">
                 <button className="btn-secondary" onClick={closeAddModal} type="button">Cancel</button>
                 <button className="btn-primary" disabled={saving} onClick={() => void handleSaveExpense()} type="button">
-                  Save Expense
+                  {editingExpenseId ? "Update Expense" : "Save Expense"}
                 </button>
               </div>
             </form>
           </SurfaceCard>
         </div>
       )}
+      <ConfirmModal
+        cancelLabel="Cancel"
+        confirmClassName="btn-danger"
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        description={expenseToDelete ? `Delete expense "${expenseToDelete.description}"? Project totals will be reversed automatically.` : ""}
+        onCancel={() => setExpenseToDelete(null)}
+        onConfirm={() => void handleDeleteExpense()}
+        open={expenseToDelete !== null}
+        title="Delete Expense"
+      />
     </div>
   );
 };

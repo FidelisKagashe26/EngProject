@@ -3,9 +3,11 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireRoles } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 
 const router = Router();
+const supplierManagerRoles = ["Admin", "Engineer / Project Manager", "Store Keeper"] as const;
 
 const supplierSchema = z.object({
   name: z.string().min(2),
@@ -113,6 +115,7 @@ router.get(
 
 router.post(
   "/",
+  requireRoles(...supplierManagerRoles),
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const parsed = supplierSchema.parse({
@@ -207,4 +210,3 @@ router.post(
 );
 
 export default router;
-

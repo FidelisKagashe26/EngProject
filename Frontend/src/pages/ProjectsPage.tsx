@@ -1,6 +1,7 @@
 import { Calendar, MapPin, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { hasPermission, useAuth } from "../auth";
 import { EmptyState, ProgressBar, SectionTitle, SkeletonTable, SurfaceCard, GuiSelect } from "../components/ui";
 import { api, type ProjectApiRecord } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
@@ -40,6 +41,7 @@ const toViewProject = (row: ProjectApiRecord): ViewProject => ({
 });
 
 export const ProjectsPage = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<ViewProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +99,7 @@ export const ProjectsPage = () => {
     uniqueLocations.sort((a, b) => a.localeCompare(b));
     return uniqueLocations;
   }, [rows]);
+  const canManageProjects = hasPermission(user?.role, "projects.manage");
 
   return (
     <div className="space-y-6">
@@ -105,11 +108,13 @@ export const ProjectsPage = () => {
         title="Projects / Sites"
       />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <Link className="btn-primary whitespace-nowrap" to="/projects/new">
-          Add New Project
-        </Link>
-      </div>
+      {canManageProjects ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+          <Link className="btn-primary whitespace-nowrap" to="/projects/new">
+            Add New Project
+          </Link>
+        </div>
+      ) : null}
 
       {error && (
         <SurfaceCard>
@@ -177,9 +182,9 @@ export const ProjectsPage = () => {
         <SkeletonTable rows={4} />
       ) : filteredProjects.length === 0 ? (
         <EmptyState
-          actionLabel="Create First Project"
+          actionLabel={canManageProjects ? "Create First Project" : undefined}
           description="No projects found. Start by registering your first engineering site."
-          onAction={() => navigate("/projects/new")}
+          onAction={canManageProjects ? () => navigate("/projects/new") : undefined}
           title="No projects found"
         />
       ) : (
@@ -277,12 +282,14 @@ export const ProjectsPage = () => {
                     >
                       View details
                     </Link>
-                    <Link
-                      className="btn-primary w-full justify-center text-xs"
-                      to={`/projects/${encodeURIComponent(project.id)}/edit`}
-                    >
-                      Edit
-                    </Link>
+                    {canManageProjects ? (
+                      <Link
+                        className="btn-primary w-full justify-center text-xs"
+                        to={`/projects/${encodeURIComponent(project.id)}/edit`}
+                      >
+                        Edit
+                      </Link>
+                    ) : null}
                   </div>
                 </div>
               </div>

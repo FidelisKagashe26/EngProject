@@ -13,14 +13,25 @@ import {
 
 const router = Router();
 
+const materialSupplySourceSchema = z.enum(["Company Purchased", "Client Supplied"]);
+
 const requirementSchema = z.object({
   projectId: z.string().min(3),
   materialName: z.string().min(2),
   requiredQuantity: z.number().nonnegative(),
   unit: z.string().min(1),
   estimatedUnitCost: z.number().nonnegative(),
+  supplySource: materialSupplySourceSchema.optional().default("Company Purchased"),
+  requestedQuantity: z.number().nonnegative().optional().default(0),
+  supplyStatus: z.string().optional().default("Planned"),
   priority: z.string().optional().default("Medium"),
   neededByDate: z.string().date().optional(),
+  notes: z.string().optional().default(""),
+});
+
+const requestSupplySchema = z.object({
+  requestedQuantity: z.number().positive(),
+  requestDate: z.string().date().optional(),
   notes: z.string().optional().default(""),
 });
 
@@ -31,6 +42,7 @@ const purchaseSchema = z.object({
   quantityPurchased: z.number().nonnegative(),
   supplierName: z.string().min(2),
   unitCost: z.number().nonnegative(),
+  supplySource: materialSupplySourceSchema.optional().default("Company Purchased"),
   purchaseDate: z.string().date(),
   deliveryNoteNumber: z.string().optional().default(""),
   deliveryStatus: z.string().optional().default("Pending Delivery"),
@@ -47,10 +59,17 @@ type RequirementLookup = {
   id: string;
   project_id: string;
   material_name: string;
+  supply_source: string;
+};
+
+type QueryExecutor = {
+  query: (text: string, params?: unknown[]) => Promise<unknown>;
 };
 
 const normalizeText = (value: string): string =>
   value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const getTodaySqlDate = (): string => new Date().toISOString().slice(0, 10);
 
 const getProjectById = async (
   companyId: number,
@@ -74,7 +93,7 @@ const getRequirementById = async (
 ): Promise<RequirementLookup | null> => {
   const result = await db.query<RequirementLookup>(
     `
-    SELECT id, project_id, material_name
+    SELECT id, project_id, material_name, supply_source
     FROM engicost.material_requirements
     WHERE company_id = $1 AND id = $2
     LIMIT 1
@@ -82,6 +101,39 @@ const getRequirementById = async (
     [companyId, requirementId],
   );
   return result.rows[0] ?? null;
+};
+
+const refreshRequirementSupplyStatus = async (
+  queryable: QueryExecutor,
+  companyId: number,
+  requirementId: string | null | undefined,
+): Promise<void> => {
+  if (!requirementId || requirementId.trim().length === 0) {
+    return;
+  }
+
+  await queryable.query(
+    `
+    UPDATE engicost.material_requirements mr
+    SET
+      supply_status = CASE
+        WHEN delivered.quantity >= mr.required_quantity THEN 'Fulfilled'
+        WHEN delivered.quantity > 0 THEN 'Partially Delivered'
+        WHEN mr.requested_quantity > 0 THEN 'Requested'
+        ELSE 'Planned'
+      END,
+      updated_at = NOW()
+    FROM (
+      SELECT COALESCE(SUM(quantity_purchased), 0) AS quantity
+      FROM engicost.material_purchases
+      WHERE company_id = $1
+        AND requirement_id = $2
+        AND is_deleted = FALSE
+    ) delivered
+    WHERE mr.company_id = $1 AND mr.id = $2
+    `,
+    [companyId, requirementId],
+  );
 };
 
 router.get(
@@ -98,6 +150,10 @@ router.get(
         required_quantity: string;
         unit: string;
         estimated_unit_cost: string;
+        supply_source: string;
+        requested_quantity: string;
+        last_request_date: string | null;
+        supply_status: string;
         priority: string;
         needed_by_date: string | null;
         notes: string | null;
@@ -111,6 +167,10 @@ router.get(
           mr.required_quantity::text,
           mr.unit,
           mr.estimated_unit_cost::text,
+          mr.supply_source,
+          mr.requested_quantity::text,
+          mr.last_request_date::text,
+          mr.supply_status,
           mr.priority,
           mr.needed_by_date::text,
           mr.notes
@@ -131,6 +191,7 @@ router.get(
         supplier_name: string;
         unit_cost: string;
         total_cost: string;
+        supply_source: string;
         purchase_date: string;
         delivery_note_number: string | null;
         delivery_status: string;
@@ -149,6 +210,7 @@ router.get(
           mp.supplier_name,
           mp.unit_cost::text,
           mp.total_cost::text,
+          mp.supply_source,
           mp.purchase_date::text,
           mp.delivery_note_number,
           mp.delivery_status,
@@ -173,6 +235,26 @@ router.get(
       },
       {},
     );
+    const clientSuppliedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
+      (acc, item) => {
+        if (item.requirement_id && item.supply_source === "Client Supplied") {
+          acc[item.requirement_id] =
+            (acc[item.requirement_id] ?? 0) + Number(item.quantity_purchased);
+        }
+        return acc;
+      },
+      {},
+    );
+    const companyPurchasedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
+      (acc, item) => {
+        if (item.requirement_id && item.supply_source !== "Client Supplied") {
+          acc[item.requirement_id] =
+            (acc[item.requirement_id] ?? 0) + Number(item.quantity_purchased);
+        }
+        return acc;
+      },
+      {},
+    );
 
     res.json({
       requirements: requirementsResult.rows.map((row) => {
@@ -185,9 +267,15 @@ router.get(
           materialName: row.material_name,
           requiredQuantity: required,
           purchasedQuantity: purchased,
+          companyPurchasedQuantity: companyPurchasedByRequirement[row.id] ?? 0,
+          clientSuppliedQuantity: clientSuppliedByRequirement[row.id] ?? 0,
           remainingQuantity: Math.max(required - purchased, 0),
           unit: row.unit,
           estimatedUnitCost: Number(row.estimated_unit_cost),
+          supplySource: row.supply_source,
+          requestedQuantity: Number(row.requested_quantity),
+          lastRequestDate: row.last_request_date,
+          supplyStatus: row.supply_status,
           priority: row.priority,
           neededByDate: row.needed_by_date,
           notes: row.notes ?? "",
@@ -203,6 +291,7 @@ router.get(
         supplierName: row.supplier_name,
         unitCost: Number(row.unit_cost),
         totalCost: Number(row.total_cost),
+        supplySource: row.supply_source,
         purchaseDate: row.purchase_date,
         deliveryNoteNumber: row.delivery_note_number ?? "",
         deliveryStatus: row.delivery_status,
@@ -221,6 +310,7 @@ router.post(
       ...req.body,
       requiredQuantity: toMoney(req.body.requiredQuantity),
       estimatedUnitCost: toMoney(req.body.estimatedUnitCost),
+      requestedQuantity: req.body.requestedQuantity !== undefined ? toMoney(req.body.requestedQuantity) : undefined,
     });
 
     const project = await getProjectById(companyId, parsed.projectId);
@@ -233,10 +323,11 @@ router.post(
       `
       INSERT INTO engicost.material_requirements (
         id, company_id, project_id, material_name, required_quantity, unit,
-        estimated_unit_cost, priority, needed_by_date, notes
+        estimated_unit_cost, supply_source, requested_quantity, last_request_date,
+        supply_status, priority, needed_by_date, notes
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10
+        $7, $8, $9, $10, $11, $12, $13, $14
       )
       RETURNING
         id,
@@ -245,6 +336,10 @@ router.post(
         required_quantity::text,
         unit,
         estimated_unit_cost::text,
+        supply_source,
+        requested_quantity::text,
+        last_request_date::text,
+        supply_status,
         priority,
         needed_by_date::text,
         notes
@@ -257,6 +352,10 @@ router.post(
         parsed.requiredQuantity,
         parsed.unit,
         parsed.estimatedUnitCost,
+        parsed.supplySource,
+        parsed.requestedQuantity,
+        parsed.requestedQuantity > 0 ? getTodaySqlDate() : null,
+        parsed.requestedQuantity > 0 ? "Requested" : parsed.supplyStatus,
         parsed.priority,
         parsed.neededByDate ?? null,
         parsed.notes,
@@ -272,7 +371,7 @@ router.post(
         makeId("ACT"),
         companyId,
         parsed.projectId,
-        `Added requirement ${parsed.materialName} for ${project.name}.`,
+        `Added ${parsed.supplySource.toLowerCase()} requirement ${parsed.materialName} for ${project.name}.`,
       ],
     );
 
@@ -285,9 +384,219 @@ router.post(
       requiredQuantity: Number(row.required_quantity),
       unit: row.unit,
       estimatedUnitCost: Number(row.estimated_unit_cost),
+      supplySource: row.supply_source,
+      requestedQuantity: Number(row.requested_quantity),
+      lastRequestDate: row.last_request_date,
+      supplyStatus: row.supply_status,
       priority: row.priority,
       neededByDate: row.needed_by_date,
       notes: row.notes ?? "",
+    });
+  }),
+);
+
+router.patch(
+  "/requirements/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const requirementId = String(req.params.id);
+    const parsed = requirementSchema.partial().parse({
+      ...req.body,
+      requiredQuantity: req.body.requiredQuantity !== undefined ? toMoney(req.body.requiredQuantity) : undefined,
+      estimatedUnitCost: req.body.estimatedUnitCost !== undefined ? toMoney(req.body.estimatedUnitCost) : undefined,
+      requestedQuantity: req.body.requestedQuantity !== undefined ? toMoney(req.body.requestedQuantity) : undefined,
+    });
+
+    const setClauses: string[] = [];
+    const params: unknown[] = [companyId, requirementId];
+    let paramIndex = 3;
+
+    if (parsed.projectId) {
+      const project = await getProjectById(companyId, parsed.projectId);
+      if (!project) {
+        res.status(400).json({ message: "Selected project/site does not exist." });
+        return;
+      }
+      setClauses.push(`project_id = $${paramIndex++}`);
+      params.push(parsed.projectId);
+    }
+    if (parsed.materialName) {
+      setClauses.push(`material_name = $${paramIndex++}`);
+      params.push(parsed.materialName);
+    }
+    if (parsed.requiredQuantity !== undefined) {
+      setClauses.push(`required_quantity = $${paramIndex++}`);
+      params.push(parsed.requiredQuantity);
+    }
+    if (parsed.unit) {
+      setClauses.push(`unit = $${paramIndex++}`);
+      params.push(parsed.unit);
+    }
+    if (parsed.estimatedUnitCost !== undefined) {
+      setClauses.push(`estimated_unit_cost = $${paramIndex++}`);
+      params.push(parsed.estimatedUnitCost);
+    }
+    if (parsed.supplySource) {
+      setClauses.push(`supply_source = $${paramIndex++}`);
+      params.push(parsed.supplySource);
+    }
+    if (parsed.requestedQuantity !== undefined) {
+      setClauses.push(`requested_quantity = $${paramIndex++}`);
+      params.push(parsed.requestedQuantity);
+      setClauses.push(`last_request_date = CASE WHEN $${paramIndex}::numeric > 0 THEN COALESCE(last_request_date, CURRENT_DATE) ELSE last_request_date END`);
+      params.push(parsed.requestedQuantity);
+      paramIndex += 1;
+    }
+    if (parsed.supplyStatus) {
+      setClauses.push(`supply_status = $${paramIndex++}`);
+      params.push(parsed.supplyStatus);
+    }
+    if (parsed.priority) {
+      setClauses.push(`priority = $${paramIndex++}`);
+      params.push(parsed.priority);
+    }
+    if (parsed.neededByDate !== undefined) {
+      setClauses.push(`needed_by_date = $${paramIndex++}`);
+      params.push(parsed.neededByDate ?? null);
+    }
+    if (parsed.notes !== undefined) {
+      setClauses.push(`notes = $${paramIndex++}`);
+      params.push(parsed.notes);
+    }
+
+    if (setClauses.length === 0) {
+      res.status(400).json({ message: "No requirement fields provided for update." });
+      return;
+    }
+
+    const updated = await db.query<{
+      id: string;
+      project_id: string;
+      material_name: string;
+      required_quantity: string;
+      unit: string;
+      estimated_unit_cost: string;
+      supply_source: string;
+      requested_quantity: string;
+      last_request_date: string | null;
+      supply_status: string;
+      priority: string;
+      needed_by_date: string | null;
+      notes: string | null;
+    }>(
+      `
+      UPDATE engicost.material_requirements
+      SET ${setClauses.join(", ")}, updated_at = NOW()
+      WHERE company_id = $1 AND id = $2
+      RETURNING
+        id,
+        project_id,
+        material_name,
+        required_quantity::text,
+        unit,
+        estimated_unit_cost::text,
+        supply_source,
+        requested_quantity::text,
+        last_request_date::text,
+        supply_status,
+        priority,
+        needed_by_date::text,
+        notes
+      `,
+      params,
+    );
+
+    if (updated.rowCount === 0) {
+      res.status(404).json({ message: "Material requirement not found." });
+      return;
+    }
+
+    const row = updated.rows[0];
+    res.json({
+      id: row.id,
+      projectId: row.project_id,
+      materialName: row.material_name,
+      requiredQuantity: Number(row.required_quantity),
+      unit: row.unit,
+      estimatedUnitCost: Number(row.estimated_unit_cost),
+      supplySource: row.supply_source,
+      requestedQuantity: Number(row.requested_quantity),
+      lastRequestDate: row.last_request_date,
+      supplyStatus: row.supply_status,
+      priority: row.priority,
+      neededByDate: row.needed_by_date,
+      notes: row.notes ?? "",
+    });
+  }),
+);
+
+router.patch(
+  "/requirements/:id/request-supply",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const requirementId = String(req.params.id);
+    const parsed = requestSupplySchema.parse({
+      ...req.body,
+      requestedQuantity: toMoney(req.body.requestedQuantity),
+    });
+
+    const updated = await db.query<{
+      id: string;
+      project_id: string;
+      material_name: string;
+      requested_quantity: string;
+      last_request_date: string | null;
+      supply_status: string;
+    }>(
+      `
+      UPDATE engicost.material_requirements
+      SET
+        requested_quantity = requested_quantity + $3,
+        last_request_date = $4,
+        supply_status = 'Requested',
+        notes = CASE
+          WHEN $5::text = '' THEN notes
+          WHEN COALESCE(notes, '') = '' THEN $5
+          ELSE notes || E'\n' || $5
+        END,
+        updated_at = NOW()
+      WHERE company_id = $1 AND id = $2
+      RETURNING id, project_id, material_name, requested_quantity::text, last_request_date::text, supply_status
+      `,
+      [
+        companyId,
+        requirementId,
+        parsed.requestedQuantity,
+        parsed.requestDate ?? getTodaySqlDate(),
+        parsed.notes.trim(),
+      ],
+    );
+
+    if (updated.rowCount === 0) {
+      res.status(404).json({ message: "Material requirement not found." });
+      return;
+    }
+
+    const row = updated.rows[0];
+    await db.query(
+      `
+      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+      VALUES ($1, $2, $3, 'Requested Material Supply', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
+      `,
+      [
+        makeId("ACT"),
+        companyId,
+        req.authUser?.fullName || "Store Keeper",
+        row.project_id,
+        `Requested ${parsed.requestedQuantity.toLocaleString("en-TZ")} more ${row.material_name}.`,
+      ],
+    );
+
+    res.json({
+      id: row.id,
+      requestedQuantity: Number(row.requested_quantity),
+      lastRequestDate: row.last_request_date,
+      supplyStatus: row.supply_status,
     });
   }),
 );
@@ -338,8 +647,9 @@ router.post(
       }
     }
 
-    const totalCost = parsed.quantityPurchased * parsed.unitCost;
-    const needsApproval = requiresApproval("material_purchases", totalCost);
+    const isClientSupplied = parsed.supplySource === "Client Supplied";
+    const totalCost = isClientSupplied ? 0 : parsed.quantityPurchased * parsed.unitCost;
+    const needsApproval = !isClientSupplied && requiresApproval("material_purchases", totalCost);
     const approvalStatus = getApprovalStatusForAmount("material_purchases", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Store Keeper";
     const client = await db.connect();
@@ -353,6 +663,7 @@ router.post(
           supplier_name: string;
           unit_cost: string;
           total_cost: string;
+          supply_source: string;
           purchase_date: string;
           delivery_note_number: string | null;
           delivery_status: string;
@@ -374,6 +685,7 @@ router.post(
         supplier_name: string;
         unit_cost: string;
         total_cost: string;
+        supply_source: string;
         purchase_date: string;
         delivery_note_number: string | null;
         delivery_status: string;
@@ -384,14 +696,14 @@ router.post(
         `
         INSERT INTO engicost.material_purchases (
           id, company_id, project_id, requirement_id, material_name, quantity_purchased,
-          supplier_name, unit_cost, total_cost, purchase_date, delivery_note_number,
+          supplier_name, unit_cost, total_cost, supply_source, purchase_date, delivery_note_number,
           delivery_status, receipt_ref, notes,
           approval_status, approval_requested_by, approval_requested_at
         ) VALUES (
           $1, $2, $3, NULLIF($4, ''), $5, $6,
           $7, $8, $9, $10, $11,
-          $12, $13, $14,
-          $15, $16, NOW()
+          $12, $13, $14, $15,
+          $16, $17, NOW()
         )
         RETURNING
           id,
@@ -402,6 +714,7 @@ router.post(
           supplier_name,
           unit_cost::text,
           total_cost::text,
+          supply_source,
           purchase_date::text,
           delivery_note_number,
           delivery_status,
@@ -417,8 +730,9 @@ router.post(
           parsed.materialName,
           parsed.quantityPurchased,
           parsed.supplierName,
-          parsed.unitCost,
+          isClientSupplied ? 0 : parsed.unitCost,
           totalCost,
+          parsed.supplySource,
           parsed.purchaseDate,
           parsed.deliveryNoteNumber,
           parsed.deliveryStatus,
@@ -441,6 +755,8 @@ router.post(
         );
       }
 
+      await refreshRequirementSupplyStatus(client, companyId, parsed.requirementId);
+
       await client.query(
         `
         INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
@@ -453,7 +769,9 @@ router.post(
           parsed.projectId,
           needsApproval
             ? `Material purchase pending approval: ${parsed.materialName} for TZS ${totalCost.toLocaleString("en-TZ")}.`
-            : `Purchased ${parsed.materialName} from ${parsed.supplierName} for TZS ${totalCost.toLocaleString("en-TZ")}.`,
+            : isClientSupplied
+              ? `Received client-supplied ${parsed.materialName}: ${parsed.quantityPurchased.toLocaleString("en-TZ")}.`
+              : `Purchased ${parsed.materialName} from ${parsed.supplierName} for TZS ${totalCost.toLocaleString("en-TZ")}.`,
         ],
       );
 
@@ -481,6 +799,7 @@ router.post(
       supplierName: row.supplier_name,
       unitCost: Number(row.unit_cost),
       totalCost: Number(row.total_cost),
+      supplySource: row.supply_source,
       purchaseDate: row.purchase_date,
       deliveryNoteNumber: row.delivery_note_number ?? "",
       deliveryStatus: row.delivery_status,
@@ -509,13 +828,24 @@ router.patch(
 
     const result = await db.query<{
       project_id: string;
+      requirement_id: string | null;
+      material_name: string;
       quantity_purchased: string;
       unit_cost: string;
       total_cost: string;
+      supply_source: string;
       approval_status: string | null;
     }>(
       `
-      SELECT project_id, quantity_purchased::text, unit_cost::text, total_cost::text, approval_status
+      SELECT
+        project_id,
+        requirement_id,
+        material_name,
+        quantity_purchased::text,
+        unit_cost::text,
+        total_cost::text,
+        supply_source,
+        approval_status
       FROM engicost.material_purchases
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
@@ -530,11 +860,52 @@ router.patch(
 
     const oldPurchase = result.rows[0];
     const oldTotalCost = Number(oldPurchase.total_cost);
+    const oldRequirementId = oldPurchase.requirement_id ?? "";
 
+    const newProjectId = parsed.projectId ?? oldPurchase.project_id;
+    const newRequirementId =
+      parsed.requirementId !== undefined ? parsed.requirementId.trim() : oldRequirementId;
+    const newMaterialName = parsed.materialName ?? oldPurchase.material_name;
     const newQuantity = parsed.quantityPurchased ?? Number(oldPurchase.quantity_purchased);
-    const newUnitCost = parsed.unitCost ?? Number(oldPurchase.unit_cost);
-    const newTotalCost = newQuantity * newUnitCost;
+    const newSupplySource = parsed.supplySource ?? oldPurchase.supply_source;
+    const newUnitCost =
+      newSupplySource === "Client Supplied"
+        ? 0
+        : parsed.unitCost ?? Number(oldPurchase.unit_cost);
+    const newTotalCost = newSupplySource === "Client Supplied" ? 0 : newQuantity * newUnitCost;
     const costDifference = newTotalCost - oldTotalCost;
+
+    if (parsed.projectId) {
+      const project = await getProjectById(companyId, parsed.projectId);
+      if (!project) {
+        res.status(400).json({ message: "Selected project/site does not exist." });
+        return;
+      }
+    }
+
+    if (newRequirementId.length > 0) {
+      const requirement = await getRequirementById(companyId, newRequirementId);
+      if (!requirement) {
+        res.status(400).json({ message: "Selected material requirement does not exist." });
+        return;
+      }
+
+      if (requirement.project_id !== newProjectId) {
+        res.status(400).json({
+          message:
+            "Selected requirement belongs to another project. Please pick a matching project/requirement.",
+        });
+        return;
+      }
+
+      if (normalizeText(requirement.material_name) !== normalizeText(newMaterialName)) {
+        res.status(400).json({
+          message:
+            "Material name must match the selected requirement to keep project records consistent.",
+        });
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {
@@ -544,13 +915,33 @@ router.patch(
       const params: unknown[] = [companyId, purchaseId];
       let paramIndex = 3;
 
+      if (parsed.projectId) {
+        setClauses.push(`project_id = $${paramIndex++}`);
+        params.push(parsed.projectId);
+      }
+      if (parsed.requirementId !== undefined) {
+        setClauses.push(`requirement_id = NULLIF($${paramIndex++}, '')`);
+        params.push(parsed.requirementId.trim());
+      }
+      if (parsed.materialName) {
+        setClauses.push(`material_name = $${paramIndex++}`);
+        params.push(parsed.materialName);
+      }
       if (parsed.quantityPurchased !== undefined) {
         setClauses.push(`quantity_purchased = $${paramIndex++}`);
         params.push(parsed.quantityPurchased);
       }
       if (parsed.unitCost !== undefined) {
         setClauses.push(`unit_cost = $${paramIndex++}`);
-        params.push(parsed.unitCost);
+        params.push(newUnitCost);
+      }
+      if (parsed.supplySource !== undefined) {
+        setClauses.push(`supply_source = $${paramIndex++}`);
+        params.push(parsed.supplySource);
+        if (parsed.supplySource === "Client Supplied" && parsed.unitCost === undefined) {
+          setClauses.push(`unit_cost = $${paramIndex++}`);
+          params.push(0);
+        }
       }
       if (parsed.supplierName) {
         setClauses.push(`supplier_name = $${paramIndex++}`);
@@ -560,9 +951,17 @@ router.patch(
         setClauses.push(`purchase_date = $${paramIndex++}`);
         params.push(parsed.purchaseDate);
       }
+      if (parsed.deliveryNoteNumber !== undefined) {
+        setClauses.push(`delivery_note_number = $${paramIndex++}`);
+        params.push(parsed.deliveryNoteNumber);
+      }
       if (parsed.deliveryStatus) {
         setClauses.push(`delivery_status = $${paramIndex++}`);
         params.push(parsed.deliveryStatus);
+      }
+      if (parsed.receiptRef !== undefined) {
+        setClauses.push(`receipt_ref = $${paramIndex++}`);
+        params.push(parsed.receiptRef);
       }
       if (parsed.notes !== undefined) {
         setClauses.push(`notes = $${paramIndex++}`);
@@ -579,15 +978,39 @@ router.patch(
         );
       }
 
-      if (costDifference !== 0 && isAppliedApprovalStatus(oldPurchase.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, oldPurchase.project_id, costDifference],
-        );
+      if (isAppliedApprovalStatus(oldPurchase.approval_status)) {
+        if (newProjectId !== oldPurchase.project_id) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldPurchase.project_id, oldTotalCost],
+          );
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = total_spent + $3, updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, newProjectId, newTotalCost],
+          );
+        } else if (costDifference !== 0) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldPurchase.project_id, costDifference],
+          );
+        }
+      }
+
+      await refreshRequirementSupplyStatus(client, companyId, oldRequirementId);
+      if (newRequirementId !== oldRequirementId) {
+        await refreshRequirementSupplyStatus(client, companyId, newRequirementId);
       }
 
       await client.query(
@@ -598,8 +1021,8 @@ router.patch(
         [
           makeId("ACT"),
           companyId,
-          "Store Keeper",
-          oldPurchase.project_id,
+          req.authUser?.fullName || "Store Keeper",
+          newProjectId,
           `Updated purchase - Cost change: ${costDifference > 0 ? "+" : ""}TZS ${costDifference.toLocaleString("en-TZ")}`,
         ],
       );
@@ -629,11 +1052,12 @@ router.delete(
 
     const result = await db.query<{
       project_id: string;
+      requirement_id: string | null;
       total_cost: string;
       approval_status: string | null;
     }>(
       `
-      SELECT project_id, total_cost::text, approval_status
+      SELECT project_id, requirement_id, total_cost::text, approval_status
       FROM engicost.material_purchases
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
@@ -673,6 +1097,8 @@ router.delete(
           [companyId, purchase.project_id, totalCost],
         );
       }
+
+      await refreshRequirementSupplyStatus(client, companyId, purchase.requirement_id);
 
       // Log the action
       await client.query(
@@ -714,11 +1140,12 @@ router.patch(
 
     const result = await db.query<{
       project_id: string;
+      requirement_id: string | null;
       total_cost: string;
       approval_status: string | null;
     }>(
       `
-      SELECT project_id, total_cost::text, approval_status
+      SELECT project_id, requirement_id, total_cost::text, approval_status
       FROM engicost.material_purchases
       WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
       LIMIT 1
@@ -758,6 +1185,8 @@ router.patch(
           [companyId, purchase.project_id, totalCost],
         );
       }
+
+      await refreshRequirementSupplyStatus(client, companyId, purchase.requirement_id);
 
       // Log the action
       await client.query(

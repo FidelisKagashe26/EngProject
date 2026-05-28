@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { hasAnyPermission } from "../auth";
 import { UnsavedChangesRouteGuard } from "../guards/UnsavedChangesGuard";
 import { api, type AuthUser, type CompanyProfile, type ProjectApiRecord } from "../services/api";
 import { mainNavItems, quickAddActions, utilityNavItems } from "./navigation";
@@ -59,6 +60,28 @@ export const AppShell = ({
   const [projectJump, setProjectJump] = useState("");
   const companyLogoAlt =
     company?.name.trim().length ? `${company.name.trim()} logo` : "Company logo";
+  const visibleMainNavItems = useMemo(
+    () =>
+      mainNavItems.filter(
+        (item) => !item.permissions || hasAnyPermission(user?.role, item.permissions),
+      ),
+    [user?.role],
+  );
+  const visibleUtilityNavItems = useMemo(
+    () =>
+      utilityNavItems.filter(
+        (item) => !item.permissions || hasAnyPermission(user?.role, item.permissions),
+      ),
+    [user?.role],
+  );
+  const visibleQuickAddActions = useMemo(
+    () =>
+      quickAddActions.filter((action) =>
+        hasAnyPermission(user?.role, action.permissions),
+      ),
+    [user?.role],
+  );
+  const canViewNotifications = hasAnyPermission(user?.role, ["notifications.view"]);
 
   const breadcrumbTitle = useMemo(() => {
     if (location.pathname.startsWith("/projects/") && location.pathname.endsWith("/edit")) {
@@ -107,13 +130,13 @@ export const AppShell = ({
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
       <UnsavedChangesRouteGuard />
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
+      <aside className="app-sidebar fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 lg:block">
         <Link className="mb-8 flex items-center justify-center" to="/dashboard">
           <img alt={companyLogoAlt} className="h-20 w-auto object-contain" src="/EngLogo.png" />
         </Link>
 
         <nav className="space-y-1">
-          {mainNavItems.map((item) => (
+          {visibleMainNavItems.map((item) => (
             <NavLink
               className={({ isActive }) =>
                 `sidebar-link ${isActive ? "sidebar-link-active" : ""}`
@@ -127,13 +150,13 @@ export const AppShell = ({
           ))}
         </nav>
 
-        {utilityNavItems.length > 0 ? (
+        {visibleUtilityNavItems.length > 0 ? (
           <>
             <p className="mb-2 mt-7 px-3 text-[11px] font-bold uppercase tracking-widest text-slate-400">
               Utility
             </p>
             <nav className="space-y-1">
-              {utilityNavItems.map((item) => (
+              {visibleUtilityNavItems.map((item) => (
                 <NavLink
                   className={({ isActive }) =>
                     `sidebar-link ${isActive ? "sidebar-link-active" : ""}`
@@ -150,7 +173,7 @@ export const AppShell = ({
         ) : null}
       </aside>
 
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur lg:ml-72">
+      <header className="app-header sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur lg:ml-72">
         <div className="flex items-center justify-between gap-2 px-4 py-2 sm:px-6 sm:py-3">
           <div className="flex items-center gap-2 sm:gap-3">
             <button
@@ -197,10 +220,13 @@ export const AppShell = ({
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
 
-            <Link className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50" to="/notifications">
-              <Bell className="h-4 w-4" />
-            </Link>
+            {canViewNotifications ? (
+              <Link className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50" to="/notifications">
+                <Bell className="h-4 w-4" />
+              </Link>
+            ) : null}
 
+            {visibleQuickAddActions.length > 0 ? (
             <div className="relative">
               <button
                 className="btn-primary hidden px-3! py-2! text-sm lg:inline-flex"
@@ -213,7 +239,7 @@ export const AppShell = ({
               </button>
               {showQuickAdd && (
                 <div className="absolute right-0 mt-2 hidden w-60 rounded-xl border border-slate-200 bg-white p-2 shadow-xl lg:block">
-                  {quickAddActions.map((action) => (
+                  {visibleQuickAddActions.map((action) => (
                     <Link
                       className="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                       key={action.label}
@@ -226,6 +252,7 @@ export const AppShell = ({
                 </div>
               )}
             </div>
+            ) : null}
 
             <div className="ml-1 hidden items-center gap-2 rounded-xl border border-slate-200 px-2 py-1 lg:flex">
               <div className="grid h-8 w-8 place-items-center rounded-full bg-[#0b2a53] text-xs font-semibold text-white">
@@ -276,7 +303,7 @@ export const AppShell = ({
 
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-70 bg-slate-900/50 lg:hidden">
-          <div className="h-full w-80 max-w-[90%] overflow-y-auto bg-white p-4">
+          <div className="app-mobile-sidebar h-full w-80 max-w-[90%] overflow-y-auto bg-white p-4">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm font-semibold text-slate-900">Navigation</p>
               <button className="rounded-lg border border-slate-200 p-1.5" onClick={() => setMobileMenuOpen(false)} type="button">
@@ -301,23 +328,25 @@ export const AppShell = ({
                   </option>
                 ))}
               </GuiSelect>
-              <div className="space-y-1">
-                <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Add New</p>
-                {quickAddActions.map((action) => (
-                  <Link
-                    className="sidebar-link bg-white!"
-                    key={`mobile-add-${action.label}`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    to={action.path}
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>{action.label}</span>
-                  </Link>
-                ))}
-              </div>
+              {visibleQuickAddActions.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Add New</p>
+                  {visibleQuickAddActions.map((action) => (
+                    <Link
+                      className="sidebar-link"
+                      key={`mobile-add-${action.label}`}
+                      onClick={() => setMobileMenuOpen(false)}
+                      to={action.path}
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>{action.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <div className="space-y-1">
-              {mainNavItems.concat(utilityNavItems).map((item) => (
+              {visibleMainNavItems.concat(visibleUtilityNavItems).map((item) => (
                 <NavLink
                   className={({ isActive }) =>
                     `sidebar-link ${isActive ? "sidebar-link-active" : ""}`

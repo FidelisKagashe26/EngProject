@@ -14,6 +14,7 @@ import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
+  type MaterialSupplySource,
   type MaterialPurchaseApiRecord,
   type MaterialRequirementApiRecord,
   type MaterialsResponse,
@@ -41,6 +42,16 @@ type MaterialTableRow = {
   totalCost: number;
   purchaseDate: string;
   deliveryStatus: string;
+  supplySource: MaterialSupplySource;
+  requestedQuantity: number;
+  lastRequestDate: string | null;
+  supplyStatus: string;
+  priority: string;
+  neededByDate: string | null;
+  notes: string;
+  companyPurchased: number;
+  clientSupplied: number;
+  latestPurchaseId: string;
 };
 
 const normalizeMaterialName = (value: string): string =>
@@ -67,24 +78,33 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   // Modal states
   const [showRequirementModal, setShowRequirementModal] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [requestTarget, setRequestTarget] = useState<MaterialTableRow | null>(null);
 
   // Requirement form
+  const [editingRequirementId, setEditingRequirementId] = useState("");
   const [requirementProjectId, setRequirementProjectId] = useState(projectFromQuery);
   const [requirementMaterialName, setRequirementMaterialName] = useState("");
   const [requiredQuantity, setRequiredQuantity] = useState("");
   const [requirementUnit, setRequirementUnit] = useState("Bags");
   const [estimatedUnitCost, setEstimatedUnitCost] = useState("");
+  const [requirementSupplySource, setRequirementSupplySource] =
+    useState<MaterialSupplySource>("Company Purchased");
+  const [requestedQuantity, setRequestedQuantity] = useState("");
+  const [supplyStatus, setSupplyStatus] = useState("Planned");
   const [priority, setPriority] = useState("High");
   const [neededByDate, setNeededByDate] = useState("");
   const [requirementNotes, setRequirementNotes] = useState("");
   const [savingRequirement, setSavingRequirement] = useState(false);
 
   // Purchase form
+  const [editingPurchaseId, setEditingPurchaseId] = useState("");
   const [purchaseProjectId, setPurchaseProjectId] = useState(projectFromQuery);
   const [purchaseRequirementId, setPurchaseRequirementId] = useState("");
   const [purchaseMaterialName, setPurchaseMaterialName] = useState("");
   const [qtyPurchased, setQtyPurchased] = useState("120");
   const [unitCost, setUnitCost] = useState("17500");
+  const [purchaseSupplySource, setPurchaseSupplySource] =
+    useState<MaterialSupplySource>("Company Purchased");
   const [supplierName, setSupplierName] = useState("");
   const [purchaseDate, setPurchaseDate] = useState("");
   const [deliveryNoteNumber, setDeliveryNoteNumber] = useState("");
@@ -92,6 +112,10 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   const [receiptRef, setReceiptRef] = useState("");
   const [purchaseNotes, setPurchaseNotes] = useState("");
   const [savingPurchase, setSavingPurchase] = useState(false);
+  const [requestQuantity, setRequestQuantity] = useState("");
+  const [requestDate, setRequestDate] = useState("");
+  const [requestNotes, setRequestNotes] = useState("");
+  const [savingRequest, setSavingRequest] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -157,6 +181,12 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   useEffect(() => {
     if (!selectedRequirement) return;
     setPurchaseMaterialName(selectedRequirement.materialName);
+    setPurchaseSupplySource(selectedRequirement.supplySource);
+    if (selectedRequirement.supplySource === "Client Supplied") {
+      setSupplierName((current) => current || "Client Supplied");
+      setUnitCost("0");
+      return;
+    }
     if (!unitCost || Number(unitCost) === 0) setUnitCost(String(selectedRequirement.estimatedUnitCost));
   }, [selectedRequirement, unitCost]);
 
@@ -184,6 +214,16 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         totalCost: latest?.totalCost ?? 0,
         purchaseDate: latest?.purchaseDate ?? "",
         deliveryStatus: latest?.deliveryStatus ?? "Pending Delivery",
+        supplySource: req.supplySource,
+        requestedQuantity: req.requestedQuantity,
+        lastRequestDate: req.lastRequestDate,
+        supplyStatus: req.supplyStatus,
+        priority: req.priority,
+        neededByDate: req.neededByDate,
+        notes: req.notes,
+        companyPurchased: req.companyPurchasedQuantity,
+        clientSupplied: req.clientSuppliedQuantity,
+        latestPurchaseId: latest?.id ?? "",
       };
     });
   }, [purchases, requirements]);
@@ -231,6 +271,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   const materialsPagination = useTablePagination(filteredRows);
 
   const purchaseTotal = useMemo(() => (Number(qtyPurchased) || 0) * (Number(unitCost) || 0), [qtyPurchased, unitCost]);
+  const effectivePurchaseTotal = purchaseSupplySource === "Client Supplied" ? 0 : purchaseTotal;
 
   const purchaseProgress = useMemo(() => {
     if (!selectedRequirement) return 0;
@@ -240,24 +281,72 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   }, [qtyPurchased, selectedRequirement]);
 
   const resetRequirementForm = () => {
+    setEditingRequirementId("");
     setRequirementMaterialName("");
     setRequiredQuantity("");
     setEstimatedUnitCost("");
+    setRequirementSupplySource("Company Purchased");
+    setRequestedQuantity("");
+    setSupplyStatus("Planned");
     setNeededByDate("");
     setRequirementNotes("");
   };
 
   const resetPurchaseForm = () => {
+    setEditingPurchaseId("");
     setPurchaseRequirementId("");
     setPurchaseMaterialName("");
     setQtyPurchased("");
     setSupplierName("");
     setUnitCost("");
+    setPurchaseSupplySource("Company Purchased");
     setPurchaseDate("");
     setDeliveryNoteNumber("");
     setDeliveryStatus("Pending Delivery");
     setReceiptRef("");
     setPurchaseNotes("");
+  };
+
+  const openEditRequirement = (row: MaterialTableRow) => {
+    setEditingRequirementId(row.id);
+    setRequirementProjectId(row.projectId);
+    setRequirementMaterialName(row.materialName);
+    setRequiredQuantity(String(row.needed));
+    setRequirementUnit(row.unit);
+    setEstimatedUnitCost(String(row.unitCost));
+    setRequirementSupplySource(row.supplySource);
+    setRequestedQuantity(row.requestedQuantity > 0 ? String(row.requestedQuantity) : "");
+    setSupplyStatus(row.supplyStatus);
+    setPriority(row.priority);
+    setNeededByDate(row.neededByDate ?? "");
+    setRequirementNotes(row.notes);
+    setShowRequirementModal(true);
+  };
+
+  const openEditPurchase = (purchaseId: string) => {
+    const purchase = purchases.find((item) => item.id === purchaseId);
+    if (!purchase) return;
+    setEditingPurchaseId(purchase.id);
+    setPurchaseProjectId(purchase.projectId);
+    setPurchaseRequirementId(purchase.requirementId ?? "");
+    setPurchaseMaterialName(purchase.materialName);
+    setQtyPurchased(String(purchase.quantityPurchased));
+    setSupplierName(purchase.supplierName);
+    setUnitCost(String(purchase.unitCost));
+    setPurchaseSupplySource(purchase.supplySource);
+    setPurchaseDate(purchase.purchaseDate);
+    setDeliveryNoteNumber(purchase.deliveryNoteNumber);
+    setDeliveryStatus(purchase.deliveryStatus);
+    setReceiptRef(purchase.receiptRef);
+    setPurchaseNotes(purchase.notes);
+    setShowPurchaseModal(true);
+  };
+
+  const openRequestSupply = (row: MaterialTableRow) => {
+    setRequestTarget(row);
+    setRequestQuantity(row.remaining > 0 ? String(row.remaining) : "");
+    setRequestDate(new Date().toISOString().slice(0, 10));
+    setRequestNotes("");
   };
 
   const handleSaveRequirement = async () => {
@@ -268,16 +357,24 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     setSavingRequirement(true);
     setError("");
     try {
-      await api.createMaterialRequirement({
+      const payload = {
         projectId: requirementProjectId,
         materialName: requirementMaterialName.trim(),
         requiredQuantity: Number(requiredQuantity) || 0,
         unit: requirementUnit,
-        estimatedUnitCost: Number(estimatedUnitCost) || 0,
+        estimatedUnitCost: requirementSupplySource === "Client Supplied" ? 0 : Number(estimatedUnitCost) || 0,
+        supplySource: requirementSupplySource,
+        requestedQuantity: Number(requestedQuantity) || 0,
+        supplyStatus,
         priority,
         neededByDate: neededByDate || undefined,
         notes: requirementNotes.trim(),
-      });
+      };
+      if (editingRequirementId) {
+        await api.updateMaterialRequirement(editingRequirementId, payload);
+      } else {
+        await api.createMaterialRequirement(payload);
+      }
       await refreshMaterials();
       markSaved();
       setShowRequirementModal(false);
@@ -290,26 +387,35 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   };
 
   const handleSavePurchase = async () => {
-    if (purchaseProjectId.trim().length === 0 || purchaseMaterialName.trim().length < 2 || supplierName.trim().length < 2 || (Number(qtyPurchased) || 0) <= 0 || purchaseDate.trim().length === 0) {
+    const effectiveSupplierName = purchaseSupplySource === "Client Supplied"
+      ? (supplierName.trim() || "Client Supplied")
+      : supplierName.trim();
+    if (purchaseProjectId.trim().length === 0 || purchaseMaterialName.trim().length < 2 || effectiveSupplierName.length < 2 || (Number(qtyPurchased) || 0) <= 0 || purchaseDate.trim().length === 0) {
       setError("Please provide project, material, supplier, quantity and purchase date.");
       return;
     }
     setSavingPurchase(true);
     setError("");
     try {
-      await api.createMaterialPurchase({
+      const payload = {
         projectId: purchaseProjectId,
         requirementId: purchaseRequirementId,
         materialName: purchaseMaterialName.trim(),
         quantityPurchased: Number(qtyPurchased) || 0,
-        supplierName: supplierName.trim(),
-        unitCost: Number(unitCost) || 0,
+        supplierName: effectiveSupplierName,
+        unitCost: purchaseSupplySource === "Client Supplied" ? 0 : Number(unitCost) || 0,
+        supplySource: purchaseSupplySource,
         purchaseDate,
         deliveryNoteNumber: deliveryNoteNumber.trim(),
         deliveryStatus,
         receiptRef: receiptRef.trim(),
         notes: purchaseNotes.trim(),
-      });
+      };
+      if (editingPurchaseId) {
+        await api.updateMaterialPurchase(editingPurchaseId, payload);
+      } else {
+        await api.createMaterialPurchase(payload);
+      }
       await refreshMaterials();
       markSaved();
       setShowPurchaseModal(false);
@@ -318,6 +424,29 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
       setError(saveError instanceof Error ? saveError.message : "Failed to save material purchase.");
     } finally {
       setSavingPurchase(false);
+    }
+  };
+
+  const handleRequestSupply = async () => {
+    if (!requestTarget || (Number(requestQuantity) || 0) <= 0) {
+      setError("Please provide a valid requested quantity.");
+      return;
+    }
+    setSavingRequest(true);
+    setError("");
+    try {
+      await api.requestMaterialSupply(requestTarget.id, {
+        requestedQuantity: Number(requestQuantity) || 0,
+        requestDate: requestDate || undefined,
+        notes: requestNotes.trim(),
+      });
+      await refreshMaterials();
+      markSaved();
+      setRequestTarget(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to request material supply.");
+    } finally {
+      setSavingRequest(false);
     }
   };
 
@@ -371,7 +500,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
           + Add Requirement
         </button>
         <button className="btn-primary whitespace-nowrap" onClick={() => { resetPurchaseForm(); setShowPurchaseModal(true); }} type="button">
-          + Add Purchase
+          + Add Receipt
         </button>
       </div>
 
@@ -386,15 +515,18 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table min-w-[1120px]">
+              <table className="data-table min-w-[1420px]">
                 <thead>
                   <tr>
                     <th>S/N</th>
                     <th>Material Name</th>
                     <th>Project/Site</th>
+                    <th>Source</th>
                     <th>Qty Needed</th>
-                    <th>Qty Purchased</th>
+                    <th>Company Qty</th>
+                    <th>Client Qty</th>
                     <th>Remaining</th>
+                    <th>Requested</th>
                     <th>Unit</th>
                     <th>Supplier</th>
                     <th>Unit Cost</th>
@@ -402,6 +534,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                     <th>Purchase Date</th>
                     <th>Delivery Status</th>
                     <th>Indicator</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -410,11 +543,14 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                       <td>{materialsPagination.startIndex + index + 1}</td>
                       <td>{row.materialName}</td>
                       <td>{row.projectName}</td>
+                      <td>{row.supplySource}</td>
                       <td>{formatNumber(row.needed)}</td>
-                      <td>{formatNumber(row.purchased)}</td>
+                      <td>{formatNumber(row.companyPurchased)}</td>
+                      <td>{formatNumber(row.clientSupplied)}</td>
                       <td className={row.remaining > 0 ? "text-amber-700" : "text-emerald-700"}>
                         {formatNumber(row.remaining)}
                       </td>
+                      <td>{formatNumber(row.requestedQuantity)}</td>
                       <td>{row.unit}</td>
                       <td>{row.supplier}</td>
                       <td>{formatTzs(row.unitCost)}</td>
@@ -435,6 +571,21 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                         <span className="text-xs font-semibold text-slate-700">
                           {materialIndicator(row.needed, row.purchased)}
                         </span>
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-2">
+                          <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => openEditRequirement(row)} type="button">
+                            Edit
+                          </button>
+                          <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => openRequestSupply(row)} type="button">
+                            Request
+                          </button>
+                          {row.latestPurchaseId ? (
+                            <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => openEditPurchase(row.latestPurchaseId)} type="button">
+                              Edit Receipt
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -459,7 +610,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
       {/* Add Requirement Modal */}
       {showRequirementModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Material Requirement">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title={editingRequirementId ? "Edit Material Requirement" : "Add Material Requirement"}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project</span>
@@ -483,6 +634,34 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
               </label>
               <FinancialInput label="Estimated Unit Cost" onChange={setEstimatedUnitCost} placeholder="17500" value={estimatedUnitCost} />
               <label className="form-field">
+                <span>Supply Source</span>
+                <GuiSelect
+                  className="input-field"
+                  onChange={(e) => {
+                    const source = e.target.value as MaterialSupplySource;
+                    setRequirementSupplySource(source);
+                    if (source === "Client Supplied") setEstimatedUnitCost("0");
+                  }}
+                  value={requirementSupplySource}
+                >
+                  <option value="Company Purchased">Company Purchased</option>
+                  <option value="Client Supplied">Client Supplied</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Requested Quantity</span>
+                <input className="input-field" onChange={(e) => setRequestedQuantity(e.target.value)} type="number" value={requestedQuantity} />
+              </label>
+              <label className="form-field">
+                <span>Supply Status</span>
+                <GuiSelect className="input-field" onChange={(e) => setSupplyStatus(e.target.value)} value={supplyStatus}>
+                  <option value="Planned">Planned</option>
+                  <option value="Requested">Requested</option>
+                  <option value="Partially Delivered">Partially Delivered</option>
+                  <option value="Fulfilled">Fulfilled</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
                 <span>Priority</span>
                 <GuiSelect className="input-field" onChange={(e) => setPriority(e.target.value)} value={priority}>
                   <option value="High">High</option>
@@ -501,7 +680,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
               <div className="sm:col-span-2 flex justify-end gap-2">
                 <button className="btn-secondary" onClick={() => { setShowRequirementModal(false); resetRequirementForm(); }} type="button">Cancel</button>
                 <button className="btn-primary" disabled={savingRequirement} onClick={() => void handleSaveRequirement()} type="button">
-                  Save Requirement
+                  {editingRequirementId ? "Update Requirement" : "Save Requirement"}
                 </button>
               </div>
             </form>
@@ -512,7 +691,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
       {/* Add Purchase Modal */}
       {showPurchaseModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Material Purchase">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title={editingPurchaseId ? "Edit Material Receipt" : "Add Material Receipt"}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project</span>
@@ -532,6 +711,24 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                 <input className="input-field" onChange={(e) => setPurchaseMaterialName(e.target.value)} placeholder="Material purchased..." value={purchaseMaterialName} />
               </label>
               <label className="form-field">
+                <span>Supply Source</span>
+                <GuiSelect
+                  className="input-field"
+                  onChange={(e) => {
+                    const source = e.target.value as MaterialSupplySource;
+                    setPurchaseSupplySource(source);
+                    if (source === "Client Supplied") {
+                      setSupplierName((current) => current || "Client Supplied");
+                      setUnitCost("0");
+                    }
+                  }}
+                  value={purchaseSupplySource}
+                >
+                  <option value="Company Purchased">Company Purchased</option>
+                  <option value="Client Supplied">Client Supplied</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
                 <span>Quantity Purchased</span>
                 <input className="input-field" onChange={(e) => setQtyPurchased(e.target.value)} type="number" value={qtyPurchased} />
               </label>
@@ -542,7 +739,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
               <FinancialInput label="Unit Cost" onChange={setUnitCost} placeholder="17500" value={unitCost} />
               <label className="form-field">
                 <span>Total Cost (Auto)</span>
-                <input className="input-field bg-slate-50" readOnly value={formatTzs(purchaseTotal)} />
+                <input className="input-field bg-slate-50" readOnly value={formatTzs(effectivePurchaseTotal)} />
               </label>
               <label className="form-field">
                 <span>Date of Purchase</span>
@@ -575,7 +772,35 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
               <div className="sm:col-span-2 flex justify-end gap-2">
                 <button className="btn-secondary" onClick={() => { setShowPurchaseModal(false); resetPurchaseForm(); }} type="button">Cancel</button>
                 <button className="btn-primary" disabled={savingPurchase} onClick={() => void handleSavePurchase()} type="button">
-                  Save Purchase
+                  {editingPurchaseId ? "Update Receipt" : "Save Receipt"}
+                </button>
+              </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
+      {requestTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <SurfaceCard className="w-full max-w-xl" title={`Request Supply - ${requestTarget.materialName}`}>
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Requested Quantity</span>
+                <input className="input-field" onChange={(e) => setRequestQuantity(e.target.value)} type="number" value={requestQuantity} />
+              </label>
+              <label className="form-field">
+                <span>Request Date</span>
+                <input className="input-field" onChange={(e) => setRequestDate(e.target.value)} type="date" value={requestDate} />
+              </label>
+              <label className="form-field sm:col-span-2">
+                <span>Notes</span>
+                <textarea className="input-field min-h-20" onChange={(e) => setRequestNotes(e.target.value)} value={requestNotes} />
+              </label>
+              <div className="sm:col-span-2 flex justify-end gap-2">
+                <button className="btn-secondary" onClick={() => setRequestTarget(null)} type="button">
+                  Cancel
+                </button>
+                <button className="btn-primary" disabled={savingRequest} onClick={() => void handleRequestSupply()} type="button">
+                  {savingRequest ? "Requesting..." : "Save Request"}
                 </button>
               </div>
             </form>

@@ -25,7 +25,7 @@ const equipmentSchema = z.object({
   dailyRate: z.number().nonnegative().optional().default(0),
   maintenanceCost: z.number().nonnegative().optional().default(0),
   status: z
-    .enum(["In Use", "Idle", "Under Maintenance"])
+    .enum(["In Use", "Idle", "Under Maintenance", "Out of Use"])
     .optional()
     .default("In Use"),
   maintenanceNotes: z.string().optional().default(""),
@@ -318,6 +318,8 @@ router.patch(
 
     const result = await db.query<{
       project_id: string;
+      start_date: string;
+      end_date: string;
       usage_days: number;
       daily_rate: string;
       maintenance_cost: string;
@@ -326,7 +328,7 @@ router.patch(
       approval_status: string | null;
     }>(
       `
-      SELECT project_id, usage_days, daily_rate::text, maintenance_cost::text, ownership_type, total_cost::text, approval_status
+      SELECT project_id, start_date::text, end_date::text, usage_days, daily_rate::text, maintenance_cost::text, ownership_type, total_cost::text, approval_status
       FROM engicost.equipment_usage
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
@@ -342,11 +344,40 @@ router.patch(
     const oldEquipment = result.rows[0];
     const oldTotalCost = Number(oldEquipment.total_cost);
 
-    const newUsageDays = parsed.usageDays ?? oldEquipment.usage_days;
+    const newProjectId = parsed.projectId ?? oldEquipment.project_id;
+    const newStartDate = parsed.startDate ?? oldEquipment.start_date;
+    const newEndDate = parsed.endDate ?? oldEquipment.end_date;
+    if (newEndDate < newStartDate) {
+      res.status(400).json({ message: "Equipment end date must be on or after start date." });
+      return;
+    }
+
+    if (parsed.projectId) {
+      const projectResult = await db.query<{ id: string }>(
+        `
+        SELECT id
+        FROM engicost.projects
+        WHERE company_id = $1 AND id = $2
+        LIMIT 1
+        `,
+        [companyId, parsed.projectId],
+      );
+      if (projectResult.rowCount === 0) {
+        res.status(400).json({ message: "Selected project/site does not exist." });
+        return;
+      }
+    }
+
+    const start = new Date(newStartDate);
+    const end = new Date(newEndDate);
+    const computedDays =
+      Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const newUsageDays = parsed.usageDays ?? computedDays;
     const newDailyRate = parsed.dailyRate ?? Number(oldEquipment.daily_rate);
     const newMaintenanceCost = parsed.maintenanceCost ?? Number(oldEquipment.maintenance_cost);
+    const newOwnershipType = parsed.ownershipType ?? oldEquipment.ownership_type;
     
-    const newRentalCost = oldEquipment.ownership_type === "Rented" ? newUsageDays * newDailyRate : 0;
+    const newRentalCost = newOwnershipType === "Rented" ? newUsageDays * newDailyRate : 0;
     const newTotalCost = newRentalCost + newMaintenanceCost;
     const costDifference = newTotalCost - oldTotalCost;
 
@@ -358,9 +389,33 @@ router.patch(
       const params: unknown[] = [companyId, equipmentId];
       let paramIndex = 3;
 
-      if (parsed.usageDays !== undefined) {
-        setClauses.push(`usage_days = $${paramIndex++}`);
-        params.push(parsed.usageDays);
+      if (parsed.projectId) {
+        setClauses.push(`project_id = $${paramIndex++}`);
+        params.push(parsed.projectId);
+      }
+      if (parsed.equipmentName) {
+        setClauses.push(`equipment_name = $${paramIndex++}`);
+        params.push(parsed.equipmentName);
+      }
+      if (parsed.equipmentType) {
+        setClauses.push(`equipment_type = $${paramIndex++}`);
+        params.push(parsed.equipmentType);
+      }
+      if (parsed.ownershipType) {
+        setClauses.push(`ownership_type = $${paramIndex++}`);
+        params.push(parsed.ownershipType);
+      }
+      if (parsed.ownerName) {
+        setClauses.push(`owner_name = $${paramIndex++}`);
+        params.push(parsed.ownerName);
+      }
+      if (parsed.startDate) {
+        setClauses.push(`start_date = $${paramIndex++}`);
+        params.push(parsed.startDate);
+      }
+      if (parsed.endDate) {
+        setClauses.push(`end_date = $${paramIndex++}`);
+        params.push(parsed.endDate);
       }
       if (parsed.dailyRate !== undefined) {
         setClauses.push(`daily_rate = $${paramIndex++}`);
@@ -383,23 +438,44 @@ router.patch(
       params.push(newRentalCost);
       setClauses.push(`total_cost = $${paramIndex++}`);
       params.push(newTotalCost);
+      setClauses.push(`usage_days = $${paramIndex++}`);
+      params.push(newUsageDays);
 
-      if (setClauses.length > 2) {
+      if (setClauses.length > 0) {
         await client.query(
           `UPDATE engicost.equipment_usage SET ${setClauses.join(", ")}, updated_at = NOW() WHERE company_id = $1 AND id = $2`,
           params,
         );
       }
 
-      if (costDifference !== 0 && isAppliedApprovalStatus(oldEquipment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, oldEquipment.project_id, costDifference],
-        );
+      if (isAppliedApprovalStatus(oldEquipment.approval_status)) {
+        if (newProjectId !== oldEquipment.project_id) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldEquipment.project_id, oldTotalCost],
+          );
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = total_spent + $3, updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, newProjectId, newTotalCost],
+          );
+        } else if (costDifference !== 0) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldEquipment.project_id, costDifference],
+          );
+        }
       }
 
       await client.query(
@@ -411,7 +487,7 @@ router.patch(
           makeId("ACT"),
           companyId,
           "Site Supervisor",
-          oldEquipment.project_id,
+          newProjectId,
           `Updated equipment - Cost change: ${costDifference > 0 ? "+" : ""}TZS ${costDifference.toLocaleString("en-TZ")}`,
         ],
       );

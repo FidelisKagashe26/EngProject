@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireRoles } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
@@ -166,6 +167,7 @@ router.patch(
 
 router.get(
   "/activity-log",
+  requireRoles("Admin", "Accountant"),
   handleAsync(async (_req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const result = await db.query<{
@@ -215,4 +217,3 @@ router.get(
 );
 
 export default router;
-

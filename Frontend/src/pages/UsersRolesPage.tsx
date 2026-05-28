@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ConfirmModal,
   EmptyState,
@@ -8,6 +8,15 @@ import {
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
+import {
+  APP_PERMISSIONS,
+  APP_ROLES,
+  PERMISSION_LABELS,
+  ROLE_PERMISSIONS,
+  type AppPermission,
+  type AppRole,
+  useAuth,
+} from "../auth";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
@@ -16,57 +25,18 @@ import {
 } from "../services/api";
 import { formatDate } from "../utils/format";
 
-const ROLES = [
-  "Admin",
-  "Engineer / Project Manager",
-  "Accountant",
-  "Store Keeper",
-  "Site Supervisor",
-] as const;
+const ROLES = APP_ROLES;
+const PERMISSION_GROUPS = APP_PERMISSIONS;
+type Role = AppRole;
 
-type Role = (typeof ROLES)[number];
-
-const PERMISSION_GROUPS = [
-  "View dashboard",
-  "Manage projects",
-  "Manage contracts",
-  "Manage labor",
-  "Manage materials",
-  "Manage expenses",
-  "Manage payments",
-  "Upload documents",
-  "View reports",
-  "Manage users",
-  "Export reports",
-] as const;
-
-const ROLE_PERMISSIONS: Record<Role, readonly string[]> = {
-  Admin: PERMISSION_GROUPS,
-  "Engineer / Project Manager": [
-    "View dashboard",
-    "Manage projects",
-    "Manage contracts",
-    "Manage labor",
-    "Manage materials",
-    "Manage expenses",
-    "Manage payments",
-    "Upload documents",
-    "View reports",
-    "Export reports",
-  ],
-  Accountant: [
-    "View dashboard",
-    "Manage expenses",
-    "Manage payments",
-    "Upload documents",
-    "View reports",
-    "Export reports",
-  ],
-  "Store Keeper": ["View dashboard", "Manage materials", "Upload documents"],
-  "Site Supervisor": ["View dashboard", "Manage labor", "Manage expenses", "Upload documents"],
-};
+const splitAssignedProjects = (value: string): string[] =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 export const UsersRolesPage = () => {
+  const { user: currentUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -85,7 +55,7 @@ export const UsersRolesPage = () => {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<Role>("Site Supervisor");
-  const [assignedProjects, setAssignedProjects] = useState("");
+  const [assignedProjects, setAssignedProjects] = useState<string[]>([]);
   const [status, setStatus] = useState("Active");
   const [password, setPassword] = useState("");
 
@@ -119,13 +89,23 @@ export const UsersRolesPage = () => {
 
   const usersPagination = useTablePagination(users);
   const permissionsPagination = useTablePagination([...PERMISSION_GROUPS]);
+  const projectNameById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+
+  const formatAssignedProjects = (value: string) => {
+    const ids = splitAssignedProjects(value);
+    if (ids.length === 0) return "All Projects";
+    return ids.map((id) => projectNameById.get(id) ?? id).join(", ");
+  };
 
   const resetForm = () => {
     setFullName("");
     setEmail("");
     setPhone("");
     setRole("Site Supervisor");
-    setAssignedProjects("");
+    setAssignedProjects([]);
     setStatus("Active");
     setPassword("");
   };
@@ -142,7 +122,7 @@ export const UsersRolesPage = () => {
     setEmail(user.email);
     setPhone(user.phone);
     setRole(user.role as Role);
-    setAssignedProjects(user.assignedProjects);
+    setAssignedProjects(splitAssignedProjects(user.assignedProjects));
     setStatus(user.status);
     setPassword("");
     setShowAddModal(true);
@@ -178,7 +158,7 @@ export const UsersRolesPage = () => {
           email: email.trim(),
           phone: phone.trim(),
           role,
-          assignedProjects,
+          assignedProjects: assignedProjects.join(","),
           status,
         };
         if (password.length >= 8) payload.password = password;
@@ -189,7 +169,7 @@ export const UsersRolesPage = () => {
           email: email.trim(),
           phone: phone.trim(),
           role,
-          assignedProjects,
+          assignedProjects: assignedProjects.join(","),
           status,
           password,
         });
@@ -219,6 +199,7 @@ export const UsersRolesPage = () => {
     }
   };
 
+  const editingSelf = editingUser?.id === currentUser?.id;
   const modalTitle = editingUser ? `Edit User — ${editingUser.fullName}` : "Add New User";
 
   return (
@@ -280,17 +261,23 @@ export const UsersRolesPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {usersPagination.paginatedRows.map((user, index) => (
+                  {usersPagination.paginatedRows.map((user, index) => {
+                    const isCurrentUser = currentUser?.id === user.id;
+
+                    return (
                     <tr key={user.id}>
                       <td>{usersPagination.startIndex + index + 1}</td>
-                      <td className="font-medium text-slate-900">{user.fullName}</td>
+                      <td className="font-medium text-slate-900">
+                        {user.fullName}
+                        {isCurrentUser ? <span className="ml-2 text-xs text-slate-500">(You)</span> : null}
+                      </td>
                       <td>
                         <p>{user.email}</p>
                         <p className="text-xs text-slate-500">{user.phone}</p>
                       </td>
                       <td>{user.role}</td>
                       <td className="text-xs text-slate-600">
-                        {user.assignedProjects || "All Projects"}
+                        {formatAssignedProjects(user.assignedProjects)}
                       </td>
                       <td>
                         <span
@@ -321,8 +308,10 @@ export const UsersRolesPage = () => {
                           </button>
                           {user.status !== "Suspended" && (
                             <button
-                              className="btn-danger py-1 px-3 text-xs"
+                              className="btn-danger py-1 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={isCurrentUser}
                               onClick={() => setUserToSuspend(user)}
+                              title={isCurrentUser ? "You cannot suspend your own account" : "Suspend user"}
                               type="button"
                             >
                               Suspend
@@ -331,7 +320,8 @@ export const UsersRolesPage = () => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -353,7 +343,7 @@ export const UsersRolesPage = () => {
       {/* Role Permission Matrix */}
       <SurfaceCard title="Role Permission Matrix">
         <p className="mb-4 text-xs text-slate-500">
-          Read-only overview of module access per role. Contact your administrator to adjust permissions.
+          Role access overview used by navigation, routes and protected backend modules.
         </p>
         <div className="overflow-x-auto">
           <table className="data-table min-w-[860px]">
@@ -370,10 +360,12 @@ export const UsersRolesPage = () => {
               {permissionsPagination.paginatedRows.map((group, index) => (
                 <tr key={`perm-group-${group}`}>
                   <td>{permissionsPagination.startIndex + index + 1}</td>
-                  <td className="font-medium text-slate-700">{group}</td>
+                  <td className="font-medium text-slate-700">
+                    {PERMISSION_LABELS[group as AppPermission]}
+                  </td>
                   {ROLES.map((r) => (
                     <td className="text-center" key={`perm-${r}-${group}`}>
-                      {(ROLE_PERMISSIONS[r] ?? []).includes(group) ? (
+                      {(ROLE_PERMISSIONS[r] ?? []).includes(group as AppPermission) ? (
                         <span className="text-emerald-600 font-bold">✓</span>
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -435,6 +427,7 @@ export const UsersRolesPage = () => {
                 <span>Role</span>
                 <GuiSelect
                   className="input-field"
+                  disabled={editingSelf}
                   onChange={(e) => setRole(e.target.value as Role)}
                   value={role}
                 >
@@ -447,6 +440,7 @@ export const UsersRolesPage = () => {
                 <span>Status</span>
                 <GuiSelect
                   className="input-field"
+                  disabled={editingSelf}
                   onChange={(e) => setStatus(e.target.value)}
                   value={status}
                 >
@@ -473,9 +467,9 @@ export const UsersRolesPage = () => {
                   className="input-field"
                   multiple
                   onChange={(e) => {
-                    // GuiSelect multiple returns comma-joined values
-                    setAssignedProjects(e.target.value);
+                    setAssignedProjects(splitAssignedProjects(e.target.value));
                   }}
+                  placeholder="All Projects"
                   value={assignedProjects}
                 >
                   {projects.map((p) => (
@@ -495,7 +489,7 @@ export const UsersRolesPage = () => {
                       className="rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-xs font-medium text-blue-800"
                       key={perm}
                     >
-                      {perm}
+                      {PERMISSION_LABELS[perm]}
                     </span>
                   ))}
                 </div>

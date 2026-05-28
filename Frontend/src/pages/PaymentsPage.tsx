@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ConfirmModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
@@ -67,6 +68,9 @@ export const PaymentsPage = () => {
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState("");
+  const [paymentToDelete, setPaymentToDelete] = useState<PaymentApiRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Form state
   const [projectId, setProjectId] = useState(projectFromQuery);
@@ -154,6 +158,7 @@ export const PaymentsPage = () => {
   );
 
   const resetForm = () => {
+    setEditingPaymentId("");
     setClientName("");
     setPaymentType("Advance");
     setMilestone("");
@@ -175,6 +180,23 @@ export const PaymentsPage = () => {
   const closeAddModal = () => {
     setShowAddModal(false);
     resetForm();
+  };
+
+  const openEditModal = (payment: PaymentApiRecord) => {
+    setEditingPaymentId(payment.id);
+    setProjectId(payment.projectId);
+    setClientName(payment.client);
+    setPaymentType(payment.paymentType as "Advance" | "Milestone" | "Stage" | "Final" | "Other");
+    setMilestone(payment.milestone);
+    setAmountExpected(String(payment.amountExpected));
+    setAmountReceived(String(payment.amountReceived));
+    setPaymentDate(payment.paymentDate);
+    setPaymentMethod(payment.paymentMethod);
+    setReferenceNumber(payment.referenceNumber);
+    setStatus(payment.status);
+    setNotes(payment.notes);
+    setPaymentAttachmentFile(null);
+    setShowAddModal(true);
   };
 
   const handleProjectChange = (nextId: string) => {
@@ -218,7 +240,7 @@ export const PaymentsPage = () => {
         attachmentFields.attachmentType = paymentAttachmentFile.type || uploaded.mimetype;
       }
 
-      await api.createPayment({
+      const payload = {
         projectId,
         clientName: clientName.trim(),
         paymentType,
@@ -231,7 +253,12 @@ export const PaymentsPage = () => {
         status,
         notes: notes.trim(),
         ...attachmentFields,
-      });
+      };
+      if (editingPaymentId) {
+        await api.updatePayment(editingPaymentId, payload);
+      } else {
+        await api.createPayment(payload);
+      }
       await refreshPayments();
       markSaved();
       closeAddModal();
@@ -239,6 +266,23 @@ export const PaymentsPage = () => {
       setError(saveError instanceof Error ? saveError.message : "Failed to save payment.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeletePayment = async () => {
+    if (!paymentToDelete) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await api.deletePayment(paymentToDelete.id);
+      await refreshPayments();
+      markSaved();
+      setPaymentToDelete(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete payment.");
+      setPaymentToDelete(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -325,6 +369,7 @@ export const PaymentsPage = () => {
                     <th>Reference</th>
                     <th>Attachment</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,6 +410,16 @@ export const PaymentsPage = () => {
                         }>
                           {payment.status}
                         </span>
+                      </td>
+                      <td>
+                        <div className="flex gap-2">
+                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => openEditModal(payment)} type="button">
+                            Edit
+                          </button>
+                          <button className="btn-danger py-1 px-3 text-xs" onClick={() => setPaymentToDelete(payment)} type="button">
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -422,7 +477,7 @@ export const PaymentsPage = () => {
       {/* Add Payment Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Payment">
+          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title={editingPaymentId ? "Edit Payment" : "Add Payment"}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project</span>
@@ -498,13 +553,23 @@ export const PaymentsPage = () => {
               <div className="sm:col-span-2 flex justify-end gap-2">
                 <button className="btn-secondary" onClick={closeAddModal} type="button">Cancel</button>
                 <button className="btn-primary" disabled={saving} onClick={() => void handleSavePayment()} type="button">
-                  Save Payment
+                  {editingPaymentId ? "Update Payment" : "Save Payment"}
                 </button>
               </div>
             </form>
           </SurfaceCard>
         </div>
       )}
+      <ConfirmModal
+        cancelLabel="Cancel"
+        confirmClassName="btn-danger"
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        description={paymentToDelete ? `Delete payment for "${paymentToDelete.projectName}"? Project payment totals will be reversed automatically.` : ""}
+        onCancel={() => setPaymentToDelete(null)}
+        onConfirm={() => void handleDeletePayment()}
+        open={paymentToDelete !== null}
+        title="Delete Payment"
+      />
     </div>
   );
 };

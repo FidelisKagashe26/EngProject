@@ -347,6 +347,17 @@ a {
     @apply border-slate-600 bg-slate-800 text-slate-100;
   }
 
+  .dark .app-sidebar,
+  .dark .app-mobile-sidebar {
+    background-color: #0b1220 !important;
+    border-color: #1e293b !important;
+  }
+
+  .dark .app-header {
+    background-color: rgba(11, 18, 32, 0.95) !important;
+    border-color: #1e293b !important;
+  }
+
   .dark .input-field {
     @apply border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 focus:border-amber-400 focus:ring-amber-500/20;
   }

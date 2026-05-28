@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticateToken } from "../middleware/auth";
+import { authenticateToken, requireAdmin, requireRoles } from "../middleware/auth";
 import authRouter from "./auth";
 import approvalsRouter from "./approvals";
 import dashboardRouter from "./dashboard";
@@ -28,6 +28,24 @@ import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 
 const apiRouter = Router();
+
+const allRoles = [
+  "Admin",
+  "Engineer / Project Manager",
+  "Accountant",
+  "Store Keeper",
+  "Site Supervisor",
+] as const;
+const projectRoles = allRoles;
+const documentRoles = allRoles;
+const siteLaborRoles = ["Admin", "Engineer / Project Manager", "Site Supervisor"] as const;
+const siteMaterialRoles = ["Admin", "Engineer / Project Manager", "Store Keeper", "Site Supervisor"] as const;
+const siteExpenseRoles = ["Admin", "Engineer / Project Manager", "Accountant", "Site Supervisor"] as const;
+const siteEquipmentRoles = ["Admin", "Engineer / Project Manager", "Store Keeper", "Site Supervisor"] as const;
+const financialRoles = ["Admin", "Engineer / Project Manager", "Accountant"] as const;
+const pettyCashRoles = ["Admin", "Accountant", "Site Supervisor"] as const;
+const supplierRoles = ["Admin", "Engineer / Project Manager", "Accountant", "Store Keeper"] as const;
+const auditRoles = ["Admin", "Accountant"] as const;
 
 apiRouter.use("/auth", authRouter);
 
@@ -147,25 +165,25 @@ apiRouter.post(
 
 apiRouter.use(authenticateToken);
 
-apiRouter.use("/approvals", approvalsRouter);
-apiRouter.use("/dashboard", dashboardRouter);
-apiRouter.use("/projects", projectsRouter);
-apiRouter.use("/tenders", tendersRouter);
-apiRouter.use("/expenses", expensesRouter);
-apiRouter.use("/payments", paymentsRouter);
-apiRouter.use("/workers", workersRouter);
-apiRouter.use("/materials", materialsRouter);
-apiRouter.use("/equipment", equipmentRouter);
-apiRouter.use("/suppliers", suppliersRouter);
-apiRouter.use("/documents", documentsRouter);
-apiRouter.use("/settings", settingsRouter);
-apiRouter.use("/notifications", notificationsRouter);
-apiRouter.use("/petty-cash", pettyCashRouter);
-apiRouter.use("/reports", reportsRouter);
-apiRouter.use("/users", usersRouter);
-apiRouter.use("/quote-requests", quoteRequestsRouter);
-apiRouter.use("/website-settings", websiteSettingsRouter);
-apiRouter.use("/gallery", galleryRouter);
-apiRouter.use("/upload", uploadRouter);
+apiRouter.use("/approvals", requireRoles(...financialRoles), approvalsRouter);
+apiRouter.use("/dashboard", requireRoles(...allRoles), dashboardRouter);
+apiRouter.use("/projects", requireRoles(...projectRoles), projectsRouter);
+apiRouter.use("/tenders", requireRoles("Admin", "Engineer / Project Manager"), tendersRouter);
+apiRouter.use("/expenses", requireRoles(...siteExpenseRoles), expensesRouter);
+apiRouter.use("/payments", requireRoles(...financialRoles), paymentsRouter);
+apiRouter.use("/workers", requireRoles(...siteLaborRoles), workersRouter);
+apiRouter.use("/materials", requireRoles(...siteMaterialRoles), materialsRouter);
+apiRouter.use("/equipment", requireRoles(...siteEquipmentRoles), equipmentRouter);
+apiRouter.use("/suppliers", requireRoles(...supplierRoles), suppliersRouter);
+apiRouter.use("/documents", requireRoles(...documentRoles), documentsRouter);
+apiRouter.use("/settings", requireRoles(...allRoles), settingsRouter);
+apiRouter.use("/notifications", requireRoles(...allRoles), notificationsRouter);
+apiRouter.use("/petty-cash", requireRoles(...pettyCashRoles), pettyCashRouter);
+apiRouter.use("/reports", requireRoles(...financialRoles), reportsRouter);
+apiRouter.use("/users", requireAdmin, usersRouter);
+apiRouter.use("/quote-requests", requireAdmin, quoteRequestsRouter);
+apiRouter.use("/website-settings", requireAdmin, websiteSettingsRouter);
+apiRouter.use("/gallery", requireAdmin, galleryRouter);
+apiRouter.use("/upload", requireRoles(...documentRoles), uploadRouter);
 
 export default apiRouter;

@@ -3,9 +3,11 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireRoles } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
 
 const router = Router();
+const projectManagerRoles = ["Admin", "Engineer / Project Manager"] as const;
 
 const projectSchema = z.object({
   name: z.string().min(2),
@@ -200,6 +202,7 @@ router.get(
 
 router.post(
   "/",
+  requireRoles(...projectManagerRoles),
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const parsed = projectSchema.parse({
@@ -291,6 +294,7 @@ router.post(
 
 router.put(
   "/:id",
+  requireRoles(...projectManagerRoles),
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const projectId = String(req.params.id);
@@ -456,6 +460,7 @@ router.put(
 
 router.delete(
   "/:id",
+  requireRoles(...projectManagerRoles),
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const projectId = String(req.params.id);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { ProtectedRoute, useAuth } from "./auth";
+import { ProtectedRoute, hasAnyPermission, type AppPermission, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
 import { GlobalLoader } from "./components/GlobalLoader";
 import { TopToastHost } from "./components/TopToastHost";
@@ -74,6 +74,30 @@ const PublicThemeEnforcer = ({ children }: { children: React.ReactNode }) => {
     root.classList.remove("dark");
     root.style.colorScheme = "light";
   }, []);
+
+  return <>{children}</>;
+};
+
+const siteOperationPermissions = [
+  "site.labor",
+  "site.materials",
+  "site.expenses",
+  "site.equipment",
+  "site.pettyCash",
+] as const satisfies readonly AppPermission[];
+
+const PermissionOnly = ({
+  children,
+  permissions,
+}: {
+  children: React.ReactNode;
+  permissions: readonly AppPermission[];
+}) => {
+  const { user } = useAuth();
+
+  if (!hasAnyPermission(user?.role, permissions)) {
+    return <Navigate replace to="/dashboard" />;
+  }
 
   return <>{children}</>;
 };
@@ -194,27 +218,160 @@ function App() {
               </UnsavedChangesProvider>
             }
           >
-            <Route element={<DashboardPage />} path="/dashboard" />
-            <Route element={<ProjectsPage />} path="/projects" />
-            <Route element={<ProjectFormPage />} path="/projects/new" />
-            <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
-            <Route element={<ProjectFormPage />} path="/projects/:projectId/edit" />
+            <Route
+              element={
+                <PermissionOnly permissions={["dashboard.view"]}>
+                  <DashboardPage />
+                </PermissionOnly>
+              }
+              path="/dashboard"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["projects.view"]}>
+                  <ProjectsPage />
+                </PermissionOnly>
+              }
+              path="/projects"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["projects.manage"]}>
+                  <ProjectFormPage />
+                </PermissionOnly>
+              }
+              path="/projects/new"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["projects.view"]}>
+                  <ProjectDetailPage />
+                </PermissionOnly>
+              }
+              path="/projects/:projectId"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["projects.manage"]}>
+                  <ProjectFormPage />
+                </PermissionOnly>
+              }
+              path="/projects/:projectId/edit"
+            />
             <Route element={<Navigate replace to="/projects" />} path="/tenders" />
-            <Route element={<SiteOperationsPage />} path="/site-operations" />
-            <Route element={<LegacyOperationsRedirect tab="labor" />} path="/labor" />
-            <Route element={<LegacyOperationsRedirect tab="materials" />} path="/materials" />
-            <Route element={<LegacyOperationsRedirect tab="expenses" />} path="/expenses" />
-            <Route element={<PaymentsPage />} path="/payments" />
+            <Route
+              element={
+                <PermissionOnly permissions={siteOperationPermissions}>
+                  <SiteOperationsPage />
+                </PermissionOnly>
+              }
+              path="/site-operations"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["site.labor"]}>
+                  <LegacyOperationsRedirect tab="labor" />
+                </PermissionOnly>
+              }
+              path="/labor"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["site.materials"]}>
+                  <LegacyOperationsRedirect tab="materials" />
+                </PermissionOnly>
+              }
+              path="/materials"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["site.expenses"]}>
+                  <LegacyOperationsRedirect tab="expenses" />
+                </PermissionOnly>
+              }
+              path="/expenses"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["payments.view"]}>
+                  <PaymentsPage />
+                </PermissionOnly>
+              }
+              path="/payments"
+            />
             <Route element={<Navigate replace to="/projects" />} path="/documents" />
-            <Route element={<ReportsPage />} path="/reports" />
-            <Route element={<SuppliersPage />} path="/suppliers" />
-            <Route element={<LegacyOperationsRedirect tab="equipment" />} path="/equipment" />
-            <Route element={<LegacyOperationsRedirect tab="petty-cash" />} path="/petty-cash" />
-            <Route element={<UsersRolesPage />} path="/users" />
-            <Route element={<SettingsPage />} path="/settings" />
-            <Route element={<NotificationsPage />} path="/notifications" />
-            <Route element={<MobileSupervisorPage />} path="/mobile-supervisor" />
-            <Route element={<ActivityLogPage />} path="/activity-log" />
+            <Route
+              element={
+                <PermissionOnly permissions={["reports.view"]}>
+                  <ReportsPage />
+                </PermissionOnly>
+              }
+              path="/reports"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["suppliers.view"]}>
+                  <SuppliersPage />
+                </PermissionOnly>
+              }
+              path="/suppliers"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["site.equipment"]}>
+                  <LegacyOperationsRedirect tab="equipment" />
+                </PermissionOnly>
+              }
+              path="/equipment"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["site.pettyCash"]}>
+                  <LegacyOperationsRedirect tab="petty-cash" />
+                </PermissionOnly>
+              }
+              path="/petty-cash"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["users.manage"]}>
+                  <UsersRolesPage />
+                </PermissionOnly>
+              }
+              path="/users"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["settings.manage"]}>
+                  <SettingsPage />
+                </PermissionOnly>
+              }
+              path="/settings"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["notifications.view"]}>
+                  <NotificationsPage />
+                </PermissionOnly>
+              }
+              path="/notifications"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["mobile.supervisor"]}>
+                  <MobileSupervisorPage />
+                </PermissionOnly>
+              }
+              path="/mobile-supervisor"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["audit.view"]}>
+                  <ActivityLogPage />
+                </PermissionOnly>
+              }
+              path="/activity-log"
+            />
           </Route>
         </Route>
 

@@ -294,6 +294,14 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  await db.query(`
+    ALTER TABLE engicost.material_requirements
+    ADD COLUMN IF NOT EXISTS supply_source VARCHAR(40) NOT NULL DEFAULT 'Company Purchased',
+    ADD COLUMN IF NOT EXISTS requested_quantity NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_request_date DATE,
+    ADD COLUMN IF NOT EXISTS supply_status VARCHAR(40) NOT NULL DEFAULT 'Planned',
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.material_purchases (
@@ -313,6 +321,10 @@ export const initializeDatabase = async (): Promise<void> => {
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+  await db.query(`
+    ALTER TABLE engicost.material_purchases
+    ADD COLUMN IF NOT EXISTS supply_source VARCHAR(40) NOT NULL DEFAULT 'Company Purchased'
   `);
 
   await db.query(`

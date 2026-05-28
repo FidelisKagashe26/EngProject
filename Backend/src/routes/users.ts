@@ -4,9 +4,11 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireAdmin } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
+router.use(requireAdmin);
 
 const createUserSchema = z.object({
   fullName: z.string().min(2).max(160),
@@ -68,6 +70,24 @@ const mapUser = (row: UserRow) => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+const countOtherActiveAdmins = async (
+  companyId: number,
+  userId: number,
+): Promise<number> => {
+  const result = await db.query<{ count: string }>(
+    `
+    SELECT COUNT(*)::text AS count
+    FROM engicost.users
+    WHERE company_id = $1
+      AND id <> $2
+      AND role = 'Admin'
+      AND status = 'Active'
+    `,
+    [companyId, userId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+};
 
 // GET /users — list all users in company
 router.get(
@@ -149,9 +169,14 @@ router.post(
     await db.query(
       `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, 'Admin', 'Created User', 'Users', NULL, $3, '127.0.0.1 / Local Dev')
+      VALUES ($1, $2, $3, 'Created User', 'Users', NULL, $4, '127.0.0.1 / Local Dev')
       `,
-      [makeId("ACT"), companyId, `Created user account for ${row.full_name} (${row.role})`],
+      [
+        makeId("ACT"),
+        companyId,
+        req.authUser?.fullName ?? "Admin",
+        `Created user account for ${row.full_name} (${row.role})`,
+      ],
     );
 
     res.status(201).json(mapUser(row));
@@ -189,6 +214,26 @@ router.put(
     }
 
     const parsed = updateUserSchema.parse(req.body);
+    const existingUser = existing.rows[0];
+    const nextRole = parsed.role ?? existingUser.role;
+    const nextStatus = parsed.status ?? existingUser.status;
+
+    if (req.authUser?.userId === userId && (nextRole !== "Admin" || nextStatus !== "Active")) {
+      res.status(400).json({ message: "You cannot remove your own active admin access." });
+      return;
+    }
+
+    if (
+      existingUser.role === "Admin" &&
+      existingUser.status === "Active" &&
+      (nextRole !== "Admin" || nextStatus !== "Active")
+    ) {
+      const otherAdmins = await countOtherActiveAdmins(companyId, userId);
+      if (otherAdmins === 0) {
+        res.status(400).json({ message: "At least one active admin account is required." });
+        return;
+      }
+    }
 
     // Check email uniqueness if changing
     if (parsed.email) {
@@ -258,9 +303,14 @@ router.put(
     await db.query(
       `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, 'Admin', 'Updated User', 'Users', NULL, $3, '127.0.0.1 / Local Dev')
+      VALUES ($1, $2, $3, 'Updated User', 'Users', NULL, $4, '127.0.0.1 / Local Dev')
       `,
-      [makeId("ACT"), companyId, `Updated user account for ${row.full_name}`],
+      [
+        makeId("ACT"),
+        companyId,
+        req.authUser?.fullName ?? "Admin",
+        `Updated user account for ${row.full_name}`,
+      ],
     );
 
     res.json(mapUser(row));
@@ -279,14 +329,28 @@ router.delete(
       return;
     }
 
-    const existing = await db.query<{ full_name: string }>(
-      "SELECT full_name FROM engicost.users WHERE company_id = $1 AND id = $2 LIMIT 1",
+    if (req.authUser?.userId === userId) {
+      res.status(400).json({ message: "You cannot suspend your own account." });
+      return;
+    }
+
+    const existing = await db.query<{ full_name: string; role: string; status: string }>(
+      "SELECT full_name, role, status FROM engicost.users WHERE company_id = $1 AND id = $2 LIMIT 1",
       [companyId, userId],
     );
 
     if (existing.rowCount === 0) {
       res.status(404).json({ message: "User not found." });
       return;
+    }
+
+    const targetUser = existing.rows[0];
+    if (targetUser.role === "Admin" && targetUser.status === "Active") {
+      const otherAdmins = await countOtherActiveAdmins(companyId, userId);
+      if (otherAdmins === 0) {
+        res.status(400).json({ message: "At least one active admin account is required." });
+        return;
+      }
     }
 
     await db.query(
@@ -297,9 +361,14 @@ router.delete(
     await db.query(
       `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, 'Admin', 'Suspended User', 'Users', NULL, $3, '127.0.0.1 / Local Dev')
+      VALUES ($1, $2, $3, 'Suspended User', 'Users', NULL, $4, '127.0.0.1 / Local Dev')
       `,
-      [makeId("ACT"), companyId, `Suspended user account: ${existing.rows[0].full_name}`],
+      [
+        makeId("ACT"),
+        companyId,
+        req.authUser?.fullName ?? "Admin",
+        `Suspended user account: ${targetUser.full_name}`,
+      ],
     );
 
     res.json({ message: "User suspended successfully." });

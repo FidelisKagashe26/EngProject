@@ -276,7 +276,24 @@ router.patch(
     const oldExpense = result.rows[0];
     const oldAmount = Number(oldExpense.amount);
     const newAmount = parsed.amount ?? oldAmount;
+    const newProjectId = parsed.projectId ?? oldExpense.project_id;
     const amountDifference = newAmount - oldAmount;
+
+    if (parsed.projectId) {
+      const projectResult = await db.query<{ id: string }>(
+        `
+        SELECT id
+        FROM engicost.projects
+        WHERE company_id = $1 AND id = $2
+        LIMIT 1
+        `,
+        [companyId, parsed.projectId],
+      );
+      if (projectResult.rowCount === 0) {
+        res.status(400).json({ message: "Selected project/site does not exist." });
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {
@@ -295,11 +312,25 @@ router.patch(
         ]);
       }
 
-      if (parsed.date || parsed.category || parsed.description || parsed.paidBy || parsed.paymentMethod || parsed.status || parsed.notes) {
+      if (
+        parsed.projectId ||
+        parsed.date ||
+        parsed.category ||
+        parsed.description ||
+        parsed.paidBy ||
+        parsed.paymentMethod ||
+        parsed.receiptRef !== undefined ||
+        parsed.status ||
+        parsed.notes !== undefined
+      ) {
         const setClauses: string[] = [];
         const params: unknown[] = [companyId, expenseId];
         let paramIndex = 3;
 
+        if (parsed.projectId) {
+          setClauses.push(`project_id = $${paramIndex++}`);
+          params.push(parsed.projectId);
+        }
         if (parsed.date) {
           setClauses.push(`expense_date = $${paramIndex++}`);
           params.push(parsed.date);
@@ -319,6 +350,10 @@ router.patch(
         if (parsed.paymentMethod) {
           setClauses.push(`payment_method = $${paramIndex++}`);
           params.push(parsed.paymentMethod);
+        }
+        if (parsed.receiptRef !== undefined) {
+          setClauses.push(`receipt_ref = $${paramIndex++}`);
+          params.push(parsed.receiptRef);
         }
         if (parsed.status) {
           setClauses.push(`status = $${paramIndex++}`);
@@ -341,15 +376,34 @@ router.patch(
         await client.query(query, params);
       }
 
-      if (amountDifference !== 0 && isAppliedApprovalStatus(oldExpense.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, oldExpense.project_id, amountDifference],
-        );
+      if (isAppliedApprovalStatus(oldExpense.approval_status)) {
+        if (newProjectId !== oldExpense.project_id) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldExpense.project_id, oldAmount],
+          );
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = total_spent + $3, updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, newProjectId, newAmount],
+          );
+        } else if (amountDifference !== 0) {
+          await client.query(
+            `
+            UPDATE engicost.projects
+            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, oldExpense.project_id, amountDifference],
+          );
+        }
       }
 
       await client.query(
@@ -361,7 +415,7 @@ router.patch(
           makeId("ACT"),
           companyId,
           "System Admin",
-          oldExpense.project_id,
+          newProjectId,
           `Updated expense - Amount change: ${amountDifference > 0 ? "+" : ""}TZS ${amountDifference.toLocaleString("en-TZ")}`,
         ],
       );

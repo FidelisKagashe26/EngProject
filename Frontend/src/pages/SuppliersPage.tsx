@@ -9,6 +9,7 @@ import {
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
+import { hasPermission, useAuth } from "../auth";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -19,6 +20,7 @@ import {
 import { formatDate, formatTzs } from "../utils/format";
 
 export const SuppliersPage = () => {
+  const { user } = useAuth();
   const { markSaved } = useUnsavedChanges();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -153,6 +155,7 @@ export const SuppliersPage = () => {
     () => supplierRows.find((s) => s.id === selectedSupplier?.id) ?? selectedSupplier,
     [selectedSupplier, supplierRows],
   );
+  const canManageSuppliers = hasPermission(user?.role, "suppliers.manage");
 
   return (
     <div className="space-y-6">
@@ -178,11 +181,13 @@ export const SuppliersPage = () => {
       </div>
 
       {/* Add Supplier button - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-          + Add Supplier
-        </button>
-      </div>
+      {canManageSuppliers ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+          <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
+            + Add Supplier
+          </button>
+        </div>
+      ) : null}
 
       {/* Supplier Table */}
       <SurfaceCard title="Supplier Table">
@@ -191,7 +196,12 @@ export const SuppliersPage = () => {
         {loading ? (
           <SkeletonTable rows={5} />
         ) : supplierRows.length === 0 ? (
-          <EmptyState description="No suppliers found. Click Add Supplier to get started." title="No suppliers" />
+          <EmptyState
+            actionLabel={canManageSuppliers ? "Add Supplier" : undefined}
+            description="No suppliers found for your access level."
+            onAction={canManageSuppliers ? openAddModal : undefined}
+            title="No suppliers"
+          />
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -243,13 +253,15 @@ export const SuppliersPage = () => {
                           >
                             View
                           </button>
-                          <button
-                            className="btn-danger py-1 px-3 text-xs"
-                            onClick={() => setSupplierToDelete(supplier)}
-                            type="button"
-                          >
-                            Delete
-                          </button>
+                          {canManageSuppliers ? (
+                            <button
+                              className="btn-danger py-1 px-3 text-xs"
+                              onClick={() => setSupplierToDelete(supplier)}
+                              type="button"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -16,6 +16,7 @@ import {
   api,
   type EquipmentApiRecord,
   type EquipmentResponse,
+  type EquipmentStatus,
   type ProjectApiRecord,
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
@@ -46,6 +47,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingEquipmentId, setEditingEquipmentId] = useState("");
   const [equipmentToDelete, setEquipmentToDelete] = useState<EquipmentApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -59,7 +61,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
   const [endDate, setEndDate] = useState("");
   const [dailyRate, setDailyRate] = useState("0");
   const [maintenanceCost, setMaintenanceCost] = useState("0");
-  const [status, setStatus] = useState<"In Use" | "Idle" | "Under Maintenance">("In Use");
+  const [status, setStatus] = useState<EquipmentStatus>("In Use");
   const [maintenanceNotes, setMaintenanceNotes] = useState("");
 
   useEffect(() => {
@@ -142,6 +144,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
   }, [computedUsageDays, dailyRate, maintenanceCost, ownershipType]);
 
   const resetForm = () => {
+    setEditingEquipmentId("");
     setEquipmentName("");
     setEquipmentType("");
     setOwnershipType("Owned");
@@ -164,6 +167,22 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     resetForm();
   };
 
+  const openEditModal = (equipment: EquipmentApiRecord) => {
+    setEditingEquipmentId(equipment.id);
+    setProjectId(equipment.projectId);
+    setEquipmentName(equipment.equipmentName);
+    setEquipmentType(equipment.equipmentType);
+    setOwnershipType(equipment.ownershipType);
+    setOwnerName(equipment.ownerName);
+    setStartDate(equipment.startDate);
+    setEndDate(equipment.endDate);
+    setDailyRate(String(equipment.dailyRate));
+    setMaintenanceCost(String(equipment.maintenanceCost));
+    setStatus(equipment.status);
+    setMaintenanceNotes(equipment.maintenanceNotes);
+    setShowAddModal(true);
+  };
+
   const handleSaveEquipment = async () => {
     if (
       projectId.trim().length === 0 ||
@@ -183,7 +202,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     setSaving(true);
     setError("");
     try {
-      await api.createEquipment({
+      const payload = {
         projectId,
         equipmentName: equipmentName.trim(),
         equipmentType: equipmentType.trim(),
@@ -196,7 +215,12 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         maintenanceCost: Number(maintenanceCost) || 0,
         status,
         maintenanceNotes: maintenanceNotes.trim(),
-      });
+      };
+      if (editingEquipmentId) {
+        await api.updateEquipment(editingEquipmentId, payload);
+      } else {
+        await api.createEquipment(payload);
+      }
       await refreshEquipment();
       markSaved();
       closeAddModal();
@@ -212,9 +236,8 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     setDeleting(true);
     setError("");
     try {
-      // Equipment records are financial records — soft delete not needed, just remove from UI for now
-      // TODO: wire up DELETE /equipment/:id when backend supports it
-      setEquipmentRows((prev) => prev.filter((e) => e.id !== equipmentToDelete.id));
+      await api.deleteEquipment(equipmentToDelete.id);
+      await refreshEquipment();
       markSaved();
       setEquipmentToDelete(null);
     } catch (deleteError) {
@@ -325,6 +348,13 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
                       <td>
                         <div className="flex gap-2">
                           <button
+                            className="btn-secondary py-1 px-3 text-xs"
+                            onClick={() => openEditModal(equipment)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
                             className="btn-danger py-1 px-3 text-xs"
                             onClick={() => setEquipmentToDelete(equipment)}
                             type="button"
@@ -356,7 +386,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
       {/* Add Equipment Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-3xl max-h-[90vh] overflow-y-auto" title="Add Equipment Usage">
+          <SurfaceCard className="w-full max-w-3xl max-h-[90vh] overflow-y-auto" title={editingEquipmentId ? "Edit Equipment Usage" : "Add Equipment Usage"}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <label className="form-field">
                 <span>Project</span>
@@ -409,10 +439,11 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
               <FinancialInput label="Maintenance Cost" onChange={setMaintenanceCost} placeholder="200000" value={maintenanceCost} />
               <label className="form-field">
                 <span>Status</span>
-                <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value as "In Use" | "Idle" | "Under Maintenance")} value={status}>
+                <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value as EquipmentStatus)} value={status}>
                   <option value="In Use">In Use</option>
                   <option value="Idle">Idle</option>
                   <option value="Under Maintenance">Under Maintenance</option>
+                  <option value="Out of Use">Out of Use</option>
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -426,7 +457,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
               <div className="sm:col-span-2 xl:col-span-3 flex justify-end gap-2">
                 <button className="btn-secondary" onClick={closeAddModal} type="button">Cancel</button>
                 <button className="btn-primary" disabled={saving} onClick={() => void handleSaveEquipment()} type="button">
-                  Save Equipment Usage
+                  {editingEquipmentId ? "Update Equipment Usage" : "Save Equipment Usage"}
                 </button>
               </div>
             </form>

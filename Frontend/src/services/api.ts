@@ -238,6 +238,8 @@ export interface LaborPaymentApiRecord {
   nextPaymentDueDate: string | null;
 }
 
+export type MaterialSupplySource = "Company Purchased" | "Client Supplied";
+
 export interface MaterialRequirementApiRecord {
   id: string;
   projectId: string;
@@ -245,9 +247,15 @@ export interface MaterialRequirementApiRecord {
   materialName: string;
   requiredQuantity: number;
   purchasedQuantity: number;
+  companyPurchasedQuantity: number;
+  clientSuppliedQuantity: number;
   remainingQuantity: number;
   unit: string;
   estimatedUnitCost: number;
+  supplySource: MaterialSupplySource;
+  requestedQuantity: number;
+  lastRequestDate: string | null;
+  supplyStatus: string;
   priority: string;
   neededByDate: string | null;
   notes: string;
@@ -263,6 +271,7 @@ export interface MaterialPurchaseApiRecord {
   supplierName: string;
   unitCost: number;
   totalCost: number;
+  supplySource: MaterialSupplySource;
   purchaseDate: string;
   deliveryNoteNumber: string;
   deliveryStatus: string;
@@ -312,6 +321,8 @@ export interface CreateExpensePayload {
   status: string;
   notes: string;
 }
+
+export type UpdateExpensePayload = Partial<CreateExpensePayload>;
 
 export interface CreateExpenseResponse {
   id: string;
@@ -392,6 +403,8 @@ export interface CreatePaymentPayload {
   attachmentType?: string;
 }
 
+export type UpdatePaymentPayload = Partial<CreatePaymentPayload>;
+
 export interface CreatePaymentResponse {
   id: string;
   projectId: string;
@@ -425,7 +438,7 @@ export interface EquipmentApiRecord {
   rentalCost: number;
   maintenanceCost: number;
   totalCost: number;
-  status: string;
+  status: EquipmentStatus;
   maintenanceNotes: string;
   createdAt: string;
   updatedAt: string;
@@ -453,9 +466,13 @@ export interface CreateEquipmentPayload {
   usageDays: number;
   dailyRate: number;
   maintenanceCost: number;
-  status: "In Use" | "Idle" | "Under Maintenance";
+  status: EquipmentStatus;
   maintenanceNotes: string;
 }
+
+export type EquipmentStatus = "In Use" | "Idle" | "Under Maintenance" | "Out of Use";
+
+export type UpdateEquipmentPayload = Partial<CreateEquipmentPayload>;
 
 export interface SupplierApiRecord {
   id: string;
@@ -502,8 +519,19 @@ export interface CreateMaterialRequirementPayload {
   requiredQuantity: number;
   unit: string;
   estimatedUnitCost: number;
+  supplySource: MaterialSupplySource;
+  requestedQuantity: number;
+  supplyStatus: string;
   priority: string;
   neededByDate?: string;
+  notes: string;
+}
+
+export type UpdateMaterialRequirementPayload = Partial<CreateMaterialRequirementPayload>;
+
+export interface RequestMaterialSupplyPayload {
+  requestedQuantity: number;
+  requestDate?: string;
   notes: string;
 }
 
@@ -514,12 +542,15 @@ export interface CreateMaterialPurchasePayload {
   quantityPurchased: number;
   supplierName: string;
   unitCost: number;
+  supplySource: MaterialSupplySource;
   purchaseDate: string;
   deliveryNoteNumber: string;
   deliveryStatus: string;
   receiptRef: string;
   notes: string;
 }
+
+export type UpdateMaterialPurchasePayload = Partial<CreateMaterialPurchasePayload>;
 
 export interface DocumentApiRecord {
   id: string;
@@ -1166,17 +1197,50 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateExpense: (id: string, payload: UpdateExpensePayload) =>
+    apiRequest<ExpenseApiRecord>(`/expenses/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteExpense: (id: string) =>
+    apiRequest<{ message: string; reversedAmount: number }>(`/expenses/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   getPayments: () => apiRequest<PaymentsResponse>("/payments"),
   createPayment: (payload: CreatePaymentPayload) =>
     apiRequest<CreatePaymentResponse>("/payments", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updatePayment: (id: string, payload: UpdatePaymentPayload) =>
+    apiRequest<{ message: string; amountDifference: number; newAmountReceived: number }>(
+      `/payments/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  deletePayment: (id: string) =>
+    apiRequest<{ message: string; reversedAmount: number }>(`/payments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   getEquipment: () => apiRequest<EquipmentResponse>("/equipment"),
   createEquipment: (payload: CreateEquipmentPayload) =>
     apiRequest<EquipmentApiRecord>("/equipment", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  updateEquipment: (id: string, payload: UpdateEquipmentPayload) =>
+    apiRequest<{ message: string; costDifference: number; newTotalCost: number }>(
+      `/equipment/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  deleteEquipment: (id: string) =>
+    apiRequest<{ message: string; reversedAmount: number }>(`/equipment/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     }),
   getSuppliers: () => apiRequest<SuppliersResponse>("/suppliers"),
   createSupplier: (payload: CreateSupplierPayload) =>
@@ -1220,11 +1284,37 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateMaterialRequirement: (id: string, payload: UpdateMaterialRequirementPayload) =>
+    apiRequest<MaterialRequirementApiRecord>(`/materials/requirements/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  requestMaterialSupply: (id: string, payload: RequestMaterialSupplyPayload) =>
+    apiRequest<{ id: string; requestedQuantity: number; lastRequestDate: string | null; supplyStatus: string }>(
+      `/materials/requirements/${encodeURIComponent(id)}/request-supply`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
   createMaterialPurchase: (payload: CreateMaterialPurchasePayload) =>
     apiRequest<MaterialPurchaseApiRecord>("/materials/purchases", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateMaterialPurchase: (id: string, payload: UpdateMaterialPurchasePayload) =>
+    apiRequest<{ message: string; totalCostDifference: number; newTotalCost: number }>(
+      `/materials/purchases/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  deleteMaterialPurchase: (id: string) =>
+    apiRequest<{ message: string; reversedAmount: number }>(
+      `/materials/purchases/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
   getDocuments: (params?: { projectId?: string }) => {
     const query = new URLSearchParams();
     if (params?.projectId && params.projectId.trim().length > 0) {

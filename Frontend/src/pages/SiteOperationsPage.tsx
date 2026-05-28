@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
-import { Suspense, lazy, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
+import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
 import { SectionTitle, SkeletonTable } from "../components/ui";
 
 const LaborPage = lazy(async () => ({
@@ -21,11 +22,13 @@ const PettyCashPage = lazy(async () => ({
 
 type OperationsTab = "labor" | "materials" | "expenses" | "equipment" | "petty-cash";
 
-const operationTabs: Array<{
+type OperationTabConfig = {
   id: OperationsTab;
   label: string;
   icon: ComponentType<{ className?: string }>;
-}> = [
+};
+
+const operationTabs: OperationTabConfig[] = [
   { id: "labor",      label: "Labor",      icon: HardHat    },
   { id: "materials",  label: "Materials",  icon: Package    },
   { id: "expenses",   label: "Expenses",   icon: Receipt    },
@@ -44,6 +47,7 @@ export type TabBarProps = {
   onSwitch: (tab: OperationsTab) => void;
   search: string;
   onSearchChange: (value: string) => void;
+  tabs: OperationTabConfig[];
 };
 
 export const OperationsTabBar = ({
@@ -51,6 +55,7 @@ export const OperationsTabBar = ({
   onSwitch,
   search,
   onSearchChange,
+  tabs,
 }: TabBarProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -68,7 +73,7 @@ export const OperationsTabBar = ({
         <input
           className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-700 placeholder-slate-400 outline-none transition focus:border-[#0b2a53] focus:bg-white focus:ring-2 focus:ring-[#0b2a53]/10"
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={`Search ${operationTabs.find((t) => t.id === activeTab)?.label ?? ""}...`}
+          placeholder={`Search ${tabs.find((t) => t.id === activeTab)?.label ?? ""}...`}
           type="search"
           value={search}
         />
@@ -93,7 +98,7 @@ export const OperationsTabBar = ({
         ref={scrollRef}
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
-        {operationTabs.map((tab) => {
+        {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
@@ -130,12 +135,32 @@ export const OperationsTabBar = ({
 // ─── Site Operations Page ─────────────────────────────────────────────────────
 
 export const SiteOperationsPage = () => {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = isOperationsTab(searchParams.get("tab"))
-    ? (searchParams.get("tab") as OperationsTab)
-    : "labor";
-
   const [search, setSearch] = useState("");
+  const allowedTabs = useMemo(
+    () =>
+      operationTabs.filter((tab) =>
+        hasPermission(user?.role, SITE_OPERATION_PERMISSIONS[tab.id]),
+      ),
+    [user?.role],
+  );
+  const requestedTab = isOperationsTab(searchParams.get("tab"))
+    ? (searchParams.get("tab") as OperationsTab)
+    : null;
+  const activeTab = allowedTabs.some((tab) => tab.id === requestedTab)
+    ? requestedTab as OperationsTab
+    : allowedTabs[0]?.id ?? "labor";
+
+  useEffect(() => {
+    if (allowedTabs.length === 0 || requestedTab === activeTab) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("tab", activeTab);
+    setSearchParams(nextParams, { replace: true });
+  }, [activeTab, allowedTabs.length, requestedTab, searchParams, setSearchParams]);
 
   const switchTab = (tab: OperationsTab) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -152,6 +177,7 @@ export const SiteOperationsPage = () => {
       onSearchChange={setSearch}
       onSwitch={switchTab}
       search={search}
+      tabs={allowedTabs}
     />
   );
 

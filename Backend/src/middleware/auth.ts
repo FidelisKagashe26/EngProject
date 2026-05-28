@@ -7,6 +7,10 @@ const unauthorized = (res: Response, message: string): void => {
   res.status(401).json({ message });
 };
 
+const forbidden = (res: Response, message: string): void => {
+  res.status(403).json({ message });
+};
+
 export const signAuthToken = (payload: AuthTokenPayload): string => {
   const signOptions: SignOptions = {
     expiresIn: env.jwtExpiresIn as SignOptions["expiresIn"],
@@ -47,3 +51,22 @@ export const authenticateToken = (
     unauthorized(res, "Invalid token.");
   }
 };
+
+export const requireRoles =
+  (...roles: string[]) =>
+  (req: Request, res: Response, next: NextFunction): void => {
+    const authUser = req.authUser;
+    if (!authUser) {
+      unauthorized(res, "Authorization token is missing.");
+      return;
+    }
+
+    if (!roles.includes(authUser.role)) {
+      forbidden(res, "You do not have permission to access this resource.");
+      return;
+    }
+
+    next();
+  };
+
+export const requireAdmin = requireRoles("Admin");

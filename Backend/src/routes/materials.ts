@@ -4,6 +4,12 @@ import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { handleAsync, toMoney } from "./utils";
+import {
+  APPROVAL_THRESHOLDS,
+  getApprovalStatusForAmount,
+  isAppliedApprovalStatus,
+  requiresApproval,
+} from "../services/approval";
 
 const router = Router();
 
@@ -130,6 +136,7 @@ router.get(
         delivery_status: string;
         receipt_ref: string | null;
         notes: string | null;
+        approval_status: string;
       }>(
         `
         SELECT
@@ -149,7 +156,7 @@ router.get(
           mp.notes
         FROM engicost.material_purchases mp
         JOIN engicost.projects p ON p.id = mp.project_id
-        WHERE mp.company_id = $1
+        WHERE mp.company_id = $1 AND mp.is_deleted = FALSE
         ORDER BY mp.purchase_date DESC, mp.created_at DESC
         `,
         [companyId],
@@ -332,6 +339,9 @@ router.post(
     }
 
     const totalCost = parsed.quantityPurchased * parsed.unitCost;
+    const needsApproval = requiresApproval("material_purchases", totalCost);
+    const approvalStatus = getApprovalStatusForAmount("material_purchases", totalCost);
+    const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Store Keeper";
     const client = await db.connect();
     let insertedRow:
       | {
@@ -348,6 +358,7 @@ router.post(
           delivery_status: string;
           receipt_ref: string | null;
           notes: string | null;
+          approval_status: string;
         }
       | undefined;
 
@@ -368,16 +379,19 @@ router.post(
         delivery_status: string;
         receipt_ref: string | null;
         notes: string | null;
+        approval_status: string;
       }>(
         `
         INSERT INTO engicost.material_purchases (
           id, company_id, project_id, requirement_id, material_name, quantity_purchased,
           supplier_name, unit_cost, total_cost, purchase_date, delivery_note_number,
-          delivery_status, receipt_ref, notes
+          delivery_status, receipt_ref, notes,
+          approval_status, approval_requested_by, approval_requested_at
         ) VALUES (
           $1, $2, $3, NULLIF($4, ''), $5, $6,
           $7, $8, $9, $10, $11,
-          $12, $13, $14
+          $12, $13, $14,
+          $15, $16, NOW()
         )
         RETURNING
           id,
@@ -392,7 +406,8 @@ router.post(
           delivery_note_number,
           delivery_status,
           receipt_ref,
-          notes
+          notes,
+          approval_status
         `,
         [
           makeId("PUR"),
@@ -409,29 +424,36 @@ router.post(
           parsed.deliveryStatus,
           parsed.receiptRef,
           parsed.notes,
+          approvalStatus,
+          requestedBy,
         ],
       );
       insertedRow = inserted.rows[0];
 
-      await client.query(
-        `
-        UPDATE engicost.projects
-        SET total_spent = total_spent + $3, updated_at = NOW()
-        WHERE company_id = $1 AND id = $2
-        `,
-        [companyId, parsed.projectId, totalCost],
-      );
+      if (!needsApproval) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = total_spent + $3, updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, parsed.projectId, totalCost],
+        );
+      }
 
       await client.query(
         `
         INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-        VALUES ($1, $2, 'Store Keeper', 'Added Material Purchase', 'Materials', $3, $4, '127.0.0.1 / Local Dev')
+        VALUES ($1, $2, $3, 'Added Material Purchase', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
         `,
         [
           makeId("ACT"),
           companyId,
+          requestedBy,
           parsed.projectId,
-          `Purchased ${parsed.materialName} from ${parsed.supplierName} for TZS ${totalCost.toLocaleString("en-TZ")}.`,
+          needsApproval
+            ? `Material purchase pending approval: ${parsed.materialName} for TZS ${totalCost.toLocaleString("en-TZ")}.`
+            : `Purchased ${parsed.materialName} from ${parsed.supplierName} for TZS ${totalCost.toLocaleString("en-TZ")}.`,
         ],
       );
 
@@ -465,9 +487,306 @@ router.post(
       receiptRef: row.receipt_ref ?? "",
       notes: row.notes ?? "",
       requirementMaterialName: requirement?.material_name ?? "",
+      approvalStatus: row.approval_status,
+      requiresApproval: needsApproval,
+      threshold: APPROVAL_THRESHOLDS.material_purchases,
     });
   }),
 );
 
-export default router;
+router.patch(
+  "/purchases/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const purchaseId = String(req.params.id);
 
+    const updateSchema = purchaseSchema.partial();
+    const parsed = updateSchema.parse({
+      ...req.body,
+      quantityPurchased: req.body.quantityPurchased !== undefined ? Number(req.body.quantityPurchased) : undefined,
+      unitCost: req.body.unitCost !== undefined ? toMoney(req.body.unitCost) : undefined,
+    });
+
+    const result = await db.query<{
+      project_id: string;
+      quantity_purchased: string;
+      unit_cost: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, quantity_purchased::text, unit_cost::text, total_cost::text, approval_status
+      FROM engicost.material_purchases
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, purchaseId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Material purchase not found." });
+      return;
+    }
+
+    const oldPurchase = result.rows[0];
+    const oldTotalCost = Number(oldPurchase.total_cost);
+
+    const newQuantity = parsed.quantityPurchased ?? Number(oldPurchase.quantity_purchased);
+    const newUnitCost = parsed.unitCost ?? Number(oldPurchase.unit_cost);
+    const newTotalCost = newQuantity * newUnitCost;
+    const costDifference = newTotalCost - oldTotalCost;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const setClauses: string[] = [];
+      const params: unknown[] = [companyId, purchaseId];
+      let paramIndex = 3;
+
+      if (parsed.quantityPurchased !== undefined) {
+        setClauses.push(`quantity_purchased = $${paramIndex++}`);
+        params.push(parsed.quantityPurchased);
+      }
+      if (parsed.unitCost !== undefined) {
+        setClauses.push(`unit_cost = $${paramIndex++}`);
+        params.push(parsed.unitCost);
+      }
+      if (parsed.supplierName) {
+        setClauses.push(`supplier_name = $${paramIndex++}`);
+        params.push(parsed.supplierName);
+      }
+      if (parsed.purchaseDate) {
+        setClauses.push(`purchase_date = $${paramIndex++}`);
+        params.push(parsed.purchaseDate);
+      }
+      if (parsed.deliveryStatus) {
+        setClauses.push(`delivery_status = $${paramIndex++}`);
+        params.push(parsed.deliveryStatus);
+      }
+      if (parsed.notes !== undefined) {
+        setClauses.push(`notes = $${paramIndex++}`);
+        params.push(parsed.notes);
+      }
+
+      setClauses.push(`total_cost = $${paramIndex++}`);
+      params.push(newTotalCost);
+
+      if (setClauses.length > 0) {
+        await client.query(
+          `UPDATE engicost.material_purchases SET ${setClauses.join(", ")}, updated_at = NOW() WHERE company_id = $1 AND id = $2`,
+          params,
+        );
+      }
+
+      if (costDifference !== 0 && isAppliedApprovalStatus(oldPurchase.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, oldPurchase.project_id, costDifference],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Updated Material Purchase', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          "Store Keeper",
+          oldPurchase.project_id,
+          `Updated purchase - Cost change: ${costDifference > 0 ? "+" : ""}TZS ${costDifference.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Material purchase updated successfully.",
+        totalCostDifference: costDifference,
+        newTotalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+router.delete(
+  "/purchases/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const purchaseId = String(req.params.id);
+    const deletedBy = req.body?.deletedBy || "Store Keeper";
+
+    const result = await db.query<{
+      project_id: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, total_cost::text, approval_status
+      FROM engicost.material_purchases
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, purchaseId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Material purchase not found." });
+      return;
+    }
+
+    const purchase = result.rows[0];
+    const totalCost = Number(purchase.total_cost);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Soft delete: mark as deleted instead of hard delete
+      await client.query(
+        `
+        UPDATE engicost.material_purchases
+        SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, purchaseId, deletedBy],
+      );
+
+      if (isAppliedApprovalStatus(purchase.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, purchase.project_id, totalCost],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Deleted Material Purchase', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          deletedBy,
+          purchase.project_id,
+          `Soft deleted material purchase - Reversed amount: TZS ${totalCost.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Material purchase deleted (soft delete) and total_spent reversed.",
+        reversedAmount: totalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+// Restore a soft-deleted material purchase
+router.patch(
+  "/purchases/:id/restore",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const purchaseId = String(req.params.id);
+    const restoredBy = req.body?.restoredBy || "Store Keeper";
+
+    const result = await db.query<{
+      project_id: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, total_cost::text, approval_status
+      FROM engicost.material_purchases
+      WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
+      LIMIT 1
+      `,
+      [companyId, purchaseId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Deleted material purchase not found." });
+      return;
+    }
+
+    const purchase = result.rows[0];
+    const totalCost = Number(purchase.total_cost);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Restore: mark as not deleted
+      await client.query(
+        `
+        UPDATE engicost.material_purchases
+        SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, purchaseId],
+      );
+
+      if (isAppliedApprovalStatus(purchase.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = total_spent + $3, updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, purchase.project_id, totalCost],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Restored Material Purchase', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          restoredBy,
+          purchase.project_id,
+          `Restored soft-deleted material purchase - Amount re-added: TZS ${totalCost.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Material purchase restored successfully.",
+        restoredAmount: totalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+export default router;

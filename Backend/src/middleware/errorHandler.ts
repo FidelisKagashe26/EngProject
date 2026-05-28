@@ -9,17 +9,46 @@ export const errorHandler = (
 ): void => {
   if (error instanceof ZodError) {
     res.status(400).json({
+      code: "VALIDATION_ERROR",
       message: "Validation failed",
       errors: error.issues.map((issue) => ({
-        path: issue.path.join("."),
+        field: issue.path.join("."),
         message: issue.message,
+        code: issue.code,
       })),
     });
     return;
   }
 
-  const message =
-    error instanceof Error ? error.message : "Unexpected server error";
+  if (error instanceof Error) {
+    // Check for common database/business logic errors
+    const message = error.message || "Unexpected server error";
+    
+    if (message.includes("duplicate key value")) {
+      res.status(409).json({
+        code: "DUPLICATE_RECORD",
+        message: "A record with this data already exists",
+      });
+      return;
+    }
+    
+    if (message.includes("foreign key constraint")) {
+      res.status(400).json({
+        code: "INVALID_REFERENCE",
+        message: "Invalid reference to related record",
+      });
+      return;
+    }
 
-  res.status(500).json({ message });
+    res.status(500).json({
+      code: "INTERNAL_SERVER_ERROR",
+      message,
+    });
+    return;
+  }
+
+  res.status(500).json({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "Unexpected server error",
+  });
 };

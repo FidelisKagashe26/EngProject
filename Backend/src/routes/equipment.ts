@@ -4,6 +4,12 @@ import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { handleAsync, toInteger, toMoney } from "./utils";
+import {
+  APPROVAL_THRESHOLDS,
+  getApprovalStatusForAmount,
+  isAppliedApprovalStatus,
+  requiresApproval,
+} from "../services/approval";
 
 const router = Router();
 
@@ -72,7 +78,7 @@ router.get(
         e.updated_at::text
       FROM engicost.equipment_usage e
       JOIN engicost.projects p ON p.id = e.project_id
-      WHERE e.company_id = $1
+      WHERE e.company_id = $1 AND e.is_deleted = FALSE
       ORDER BY e.created_at DESC
       `,
       [companyId],
@@ -166,6 +172,9 @@ router.post(
     const rentalCost =
       parsed.ownershipType === "Rented" ? usageDays * parsed.dailyRate : 0;
     const totalCost = rentalCost + parsed.maintenanceCost;
+    const needsApproval = requiresApproval("equipment_usage", totalCost);
+    const approvalStatus = getApprovalStatusForAmount("equipment_usage", totalCost);
+    const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
 
     const inserted = await db.query<{
       id: string;
@@ -185,16 +194,17 @@ router.post(
       maintenance_notes: string | null;
       created_at: string;
       updated_at: string;
+      approval_status: string;
     }>(
       `
       INSERT INTO engicost.equipment_usage (
         id, company_id, project_id, equipment_name, equipment_type, ownership_type, owner_name,
         start_date, end_date, usage_days, daily_rate, rental_cost, maintenance_cost, total_cost,
-        status, maintenance_notes
+        status, maintenance_notes, approval_status, approval_requested_by, approval_requested_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13, $14,
-        $15, $16
+        $15, $16, $17, $18, NOW()
       )
       RETURNING
         id,
@@ -213,7 +223,8 @@ router.post(
         status,
         maintenance_notes,
         created_at::text,
-        updated_at::text
+        updated_at::text,
+        approval_status
       `,
       [
         makeId("EQ"),
@@ -232,10 +243,12 @@ router.post(
         totalCost,
         parsed.status,
         parsed.maintenanceNotes,
+        approvalStatus,
+        requestedBy,
       ],
     );
 
-    if (totalCost > 0) {
+    if (totalCost > 0 && !needsApproval) {
       await db.query(
         `
         UPDATE engicost.projects
@@ -249,13 +262,16 @@ router.post(
     await db.query(
       `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, 'Site Supervisor', 'Added Equipment Usage', 'Equipment', $3, $4, '127.0.0.1 / Local Dev')
+      VALUES ($1, $2, $3, 'Added Equipment Usage', 'Equipment', $4, $5, '127.0.0.1 / Local Dev')
       `,
       [
         makeId("ACT"),
         companyId,
+        requestedBy,
         parsed.projectId,
-        `Recorded ${parsed.equipmentName} (${parsed.ownershipType}) usage for ${usageDays} day(s).`,
+        needsApproval
+          ? `Equipment usage pending approval: ${parsed.equipmentName} for TZS ${totalCost.toLocaleString("en-TZ")}.`
+          : `Recorded ${parsed.equipmentName} (${parsed.ownershipType}) usage for ${usageDays} day(s).`,
       ],
     );
 
@@ -279,7 +295,309 @@ router.post(
       maintenanceNotes: row.maintenance_notes ?? "",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      approvalStatus: row.approval_status,
+      requiresApproval: needsApproval,
+      threshold: APPROVAL_THRESHOLDS.equipment_usage,
     });
+  }),
+);
+
+router.patch(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const equipmentId = String(req.params.id);
+
+    const updateSchema = equipmentSchema.partial();
+    const parsed = updateSchema.parse({
+      ...req.body,
+      usageDays: req.body.usageDays !== undefined ? toInteger(req.body.usageDays) : undefined,
+      dailyRate: req.body.dailyRate !== undefined ? toMoney(req.body.dailyRate) : undefined,
+      maintenanceCost: req.body.maintenanceCost !== undefined ? toMoney(req.body.maintenanceCost) : undefined,
+    });
+
+    const result = await db.query<{
+      project_id: string;
+      usage_days: number;
+      daily_rate: string;
+      maintenance_cost: string;
+      ownership_type: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, usage_days, daily_rate::text, maintenance_cost::text, ownership_type, total_cost::text, approval_status
+      FROM engicost.equipment_usage
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, equipmentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Equipment usage not found." });
+      return;
+    }
+
+    const oldEquipment = result.rows[0];
+    const oldTotalCost = Number(oldEquipment.total_cost);
+
+    const newUsageDays = parsed.usageDays ?? oldEquipment.usage_days;
+    const newDailyRate = parsed.dailyRate ?? Number(oldEquipment.daily_rate);
+    const newMaintenanceCost = parsed.maintenanceCost ?? Number(oldEquipment.maintenance_cost);
+    
+    const newRentalCost = oldEquipment.ownership_type === "Rented" ? newUsageDays * newDailyRate : 0;
+    const newTotalCost = newRentalCost + newMaintenanceCost;
+    const costDifference = newTotalCost - oldTotalCost;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const setClauses: string[] = [];
+      const params: unknown[] = [companyId, equipmentId];
+      let paramIndex = 3;
+
+      if (parsed.usageDays !== undefined) {
+        setClauses.push(`usage_days = $${paramIndex++}`);
+        params.push(parsed.usageDays);
+      }
+      if (parsed.dailyRate !== undefined) {
+        setClauses.push(`daily_rate = $${paramIndex++}`);
+        params.push(parsed.dailyRate);
+      }
+      if (parsed.maintenanceCost !== undefined) {
+        setClauses.push(`maintenance_cost = $${paramIndex++}`);
+        params.push(parsed.maintenanceCost);
+      }
+      if (parsed.status) {
+        setClauses.push(`status = $${paramIndex++}`);
+        params.push(parsed.status);
+      }
+      if (parsed.maintenanceNotes !== undefined) {
+        setClauses.push(`maintenance_notes = $${paramIndex++}`);
+        params.push(parsed.maintenanceNotes);
+      }
+
+      setClauses.push(`rental_cost = $${paramIndex++}`);
+      params.push(newRentalCost);
+      setClauses.push(`total_cost = $${paramIndex++}`);
+      params.push(newTotalCost);
+
+      if (setClauses.length > 2) {
+        await client.query(
+          `UPDATE engicost.equipment_usage SET ${setClauses.join(", ")}, updated_at = NOW() WHERE company_id = $1 AND id = $2`,
+          params,
+        );
+      }
+
+      if (costDifference !== 0 && isAppliedApprovalStatus(oldEquipment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, oldEquipment.project_id, costDifference],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Updated Equipment Usage', 'Equipment', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          "Site Supervisor",
+          oldEquipment.project_id,
+          `Updated equipment - Cost change: ${costDifference > 0 ? "+" : ""}TZS ${costDifference.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Equipment usage updated successfully.",
+        costDifference,
+        newTotalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+router.delete(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const equipmentId = String(req.params.id);
+    const deletedBy = req.body?.deletedBy || "Site Supervisor";
+
+    const result = await db.query<{
+      project_id: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, total_cost::text, approval_status
+      FROM engicost.equipment_usage
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, equipmentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Equipment usage record not found." });
+      return;
+    }
+
+    const equipment = result.rows[0];
+    const totalCost = Number(equipment.total_cost);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Soft delete: mark as deleted instead of hard delete
+      await client.query(
+        `
+        UPDATE engicost.equipment_usage
+        SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, equipmentId, deletedBy],
+      );
+
+      if (isAppliedApprovalStatus(equipment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, equipment.project_id, totalCost],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Deleted Equipment Usage', 'Equipment', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          deletedBy,
+          equipment.project_id,
+          `Soft deleted equipment usage - Reversed amount: TZS ${totalCost.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Equipment usage deleted (soft delete) and total_spent reversed.",
+        reversedAmount: totalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+// Restore a soft-deleted equipment usage
+router.patch(
+  "/:id/restore",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const equipmentId = String(req.params.id);
+    const restoredBy = req.body?.restoredBy || "Site Supervisor";
+
+    const result = await db.query<{
+      project_id: string;
+      total_cost: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, total_cost::text, approval_status
+      FROM engicost.equipment_usage
+      WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
+      LIMIT 1
+      `,
+      [companyId, equipmentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Deleted equipment usage record not found." });
+      return;
+    }
+
+    const equipment = result.rows[0];
+    const totalCost = Number(equipment.total_cost);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Restore: mark as not deleted
+      await client.query(
+        `
+        UPDATE engicost.equipment_usage
+        SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, equipmentId],
+      );
+
+      if (isAppliedApprovalStatus(equipment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = total_spent + $3, updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, equipment.project_id, totalCost],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Restored Equipment Usage', 'Equipment', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          restoredBy,
+          equipment.project_id,
+          `Restored soft-deleted equipment usage - Amount re-added: TZS ${totalCost.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Equipment usage restored successfully.",
+        restoredAmount: totalCost,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }),
 );
 

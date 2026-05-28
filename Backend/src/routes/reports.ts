@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import { getSingleTenantCompanyId } from "../db/init";
 import { db } from "../db/pool";
 import { handleAsync } from "./utils";
+import { APPLIED_APPROVAL_STATUS_SQL } from "../services/approval";
 
 type ReportProjectCostRow = {
   id: string;
@@ -386,6 +387,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       FROM engicost.material_purchases mp
       LEFT JOIN engicost.projects p ON p.id = mp.project_id
       WHERE mp.company_id = $1
+        AND mp.is_deleted = FALSE
+        AND mp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       GROUP BY mp.project_id, p.name
       ORDER BY SUM(mp.total_cost) DESC
       `,
@@ -445,6 +448,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       FROM engicost.material_purchases mp
       LEFT JOIN engicost.projects p ON p.id = mp.project_id
       WHERE mp.company_id = $1
+        AND mp.is_deleted = FALSE
+        AND mp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       ORDER BY mp.purchase_date DESC, mp.created_at DESC
       `,
       [companyId],
@@ -464,6 +469,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       FROM engicost.expenses e
       LEFT JOIN engicost.projects p ON p.id = e.project_id
       WHERE e.company_id = $1
+        AND e.is_deleted = FALSE
+        AND e.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       GROUP BY e.project_id, p.name
       ORDER BY SUM(e.amount) DESC
       `,
@@ -486,6 +493,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       FROM engicost.client_payments cp
       LEFT JOIN engicost.projects p ON p.id = cp.project_id
       WHERE cp.company_id = $1
+        AND cp.is_deleted = FALSE
+        AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       GROUP BY cp.project_id, p.name
       ORDER BY SUM(cp.amount_expected) DESC
       `,
@@ -502,6 +511,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       FROM engicost.expenses e
       LEFT JOIN engicost.projects p ON p.id = e.project_id
       WHERE e.company_id = $1
+        AND e.is_deleted = FALSE
+        AND e.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       GROUP BY e.project_id, p.name, e.category
       ORDER BY SUM(e.amount) DESC
       `,
@@ -521,6 +532,8 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       LEFT JOIN engicost.expenses AS expenses
         ON expenses.company_id = $1
         AND DATE_TRUNC('month', expenses.expense_date) = months.month_start
+        AND expenses.is_deleted = FALSE
+        AND expenses.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
       GROUP BY months.month_start
       ORDER BY months.month_start ASC
       `,

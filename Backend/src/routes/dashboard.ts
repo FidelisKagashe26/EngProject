@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "../db/pool";
 import { getSingleTenantCompanyId } from "../db/init";
 import { handleAsync } from "./utils";
+import { APPLIED_APPROVAL_STATUS_SQL } from "../services/approval";
 
 const router = Router();
 
@@ -23,17 +24,26 @@ router.get(
           over_budget_projects: string;
         }>(
           `
+          WITH payment_totals AS (
+            SELECT project_id, COALESCE(SUM(amount_received), 0) AS amount_received
+            FROM engicost.client_payments
+            WHERE company_id = $1
+              AND is_deleted = FALSE
+              AND approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+            GROUP BY project_id
+          )
           SELECT
-            COUNT(*)::text AS total_projects,
-            COUNT(*) FILTER (WHERE status = 'Active')::text AS active_sites,
-            COALESCE(SUM(contract_value), 0)::text AS total_contract_value,
-            COALESCE(SUM(amount_received), 0)::text AS total_amount_received,
-            COALESCE(SUM(total_spent), 0)::text AS total_expenses,
-            COALESCE(SUM(amount_received - total_spent), 0)::text AS estimated_profit,
-            COALESCE(SUM(pending_client_payments), 0)::text AS pending_client_payments,
-            COUNT(*) FILTER (WHERE status = 'Over Budget' OR total_spent > contract_value)::text AS over_budget_projects
-          FROM engicost.projects
-          WHERE company_id = $1
+            COUNT(p.id)::text AS total_projects,
+            COUNT(p.id) FILTER (WHERE p.status = 'Active')::text AS active_sites,
+            COALESCE(SUM(p.contract_value), 0)::text AS total_contract_value,
+            COALESCE(SUM(pt.amount_received), 0)::text AS total_amount_received,
+            COALESCE(SUM(p.total_spent), 0)::text AS total_expenses,
+            (COALESCE(SUM(pt.amount_received), 0) - COALESCE(SUM(p.total_spent), 0))::text AS estimated_profit,
+            COALESCE(SUM(p.pending_client_payments), 0)::text AS pending_client_payments,
+            COUNT(p.id) FILTER (WHERE p.status = 'Over Budget' OR p.total_spent > p.contract_value)::text AS over_budget_projects
+          FROM engicost.projects p
+          LEFT JOIN payment_totals pt ON pt.project_id = p.id
+          WHERE p.company_id = $1
           `,
           [companyId],
         ),
@@ -54,6 +64,8 @@ router.get(
               COALESCE(SUM(cp.amount_received), 0) AS income
             FROM engicost.client_payments cp
             WHERE cp.company_id = $1
+              AND cp.is_deleted = FALSE
+              AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
               AND cp.payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
               AND cp.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
             GROUP BY DATE_TRUNC('month', cp.payment_date)
@@ -62,6 +74,8 @@ router.get(
             SELECT DATE_TRUNC('month', e.expense_date) AS month_start, e.amount AS amount
             FROM engicost.expenses e
             WHERE e.company_id = $1
+              AND e.is_deleted = FALSE
+              AND e.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
               AND e.expense_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
               AND e.expense_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
@@ -70,6 +84,8 @@ router.get(
             SELECT DATE_TRUNC('month', mp.purchase_date) AS month_start, mp.total_cost AS amount
             FROM engicost.material_purchases mp
             WHERE mp.company_id = $1
+              AND mp.is_deleted = FALSE
+              AND mp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
               AND mp.purchase_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
               AND mp.purchase_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
@@ -78,6 +94,8 @@ router.get(
             SELECT DATE_TRUNC('month', lp.work_end) AS month_start, lp.amount_paid AS amount
             FROM engicost.labor_payments lp
             WHERE lp.company_id = $1
+              AND lp.is_deleted = FALSE
+              AND lp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
               AND lp.work_end >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
               AND lp.work_end < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
@@ -86,6 +104,8 @@ router.get(
             SELECT DATE_TRUNC('month', eu.end_date) AS month_start, eu.total_cost AS amount
             FROM engicost.equipment_usage eu
             WHERE eu.company_id = $1
+              AND eu.is_deleted = FALSE
+              AND eu.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
               AND eu.end_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
               AND eu.end_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
@@ -239,4 +259,3 @@ router.get(
 );
 
 export default router;
-

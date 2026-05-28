@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth";
 import authRouter from "./auth";
+import approvalsRouter from "./approvals";
 import dashboardRouter from "./dashboard";
 import documentsRouter from "./documents";
 import equipmentRouter from "./equipment";
@@ -146,6 +147,7 @@ apiRouter.post(
 
 apiRouter.use(authenticateToken);
 
+apiRouter.use("/approvals", approvalsRouter);
 apiRouter.use("/dashboard", dashboardRouter);
 apiRouter.use("/projects", projectsRouter);
 apiRouter.use("/tenders", tendersRouter);

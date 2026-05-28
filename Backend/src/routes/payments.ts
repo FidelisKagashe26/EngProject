@@ -4,6 +4,13 @@ import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { handleAsync, toMoney } from "./utils";
+import {
+  APPLIED_APPROVAL_STATUS_SQL,
+  APPROVAL_THRESHOLDS,
+  getApprovalStatusForAmount,
+  isAppliedApprovalStatus,
+  requiresApproval,
+} from "../services/approval";
 
 const router = Router();
 
@@ -68,7 +75,7 @@ router.get(
           cp.attachment_type
         FROM engicost.client_payments cp
         JOIN engicost.projects p ON p.id = cp.project_id
-        WHERE cp.company_id = $1
+        WHERE cp.company_id = $1 AND cp.is_deleted = FALSE
         ORDER BY cp.payment_date DESC, cp.created_at DESC
         `,
         [companyId],
@@ -82,9 +89,17 @@ router.get(
         SELECT
           COALESCE(SUM(cp.amount_received), 0)::text AS total_received,
           COALESCE(SUM(cp.amount_expected - cp.amount_received), 0)::text AS pending_receivables,
-          COALESCE((SELECT SUM(amount) FROM engicost.expenses WHERE company_id = $1), 0)::text AS total_outflow
+          COALESCE((
+            SELECT SUM(amount)
+            FROM engicost.expenses
+            WHERE company_id = $1
+              AND is_deleted = FALSE
+              AND approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+          ), 0)::text AS total_outflow
         FROM engicost.client_payments cp
         WHERE cp.company_id = $1
+          AND cp.is_deleted = FALSE
+          AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
         `,
         [companyId],
       ),
@@ -158,17 +173,22 @@ router.post(
       amountExpected: toMoney(req.body.amountExpected),
       amountReceived: toMoney(req.body.amountReceived),
     });
+    const needsApproval = requiresApproval("client_payments", parsed.amountReceived);
+    const approvalStatus = getApprovalStatusForAmount("client_payments", parsed.amountReceived);
+    const requestedBy = req.body.requestedBy || req.authUser?.fullName || "System";
 
     const inserted = await db.query(
       `
       INSERT INTO engicost.client_payments (
         id, company_id, project_id, client_name, payment_type, milestone, amount_expected,
         amount_received, payment_date, payment_method, reference_number, status, notes,
-        attachment_url, attachment_name, attachment_type
+        attachment_url, attachment_name, attachment_type,
+        approval_status, approval_requested_by, approval_requested_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13,
-        NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, '')
+        NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
+        $17, $18, NOW()
       )
       RETURNING
         id,
@@ -185,7 +205,8 @@ router.post(
         notes,
         attachment_url,
         attachment_name,
-        attachment_type
+        attachment_type,
+        approval_status
       `,
       [
         makeId("PAY"),
@@ -204,31 +225,38 @@ router.post(
         parsed.attachmentUrl,
         parsed.attachmentName,
         parsed.attachmentType,
+        approvalStatus,
+        requestedBy,
       ],
     );
 
-    await db.query(
-      `
-      UPDATE engicost.projects
-      SET
-        amount_received = amount_received + $3,
-        pending_client_payments = GREATEST(pending_client_payments - $3, 0),
-        updated_at = NOW()
-      WHERE company_id = $1 AND id = $2
-      `,
-      [companyId, parsed.projectId, parsed.amountReceived],
-    );
+    if (!needsApproval) {
+      await db.query(
+        `
+        UPDATE engicost.projects
+        SET
+          amount_received = amount_received + $3,
+          pending_client_payments = GREATEST(pending_client_payments - $3, 0),
+          updated_at = NOW()
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, parsed.projectId, parsed.amountReceived],
+      );
+    }
 
     await db.query(
       `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, 'Rehema Sululu', 'Recorded Client Payment', 'Payments', $3, $4, '127.0.0.1 / Local Dev')
+      VALUES ($1, $2, $3, 'Recorded Client Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
       `,
       [
         makeId("ACT"),
         companyId,
+        requestedBy,
         parsed.projectId,
-        `${parsed.paymentType} payment received: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`,
+        needsApproval
+          ? `${parsed.paymentType} payment pending approval: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`
+          : `${parsed.paymentType} payment received: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`,
       ],
     );
 
@@ -249,9 +277,309 @@ router.post(
       attachmentUrl: row.attachment_url ?? "",
       attachmentName: row.attachment_name ?? "",
       attachmentType: row.attachment_type ?? "",
+      approvalStatus: row.approval_status,
+      requiresApproval: needsApproval,
+      threshold: APPROVAL_THRESHOLDS.client_payments,
     });
   }),
 );
 
-export default router;
+router.patch(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
 
+    const updateSchema = paymentSchema.partial();
+    const parsed = updateSchema.parse({
+      ...req.body,
+      amountExpected: req.body.amountExpected !== undefined ? toMoney(req.body.amountExpected) : undefined,
+      amountReceived: req.body.amountReceived !== undefined ? toMoney(req.body.amountReceived) : undefined,
+    });
+
+    const result = await db.query<{
+      project_id: string;
+      amount_received: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, amount_received::text, approval_status
+      FROM engicost.client_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Payment not found." });
+      return;
+    }
+
+    const oldPayment = result.rows[0];
+    const oldAmountReceived = Number(oldPayment.amount_received);
+    const newAmountReceived = parsed.amountReceived ?? oldAmountReceived;
+    const amountDifference = newAmountReceived - oldAmountReceived;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const setClauses: string[] = [];
+      const params: unknown[] = [companyId, paymentId];
+      let paramIndex = 3;
+
+      if (parsed.amountReceived !== undefined) {
+        setClauses.push(`amount_received = $${paramIndex++}`);
+        params.push(parsed.amountReceived);
+      }
+      if (parsed.amountExpected !== undefined) {
+        setClauses.push(`amount_expected = $${paramIndex++}`);
+        params.push(parsed.amountExpected);
+      }
+      if (parsed.clientName) {
+        setClauses.push(`client_name = $${paramIndex++}`);
+        params.push(parsed.clientName);
+      }
+      if (parsed.paymentType) {
+        setClauses.push(`payment_type = $${paramIndex++}`);
+        params.push(parsed.paymentType);
+      }
+      if (parsed.status) {
+        setClauses.push(`status = $${paramIndex++}`);
+        params.push(parsed.status);
+      }
+      if (parsed.notes !== undefined) {
+        setClauses.push(`notes = $${paramIndex++}`);
+        params.push(parsed.notes);
+      }
+
+      if (setClauses.length > 0) {
+        await client.query(
+          `UPDATE engicost.client_payments SET ${setClauses.join(", ")}, updated_at = NOW() WHERE company_id = $1 AND id = $2`,
+          params,
+        );
+      }
+
+      if (amountDifference !== 0 && isAppliedApprovalStatus(oldPayment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET 
+            amount_received = amount_received + $3,
+            pending_client_payments = GREATEST(pending_client_payments - $3, 0),
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, oldPayment.project_id, amountDifference],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Updated Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          "Rehema Sululu",
+          oldPayment.project_id,
+          `Updated payment - Amount change: ${amountDifference > 0 ? "+" : ""}TZS ${amountDifference.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        code: "SUCCESS",
+        message: "Payment updated successfully.",
+        amountDifference,
+        newAmountReceived,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+// Delete (soft delete) a client payment
+router.delete(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
+    const deletedBy = req.body?.deletedBy || "System Admin";
+
+    const result = await db.query<{
+      project_id: string;
+      amount_received: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, amount_received::text, approval_status
+      FROM engicost.client_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Payment not found." });
+      return;
+    }
+
+    const payment = result.rows[0];
+    const amountReceived = Number(payment.amount_received);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Soft delete: mark as deleted instead of hard delete
+      await client.query(
+        `
+        UPDATE engicost.client_payments
+        SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, paymentId, deletedBy],
+      );
+
+      if (isAppliedApprovalStatus(payment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET
+            amount_received = GREATEST(amount_received - $3, 0),
+            pending_client_payments = pending_client_payments + $3,
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.project_id, amountReceived],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Deleted Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          deletedBy,
+          payment.project_id,
+          `Soft deleted client payment - Reversed amount: TZS ${amountReceived.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Payment deleted (soft delete) and project totals reversed.",
+        reversedAmount: amountReceived,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+// Restore a soft-deleted client payment
+router.patch(
+  "/:id/restore",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
+    const restoredBy = req.body?.restoredBy || "System Admin";
+
+    const result = await db.query<{
+      project_id: string;
+      amount_received: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, amount_received::text, approval_status
+      FROM engicost.client_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Deleted payment not found." });
+      return;
+    }
+
+    const payment = result.rows[0];
+    const amountReceived = Number(payment.amount_received);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Restore: mark as not deleted
+      await client.query(
+        `
+        UPDATE engicost.client_payments
+        SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, paymentId],
+      );
+
+      if (isAppliedApprovalStatus(payment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET
+            amount_received = amount_received + $3,
+            pending_client_payments = GREATEST(pending_client_payments - $3, 0),
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.project_id, amountReceived],
+        );
+      }
+
+      // Log the action
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Restored Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          restoredBy,
+          payment.project_id,
+          `Restored soft-deleted client payment - Amount re-added: TZS ${amountReceived.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Payment restored successfully.",
+        restoredAmount: amountReceived,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+export default router;

@@ -4,6 +4,12 @@ import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { handleAsync, toInteger, toMoney } from "./utils";
+import {
+  APPROVAL_THRESHOLDS,
+  getApprovalStatusForAmount,
+  isAppliedApprovalStatus,
+  requiresApproval,
+} from "../services/approval";
 
 const router = Router();
 
@@ -238,6 +244,7 @@ router.get(
             SELECT COALESCE(SUM(lp.amount_paid), 0)::text
             FROM engicost.labor_payments lp
             WHERE lp.company_id = $1
+              AND lp.is_deleted = FALSE
               AND DATE_TRUNC('month', lp.work_end) = DATE_TRUNC('month', CURRENT_DATE)
           ) AS total_paid_month,
           (
@@ -427,7 +434,7 @@ router.get(
       FROM engicost.labor_payments lp
       INNER JOIN engicost.workers w ON w.id = lp.worker_id
       LEFT JOIN engicost.projects p ON p.id = lp.project_id
-      WHERE lp.company_id = $1
+      WHERE lp.company_id = $1 AND lp.is_deleted = FALSE
       ORDER BY lp.created_at DESC
       LIMIT 200
       `,
@@ -642,6 +649,9 @@ router.post(
       isRecurring && !isHourly ? formatIsoDateUtc(addDaysUtc(workEndDate, 1)) : null;
     const lastPaymentCoveredDate =
       isRecurring && !isHourly ? formatIsoDateUtc(workEndDate) : null;
+    const needsApproval = requiresApproval("labor_payments", parsed.amountPaid);
+    const approvalStatus = getApprovalStatusForAmount("labor_payments", parsed.amountPaid);
+    const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
 
     const client = await db.connect();
     let insertedRow:
@@ -662,6 +672,7 @@ router.post(
           payment_method: string;
           notes: string | null;
           created_at: string;
+          approval_status: string;
         }
       | undefined;
 
@@ -682,19 +693,22 @@ router.post(
         total_payable: string;
         amount_paid: string;
         balance: string;
-        payment_method: string;
-        notes: string | null;
-        created_at: string;
+          payment_method: string;
+          notes: string | null;
+          created_at: string;
+          approval_status: string;
       }>(
         `
         INSERT INTO engicost.labor_payments (
           id, company_id, project_id, worker_id, work_start, work_end, days_worked,
           units_worked, pay_cycle_type, pay_cycle_count,
-          rate_amount, total_payable, amount_paid, balance, payment_method, notes
+          rate_amount, total_payable, amount_paid, balance, payment_method, notes,
+          approval_status, approval_requested_by, approval_requested_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
           $8, $9, $10,
-          $11, $12, $13, $14, $15, $16
+          $11, $12, $13, $14, $15, $16,
+          $17, $18, NOW()
         )
         RETURNING
           id,
@@ -712,7 +726,8 @@ router.post(
           balance::text,
           payment_method,
           notes,
-          created_at::text
+          created_at::text,
+          approval_status
         `,
         [
           makeId("LP"),
@@ -731,65 +746,74 @@ router.post(
           balance,
           parsed.paymentMethod,
           parsed.notes,
+          approvalStatus,
+          requestedBy,
         ],
       );
       insertedRow = inserted.rows[0];
 
-      await client.query(
-        `
-        UPDATE engicost.workers
-        SET
-          total_paid = total_paid + $3,
-          outstanding_amount = outstanding_amount + $4,
-          status = CASE WHEN outstanding_amount + $4 > 0 THEN 'Pending' ELSE 'Active' END
-        WHERE company_id = $1 AND id = $2
-        `,
-        [companyId, parsed.workerId, parsed.amountPaid, balance],
-      );
-
-      if (nextPaymentDueDate && lastPaymentCoveredDate) {
+      if (!needsApproval) {
         await client.query(
           `
           UPDATE engicost.workers
           SET
-            next_payment_due_date = $3,
-            last_payment_covered_date = $4
+            total_paid = total_paid + $3,
+            outstanding_amount = GREATEST(outstanding_amount - $3, 0) + $4,
+            status = CASE WHEN GREATEST(outstanding_amount - $3, 0) + $4 > 0 THEN 'Pending' ELSE 'Active' END,
+            updated_at = NOW()
           WHERE company_id = $1 AND id = $2
           `,
-          [companyId, parsed.workerId, nextPaymentDueDate, lastPaymentCoveredDate],
+          [companyId, parsed.workerId, parsed.amountPaid, balance],
         );
-      }
 
-      if (!worker.assigned_project_id) {
+        if (nextPaymentDueDate && lastPaymentCoveredDate) {
+          await client.query(
+            `
+            UPDATE engicost.workers
+            SET
+              next_payment_due_date = $3,
+              last_payment_covered_date = $4,
+              updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, parsed.workerId, nextPaymentDueDate, lastPaymentCoveredDate],
+          );
+        }
+
+        if (!worker.assigned_project_id) {
+          await client.query(
+            `
+            UPDATE engicost.workers
+            SET assigned_project_id = $3, updated_at = NOW()
+            WHERE company_id = $1 AND id = $2
+            `,
+            [companyId, parsed.workerId, parsed.projectId],
+          );
+        }
+
         await client.query(
           `
-          UPDATE engicost.workers
-          SET assigned_project_id = $3
+          UPDATE engicost.projects
+          SET total_spent = total_spent + $3, updated_at = NOW()
           WHERE company_id = $1 AND id = $2
           `,
-          [companyId, parsed.workerId, parsed.projectId],
+          [companyId, parsed.projectId, parsed.amountPaid],
         );
       }
-
-      await client.query(
-        `
-        UPDATE engicost.projects
-        SET total_spent = total_spent + $3, updated_at = NOW()
-        WHERE company_id = $1 AND id = $2
-        `,
-        [companyId, parsed.projectId, parsed.amountPaid],
-      );
 
       await client.query(
         `
         INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-        VALUES ($1, $2, 'Site Supervisor', 'Recorded Labor Payment', 'Labor', $3, $4, '127.0.0.1 / Local Dev')
+        VALUES ($1, $2, $3, 'Recorded Labor Payment', 'Labor', $4, $5, '127.0.0.1 / Local Dev')
         `,
         [
           makeId("ACT"),
           companyId,
+          requestedBy,
           parsed.projectId,
-          `Recorded ${payCycleType} labor payment for ${worker.full_name}: TZS ${parsed.amountPaid.toLocaleString("en-TZ")}.`,
+          needsApproval
+            ? `${payCycleType} labor payment pending approval for ${worker.full_name}: TZS ${parsed.amountPaid.toLocaleString("en-TZ")}.`
+            : `Recorded ${payCycleType} labor payment for ${worker.full_name}: TZS ${parsed.amountPaid.toLocaleString("en-TZ")}.`,
         ],
       );
 
@@ -827,6 +851,9 @@ router.post(
       projectName: project.name,
       workerName: worker.full_name,
       nextPaymentDueDate,
+      approvalStatus: row.approval_status,
+      requiresApproval: needsApproval,
+      threshold: APPROVAL_THRESHOLDS.labor_payments,
     });
   }),
 );
@@ -860,6 +887,323 @@ router.delete(
     );
 
     res.json({ message: "Worker deactivated successfully." });
+  }),
+);
+
+router.patch(
+  "/labor-payments/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
+
+    const updateSchema = laborPaymentSchema.partial();
+    const parsed = updateSchema.parse({
+      ...req.body,
+      amountPaid: req.body.amountPaid !== undefined ? toMoney(req.body.amountPaid) : undefined,
+      rateAmount: req.body.rateAmount !== undefined ? toMoney(req.body.rateAmount) : undefined,
+    });
+
+    const result = await db.query<{
+      project_id: string;
+      worker_id: string;
+      amount_paid: string;
+      total_payable: string;
+      balance: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, worker_id, amount_paid::text, total_payable::text, balance::text, approval_status
+      FROM engicost.labor_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Labor payment not found." });
+      return;
+    }
+
+    const oldPayment = result.rows[0];
+    const oldAmountPaid = Number(oldPayment.amount_paid);
+    const newAmountPaid = parsed.amountPaid ?? oldAmountPaid;
+    const totalPayable = Number(oldPayment.total_payable);
+    if (newAmountPaid > totalPayable) {
+      res.status(400).json({ message: "Amount paid cannot exceed total payable for this record." });
+      return;
+    }
+    const amountDifference = newAmountPaid - oldAmountPaid;
+    const oldBalance = Number(oldPayment.balance);
+    const newBalance = Math.max(totalPayable - newAmountPaid, 0);
+    const balanceDifference = newBalance - oldBalance;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const setClauses: string[] = [];
+      const params: unknown[] = [companyId, paymentId];
+      let paramIndex = 3;
+
+      if (parsed.amountPaid !== undefined) {
+        setClauses.push(`amount_paid = $${paramIndex++}`);
+        params.push(parsed.amountPaid);
+        setClauses.push(`balance = $${paramIndex++}`);
+        params.push(newBalance);
+      }
+      if (parsed.rateAmount !== undefined) {
+        setClauses.push(`rate_amount = $${paramIndex++}`);
+        params.push(parsed.rateAmount);
+      }
+      if (parsed.paymentMethod) {
+        setClauses.push(`payment_method = $${paramIndex++}`);
+        params.push(parsed.paymentMethod);
+      }
+      if (parsed.notes !== undefined) {
+        setClauses.push(`notes = $${paramIndex++}`);
+        params.push(parsed.notes);
+      }
+
+      if (setClauses.length > 0) {
+        await client.query(
+          `UPDATE engicost.labor_payments SET ${setClauses.join(", ")}, updated_at = NOW() WHERE company_id = $1 AND id = $2`,
+          params,
+        );
+      }
+
+      if (
+        (amountDifference !== 0 || balanceDifference !== 0) &&
+        isAppliedApprovalStatus(oldPayment.approval_status)
+      ) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, oldPayment.project_id, amountDifference],
+        );
+
+        await client.query(
+          `
+          UPDATE engicost.workers
+          SET
+            total_paid = total_paid + $3,
+            outstanding_amount = GREATEST(outstanding_amount + $4, 0),
+            status = CASE WHEN GREATEST(outstanding_amount + $4, 0) > 0 THEN 'Pending' ELSE 'Active' END,
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, oldPayment.worker_id, amountDifference, balanceDifference],
+        );
+      }
+
+      await logLaborActivity(
+        companyId,
+        "Updated Labor Payment",
+        oldPayment.project_id,
+        `Updated payment - Amount change: ${amountDifference > 0 ? "+" : ""}TZS ${amountDifference.toLocaleString("en-TZ")}`,
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Labor payment updated successfully.",
+        amountDifference,
+        newAmountPaid,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+router.delete(
+  "/labor-payments/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
+    const deletedBy = req.body?.deletedBy || "System Admin";
+
+    const result = await db.query<{
+      project_id: string;
+      worker_id: string;
+      amount_paid: string;
+      balance: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, worker_id, amount_paid::text, balance::text, approval_status
+      FROM engicost.labor_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Labor payment not found." });
+      return;
+    }
+
+    const payment = result.rows[0];
+    const amountPaid = Number(payment.amount_paid);
+    const balance = Number(payment.balance);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Soft delete: mark as deleted instead of hard delete
+      await client.query(
+        `
+        UPDATE engicost.labor_payments
+        SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, paymentId, deletedBy],
+      );
+
+      if (isAppliedApprovalStatus(payment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.project_id, amountPaid],
+        );
+
+        await client.query(
+          `
+          UPDATE engicost.workers
+          SET
+            total_paid = GREATEST(total_paid - $3, 0),
+            outstanding_amount = GREATEST(outstanding_amount + $3 - $4, 0),
+            status = CASE WHEN GREATEST(outstanding_amount + $3 - $4, 0) > 0 THEN 'Pending' ELSE 'Active' END,
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.worker_id, amountPaid, balance],
+        );
+      }
+
+      await logLaborActivity(
+        companyId,
+        "Deleted Labor Payment",
+        payment.project_id,
+        `Soft deleted labor payment - Reversed amount: TZS ${amountPaid.toLocaleString("en-TZ")}`,
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Labor payment deleted (soft delete) and totals reversed.",
+        reversedAmount: amountPaid,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+// Restore a soft-deleted labor payment
+router.patch(
+  "/labor-payments/:id/restore",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const paymentId = String(req.params.id);
+    const restoredBy = req.body?.restoredBy || "System Admin";
+
+    const result = await db.query<{
+      project_id: string;
+      worker_id: string;
+      amount_paid: string;
+      balance: string;
+      approval_status: string | null;
+    }>(
+      `
+      SELECT project_id, worker_id, amount_paid::text, balance::text, approval_status
+      FROM engicost.labor_payments
+      WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
+      LIMIT 1
+      `,
+      [companyId, paymentId],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Deleted labor payment not found." });
+      return;
+    }
+
+    const payment = result.rows[0];
+    const amountPaid = Number(payment.amount_paid);
+    const balance = Number(payment.balance);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Restore: mark as not deleted
+      await client.query(
+        `
+        UPDATE engicost.labor_payments
+        SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, paymentId],
+      );
+
+      if (isAppliedApprovalStatus(payment.approval_status)) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET total_spent = total_spent + $3, updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.project_id, amountPaid],
+        );
+
+        await client.query(
+          `
+          UPDATE engicost.workers
+          SET
+            total_paid = total_paid + $3,
+            outstanding_amount = GREATEST(outstanding_amount - $3, 0) + $4,
+            status = CASE WHEN GREATEST(outstanding_amount - $3, 0) + $4 > 0 THEN 'Pending' ELSE 'Active' END,
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, payment.worker_id, amountPaid, balance],
+        );
+      }
+
+      await logLaborActivity(
+        companyId,
+        "Restored Labor Payment",
+        payment.project_id,
+        `Restored soft-deleted labor payment - Amount re-added: TZS ${amountPaid.toLocaleString("en-TZ")}`,
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        message: "Labor payment restored successfully.",
+        restoredAmount: amountPaid,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }),
 );
 

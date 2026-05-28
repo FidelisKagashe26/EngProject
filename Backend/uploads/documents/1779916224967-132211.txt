@@ -1,0 +1,392 @@
+Mfumo wa Test - Project ya Mfano
+
+Mfumo wa test: “Project ya mfano”
+
+Tutafanya test ya project moja kamili kupitia sehemu zifuatazo:
+
+• Projects / Sites
+• Site Operations
+• Payments
+• Suppliers
+• Users & Roles
+• Settings
+• Contact / Quote Request
+
+1) Unda project mpya
+
+Nenda:
+Projects / Sites
+
+Bonyeza Add New Project
+
+Jaza fomu hii:
+
+Fields ya project
+• Project Name → Mtaa wa 2000 - Internal Street Lighting
+• Site Location → Mikocheni, Dar es Salaam
+• Client Name → Tanzania Power Co.
+• Contract Number → ENG-2026-014
+• Start Date → 2026-06-01
+• Completion Date → 2026-09-30
+• Contract Value → 12000000
+• Initial Advance → 3000000
+• Status → Active
+• Labor Budget → 3600000
+• Material Budget → 5000000
+• Operational Budget → 1200000
+• Profit Margin → 18
+• Payment Terms → 30% advance, 40% milestone, 30% final upon completion
+• Description → Install internal street lighting, trenching, cable pulling, and final testing for the estate.
+• Notes → Mobilize after safety induction and material delivery.
+
+Baada ya kujaza:
+• Bonyeza Save
+• Kumbuka project ID au jina la project iliyoundwa
+• Ikiwa system inakuonyesha taarifa ya success, hiyo ni nzuri.
+
+2) Angalia project baada ya kuundwa
+
+Nenda:
+Projects / Sites
+
+Bofya project Mtaa wa 2000 - Internal Street Lighting
+
+Angalia kama zipo:
+• Contract Value
+• Amount Received
+• Total Spent
+• Remaining Balance
+• Pending Client Payments
+• Status
+
+Inatarajiwa:
+• Amount Received inapaswa kuonyesha 3000000
+• Total Spent inapaswa kuonekana 0 kwa mwanzo
+• Remaining Balance inapaswa kuonyesha takriban 12000000
+• Status inapaswa kuwa Active
+
+3) Upload document ya project
+
+Nenda:
+kwenye page ya project → sehemu ya documents
+
+• Chagua faili
+• Bonyeza Select Documents
+• Chagua faili mfano: Approved BoQ.pdf
+
+Jaza:
+• Category → Project Documents
+• Notes → Approved bill of quantities
+
+Bonyeza:
+Upload Selected
+
+Inatarajiwa:
+• document inaonekana kwenye orodha
+
+4) Add worker
+
+Nenda:
+Site Operations → tab Labor
+
+Bonyeza:
+Add Worker
+
+Jaza fomu:
+• Full Name → Asha Mollel
+• Phone → +255712345678
+• Skill / Role → Electrician
+• Payment Type → Daily
+• Rate Amount → 45000
+• Assigned Project → chagua project yako
+• Employment Start Date → 2026-06-01
+• Notes → Handles lighting installation and troubleshooting.
+
+Bonyeza:
+Save Worker
+
+Inatarajiwa:
+• worker inaonekana kwenye orodha
+
+5) Record labor payment
+
+Nenda:
+Site Operations → tab Labor
+
+Chagua worker yako
+
+Bonyeza:
+Pay Worker au Add Payment
+
+Jaza:
+• Project → project yako
+• Worker → Asha Mollel
+• Work Start → 2026-06-01
+• Work End → 2026-06-03
+• Hours Worked → 24
+• Rate → 45000
+• Amount Paid → 180000
+• Payment Method → Cash
+• Notes → Daily site labor payment
+
+Bonyeza:
+Save Payment
+
+Inatarajiwa:
+• total paid ya worker inazidi
+• outstanding inabadilika
+
+6) Add material requirement
+
+Nenda:
+Site Operations → tab Materials
+
+Bonyeza:
+Add Requirement
+
+Jaza:
+• Project → project yako
+• Material Name → Cables 4mm
+• Required Quantity → 150
+• Unit → Meters
+• Estimated Unit Cost → 1500
+• Priority → High
+• Needed By Date → 2026-06-10
+• Notes → For trenching and final wiring.
+
+Bonyeza:
+Save Requirement
+
+Inatarajiwa:
+• requirement inaonekana kwenye table
+
+7) Add material purchase
+
+Nenda:
+Site Operations → tab Materials
+
+Bonyeza:
+Add Purchase
+
+Jaza:
+• Project → project yako
+• Material / Requirement → chagua requirement iliyoundwa
+• Material Name → Cables 4mm
+• Quantity Purchased → 120
+• Supplier Name → Apex Electrical Supplies
+• Unit Cost → 1500
+• Purchase Date → 2026-06-05
+• Delivery Note Number → DN-001
+• Delivery Status → Pending Delivery
+• Receipt Ref → REC-001
+• Notes → Initial delivery for lighting work.
+
+Bonyeza:
+Save Purchase
+
+Inatarajiwa:
+• purchased quantity inazidi
+• remaining quantity inapungua
+
+8) Add expense
+
+Nenda:
+Site Operations → tab Expenses
+
+Bonyeza:
+Add Expense
+
+Jaza:
+• Project → project yako
+• Category → Fuel
+• Description → Fuel for site mobilization and transport
+• Amount → 250000
+• Date → 2026-06-06
+• Paid By → Site Supervisor
+• Payment Method → Cash
+• Receipt Ref → EXP-001
+• Status → Approved
+• Notes → Transportation for crew and materials.
+
+Bonyeza:
+Save Expense
+
+Inatarajiwa:
+• Total Spent inaongezeka
+• chart ya expenses inaonekana
+
+9) Add payment
+
+Nenda:
+Payments
+
+Bonyeza:
+Add Payment
+
+Jaza:
+• Project → project yako
+• Client Name → Tanzania Power Co.
+• Payment Type → Advance
+• Milestone → Mobilization advance
+• Amount Expected → 3000000
+• Amount Received → 3000000
+• Payment Date → 2026-06-03
+• Payment Method → Bank Transfer
+• Reference Number → REF-ADV-001
+• Status → Received
+• Notes → Advance payment received for project mobilization.
+
+Bonyeza:
+Save Payment
+
+Inatarajiwa:
+• Total Received inaongezeka
+• Pending Receivables inapungua
+• Next Expected Payment inaonyesha taarifa mpya
+
+10) Add equipment
+
+Nenda:
+Site Operations → tab Equipment
+
+Bonyeza:
+Add Equipment
+
+Jaza:
+• Project → project yako
+• Equipment Name → Generator 10KVA
+• Equipment Type → Power
+• Ownership Type → Rented
+• Owner Name → Tanzania Equipment Hub
+• Start Date → 2026-06-05
+• End Date → 2026-06-10
+• Daily Rate → 50000
+• Maintenance Cost → 0
+• Status → In Use
+• Maintenance Notes → Used for site power during installation.
+
+Bonyeza:
+Save Equipment
+
+Inatarajiwa:
+• record inaonekana kwenye table
+• total cost inaonekana
+
+11) Add petty cash
+
+Nenda:
+Site Operations → tab Petty Cash
+
+Bonyeza:
+Add Transaction
+
+Jaza:
+• Project → project yako
+• Transaction Date → 2026-06-07
+• Transaction Type → Cash Out
+• Description → Refreshments and site stationery
+• Amount → 75000
+• Recorded By → Asha Mollel
+• Receipt Ref → PC-001
+• Status → Pending
+• Notes → For daily site operations.
+
+Bonyeza:
+Save Transaction
+
+Inatarajiwa:
+• current balance inapungua
+
+12) Add supplier
+
+Nenda:
+Suppliers
+
+Bonyeza:
+Add Supplier
+
+Jaza:
+• Supplier Name → Apex Electrical Supplies
+• Contact Person → Musa Hassan
+• Phone → +255723456789
+• Email → musa@apex.co.tz
+• Location → Dar es Salaam
+• Materials Supplied → Cables, lights, fittings
+• Total Purchases → 0
+• Outstanding Balance → 0
+• Status → Active
+• Notes → Supplier for lighting materials
+
+Bonyeza:
+Save Supplier
+
+Inatarajiwa:
+• supplier inaonekana kwenye table
+• summary cards zinabadilika
+
+13) Test users / roles
+
+Nenda:
+Users & Roles
+
+Bonyeza:
+Add User
+
+Jaza:
+• Full Name → Test Supervisor
+• Email → testsupervisor@example.com
+• Phone → +255799000111
+• Role → Site Supervisor
+• Assigned Projects → leave empty au andika project name
+• Status → Active
+• Password → Test@1234
+
+Bonyeza:
+Save User
+
+Ifuatayo:
+• Edit user
+• Suspend user
+
+Inatarajiwa:
+• user inaonekana kwenye table
+• status inabadilika
+
+14) Test settings
+
+Nenda:
+Settings
+
+Check:
+• My Profile
+• Change Password
+• System Settings
+• Website Management
+
+Angalia:
+• unaweza kubadilisha profile
+• unaweza kubadilisha password
+• unaweza kuona Website Management tab
+• unaweza upload gallery image ikiwa inahitajika
+
+Inatarajiwa:
+• hakuna error
+• sehemu zinaonyesha data vizuri
+
+15) Test public contact / quote request
+
+Nenda:
+Contact
+
+Jaza:
+• Full Name → John Doe
+• Email → john@example.com
+• Phone → +255700000000
+• Service Needed → chagua huduma yoyote
+• Message → We need lighting and power installation for a housing project.
+
+Bonyeza:
+Send Message
+
+Inatarajiwa:
+• inakuonyesha Message Sent!

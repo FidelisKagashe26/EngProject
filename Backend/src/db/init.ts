@@ -240,6 +240,10 @@ export const initializeDatabase = async (): Promise<void> => {
     ALTER TABLE engicost.workers
     ADD COLUMN IF NOT EXISTS last_payment_covered_date DATE
   `);
+  await db.query(`
+    ALTER TABLE engicost.workers
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.labor_payments (
@@ -480,6 +484,48 @@ export const initializeDatabase = async (): Promise<void> => {
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+
+  const financialTables = [
+    "expenses",
+    "client_payments",
+    "labor_payments",
+    "material_purchases",
+    "equipment_usage",
+  ];
+
+  for (const tableName of financialTables) {
+    await db.query(`
+      ALTER TABLE engicost.${tableName}
+      ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'AUTO_APPROVED',
+      ADD COLUMN IF NOT EXISTS approval_requested_by VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS approved_by VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS rejected_by VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(500),
+      ADD COLUMN IF NOT EXISTS approval_requested_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    `);
+
+    await db.query(`
+      UPDATE engicost.${tableName}
+      SET approval_status = 'AUTO_APPROVED'
+      WHERE approval_status IS NULL
+    `);
+
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_${tableName}_deleted
+      ON engicost.${tableName}(company_id, is_deleted)
+    `);
+
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_${tableName}_approval_status
+      ON engicost.${tableName}(company_id, approval_status)
+    `);
+  }
 
   const companyResult = await db.query<{ id: number }>(
     "SELECT id FROM engicost.companies ORDER BY id ASC LIMIT 1",

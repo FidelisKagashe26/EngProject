@@ -19,7 +19,7 @@ jobs:
           script: |
             set -euo pipefail
 
-            echo "🚀 Starting deployment..."
+            echo "Starting deployment..."
 
             cd /var/www/engicost
 
@@ -27,17 +27,26 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            echo "📦 Backend build..."
+            echo "Backend build..."
             cd Backend
             npm ci
             npm run build
 
-            echo "♻️ Restarting backend..."
+            # TEMPORARY one-time production wipe. Remove after confirming live data is clean.
+            if [ ! -f ../.production-data-reset-complete ]; then
+              echo "Resetting production data one time..."
+              RESET_PRODUCTION_DATA=CONFIRM_RESET_PRODUCTION_DATA node dist/scripts/resetProductionData.js
+              touch ../.production-data-reset-complete
+            else
+              echo "Production data reset already completed. Skipping."
+            fi
+
+            echo "Restarting backend..."
             pm2 restart engicost-backend --update-env
 
-            echo "🌐 Frontend build..."
+            echo "Frontend build..."
             cd ../Frontend
             npm ci
             VITE_API_BASE_URL=https://www.dreggam.com/api npm run build
 
-            echo "✅ Deployment successful"
+            echo "Deployment successful"

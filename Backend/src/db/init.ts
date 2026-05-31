@@ -73,6 +73,9 @@ const seedProjects = [
 
 export const initializeDatabase = async (): Promise<void> => {
   await db.query("CREATE SCHEMA IF NOT EXISTS engicost");
+  const shouldSeedDemoData =
+    env.seedDemoData &&
+    (!env.isProduction || process.env.ALLOW_DEMO_DATA_IN_PRODUCTION === "true");
   await db.query("DROP TABLE IF EXISTS engicost.work_orders");
 
   await db.query(`
@@ -598,7 +601,7 @@ export const initializeDatabase = async (): Promise<void> => {
   );
 
   const existingProjects = await db.query("SELECT id FROM engicost.projects LIMIT 1");
-  if (existingProjects.rowCount === 0 && env.seedDemoData) {
+  if (existingProjects.rowCount === 0 && shouldSeedDemoData) {
     for (const project of seedProjects) {
       await db.query(
         `
@@ -819,7 +822,7 @@ export const initializeDatabase = async (): Promise<void> => {
     `,
     [companyId],
   );
-  if (env.seedDemoData && Number(usersCount.rows[0]?.count ?? 0) < 4) {
+  if (shouldSeedDemoData && Number(usersCount.rows[0]?.count ?? 0) < 4) {
     await db.query(
       `
       INSERT INTO engicost.users (company_id, full_name, email, phone, role, status, assigned_projects)
@@ -837,7 +840,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.suppliers WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (env.seedDemoData && existingSuppliers.rowCount === 0) {
+  if (shouldSeedDemoData && existingSuppliers.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.suppliers (
@@ -856,7 +859,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.equipment_usage WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (env.seedDemoData && existingEquipment.rowCount === 0) {
+  if (shouldSeedDemoData && existingEquipment.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.equipment_usage (
@@ -875,7 +878,7 @@ export const initializeDatabase = async (): Promise<void> => {
     "SELECT id FROM engicost.petty_cash_transactions WHERE company_id = $1 LIMIT 1",
     [companyId],
   );
-  if (env.seedDemoData && existingPettyCash.rowCount === 0) {
+  if (shouldSeedDemoData && existingPettyCash.rowCount === 0) {
     await db.query(
       `
       INSERT INTO engicost.petty_cash_transactions (

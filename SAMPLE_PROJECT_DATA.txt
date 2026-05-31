@@ -1,0 +1,113 @@
+=============================================================================
+SAMPLE PROJECT - CUSTOMER PROVIDED MATERIALS (IMPLEMENTATION ONLY)
+=============================================================================
+
+PROJECT DETAILS:
+================
+Project Name:           Mwanzo Restaurant - Electrical Installation
+Site Location:          Dar es Salaam, Oyster Bay - Mwanzo Restaurant Building
+Client Name:            Mr. Juma Hassan
+Contract Number:        CON-2026-001-MWZ
+Contact Phone:          +255 654 321 987
+
+DATES:
+======
+Start Date:             2026-05-01
+Expected Completion:    2026-06-15
+Project Duration:       45 days
+
+CONTRACT & PAYMENT TERMS:
+=========================
+Contract Value:         TSH 850,000
+Amount Received:        TSH 850,000 (100% - Full payment upfront)
+Payment Terms:          Full payment received before work started
+Status:                 In Progress
+Progress:               85%
+
+BUDGET BREAKDOWN:
+=================
+Labor Budget:           TSH 450,000
+Material Budget:        TSH 0 (Customer provided all materials)
+Operational Budget:     TSH 100,000 (Transportation, tools, misc)
+Total Budgeted Spend:   TSH 550,000
+
+ACTUAL EXPENDITURE:
+===================
+Labor Costs Spent:      TSH 420,000 (8 electricians × TSH 52,500 each)
+Materials Spent:        TSH 0 (Customer supplied)
+Operational Spent:      TSH 85,000 (Transport, tool maintenance, meals)
+Total Spent:            TSH 505,000
+
+PROFIT/LOSS ANALYSIS:
+======================
+Amount Received:        TSH 850,000
+Total Spent:            TSH 505,000
+Profit Estimate:        TSH 345,000 (40.6% margin)
+Remaining Balance:      TSH 345,000
+
+PROJECT DESCRIPTION:
+====================
+Installation of three-phase electrical distribution system for new restaurant 
+building. Work includes:
+- Main switchboard installation with circuit breakers
+- Distribution of power to kitchen, dining, and storage areas
+- Installation of 42 electrical outlets (20A outlets for kitchen appliances)
+- Emergency lighting system installation
+- Grounding system implementation
+
+IMPLEMENTATION STATUS:
+======================
+Completed Tasks:
+✓ Switchboard installed and tested (May 5-10)
+✓ Main cabling laid through walls and conduits (May 11-18)
+✓ Kitchen outlet installation completed (May 19-25)
+✓ Dining area and storage wiring (May 26-30)
+✓ Emergency lighting installed (May 31 - Jun 2)
+
+Current Status:
+→ Final connections and troubleshooting (50% complete)
+→ Awaiting customer acceptance and payment clearance
+
+Pending Tasks:
+⚠ Final system testing and load testing (NOT COMPLETED - Customer requested to do separately)
+⚠ Customer training on emergency procedures (pending)
+⚠ Final inspection and certification (pending)
+⚠ Handover documentation
+
+NOTES & ISSUES:
+================
+- Customer provided all electrical materials (cables, outlets, breakers, switches)
+- Implementation completed on schedule
+- NO comprehensive testing performed yet - Customer preferred to conduct testing 
+  separately with their electrician
+- Some minor cable routing adjustments needed in kitchen area (non-critical)
+- Customer satisfied with workmanship so far
+
+MATERIALS PROVIDED BY CUSTOMER:
+================================
+- 3 × 16mm² 3-phase cables (100m total)
+- 1 × Triple-pole + neutral switch (100A)
+- 42 × Double gang 20A outlets
+- 32 × Light switches (single/double gang)
+- 200m × 4mm² ground cable
+- 150m × 2.5mm² single phase cable (backup)
+- Conduit pipes and junction boxes (as required)
+
+TEAM ASSIGNED:
+===============
+Project Manager: Eng. Ahmed Makani
+Lead Electrician: Mr. Peter Kamau
+Supporting Team: 6 electricians (rotational)
+
+NEXT STEPS:
+===========
+1. Complete final connections (2-3 days)
+2. Await customer's external testing
+3. Provide handover package and documentation
+4. Collect final clearance and project sign-off
+5. Process final payment (if any adjustment needed)
+
+=============================================================================
+This is a sample implementation-only project where the customer provided
+all materials and requested to handle testing separately.
+=============================================================================

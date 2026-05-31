@@ -32,14 +32,15 @@ jobs:
             npm ci
             npm run build
 
-            # TEMPORARY one-time production wipe. Remove after confirming live data is clean.
-            if [ ! -f ../.production-data-reset-complete ]; then
-              echo "Resetting production data one time..."
-              RESET_PRODUCTION_DATA=CONFIRM_RESET_PRODUCTION_DATA node dist/scripts/resetProductionData.js
-              touch ../.production-data-reset-complete
-            else
-              echo "Production data reset already completed. Skipping."
-            fi
+            # TEMPORARY production wipe command kept for future use.
+            # Uncomment this block only when you intentionally want to clear live data.
+            # if [ ! -f ../.production-data-reset-complete ]; then
+            #   echo "Resetting production data one time..."
+            #   RESET_PRODUCTION_DATA=CONFIRM_RESET_PRODUCTION_DATA node dist/scripts/resetProductionData.js
+            #   touch ../.production-data-reset-complete
+            # else
+            #   echo "Production data reset already completed. Skipping."
+            # fi
 
             echo "Restarting backend..."
             pm2 restart engicost-backend --update-env

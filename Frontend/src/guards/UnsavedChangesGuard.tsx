@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ConfirmModal } from "../components/ui";
 
@@ -14,6 +14,9 @@ const RELOAD_TOKEN = "__reload__";
 
 export const UnsavedChangesProvider = ({ children }: { children: ReactNode }) => {
   const [isDirty, setIsDirty] = useState(false);
+  const markDirty = useCallback(() => setIsDirty(true), []);
+  const markSaved = useCallback(() => setIsDirty(false), []);
+  const setDirty = useCallback((dirty: boolean) => setIsDirty(dirty), []);
 
   useEffect(() => {
     const markDirtyFromFormEvent = (event: Event) => {
@@ -46,11 +49,11 @@ export const UnsavedChangesProvider = ({ children }: { children: ReactNode }) =>
   const value = useMemo<UnsavedChangesContextValue>(
     () => ({
       isDirty,
-      markDirty: () => setIsDirty(true),
-      markSaved: () => setIsDirty(false),
-      setDirty: (dirty: boolean) => setIsDirty(dirty),
+      markDirty,
+      markSaved,
+      setDirty,
     }),
-    [isDirty],
+    [isDirty, markDirty, markSaved, setDirty],
   );
 
   return (

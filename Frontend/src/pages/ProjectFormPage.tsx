@@ -199,6 +199,11 @@ export const ProjectFormPage = () => {
       profitMargin, paymentTerms, notes,
     ],
   );
+  const currentFingerprintRef = useRef(currentFingerprint);
+
+  useEffect(() => {
+    currentFingerprintRef.current = currentFingerprint;
+  }, [currentFingerprint]);
 
   useEffect(() => {
     if (isEditMode || dirtyCheckReadyRef.current) return;
@@ -270,7 +275,7 @@ export const ProjectFormPage = () => {
             ? error.message
             : "Failed to load project details.",
         );
-        baselineFingerprintRef.current = currentFingerprint;
+        baselineFingerprintRef.current = currentFingerprintRef.current;
         dirtyCheckReadyRef.current = true;
         setDirty(false);
       } finally {
@@ -280,7 +285,7 @@ export const ProjectFormPage = () => {
 
     void load();
     return () => { mounted = false; };
-  }, [currentFingerprint, isEditMode, projectId, setDirty]);
+  }, [isEditMode, projectId, setDirty]);
 
   const validateRequired = (mode: SaveMode): boolean =>
     projectName.trim().length > 0 &&

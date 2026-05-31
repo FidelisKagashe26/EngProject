@@ -1,4 +1,4 @@
-import { LogIn, Menu, MessageSquare, X, Home, Image, Info, Mail, Wrench, Zap, Droplet, Camera, Building2 } from "lucide-react";
+import { LogIn, Menu, MessageSquare, X, Home, Image, Info, Mail, Wrench, Zap, Droplet, Camera, Building2, Phone } from "lucide-react";
 import { useState } from "react";
 import {
   FaEnvelope,
@@ -6,7 +6,6 @@ import {
   FaInstagram,
   FaLinkedinIn,
   FaLocationDot,
-  FaPhone,
   FaWhatsapp,
   FaXTwitter,
 } from "react-icons/fa6";
@@ -69,7 +68,7 @@ export const LandingLayout = () => {
           </div>
 
           {/* Desktop CTA */}
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="hidden items-center gap-2 md:flex">
             <Link
               className="flex items-center gap-1.5 rounded-lg bg-[#f28c28] px-4 py-2 text-sm font-bold text-slate-900 no-underline transition hover:bg-orange-500"
               to="/contact"
@@ -77,13 +76,29 @@ export const LandingLayout = () => {
               <MessageSquare size={15} />
               Get a Quote
             </Link>
-            <Link
-              className="flex items-center gap-1.5 rounded-lg bg-[#0b2a53] px-4 py-2 text-sm font-semibold text-white no-underline transition hover:bg-[#123b71]"
-              to="/login"
-            >
-              <LogIn size={15} />
-              Client Login
-            </Link>
+            {/* Call and WhatsApp icons */}
+            {settings.phone_main && (
+              <a
+                aria-label="Call"
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#f28c28] text-white no-underline transition hover:bg-orange-500"
+                href={`tel:${settings.phone_main}`}
+                title={settings.phone_main}
+              >
+                <Phone size={18} className="stroke-[2.5]" />
+              </a>
+            )}
+            {settings.phone_whatsapp && (
+              <a
+                aria-label="WhatsApp"
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500 text-white no-underline transition hover:bg-green-600"
+                href={`https://wa.me/${settings.phone_whatsapp.replace(/\D/g, "")}`}
+                rel="noopener noreferrer"
+                target="_blank"
+                title={settings.phone_whatsapp}
+              >
+                <FaWhatsapp size={18} />
+              </a>
+            )}
           </div>
 
           {/* Hamburger */}
@@ -124,13 +139,6 @@ export const LandingLayout = () => {
                   to="/contact"
                 >
                   <MessageSquare size={15} /> Get a Quote
-                </Link>
-                <Link
-                  className="flex items-center justify-center gap-2 rounded-lg bg-[#0b2a53] px-4 py-3 text-sm font-semibold text-white no-underline"
-                  onClick={() => setOpen(false)}
-                  to="/login"
-                >
-                  <LogIn size={15} /> Client Login
                 </Link>
               </div>
             </div>
@@ -219,7 +227,7 @@ export const LandingLayout = () => {
                         className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
                         href={`tel:${settings.phone_main}`}
                       >
-                        <FaPhone className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                        <Phone className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" strokeWidth={2.5} />
                         {settings.phone_main}
                       </a>
                     </li>
@@ -286,9 +294,17 @@ export const LandingLayout = () => {
         <div className="relative border-t border-white/10">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-[#7992c1] sm:flex-row sm:px-6 lg:px-8">
             <p>© {new Date().getFullYear()} DREGGAM Engineering. Precision in every detail.</p>
-            <div className="flex gap-6">
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-end">
               <a className="no-underline transition hover:text-[#f28c28]" href="#">Privacy Policy</a>
               <a className="no-underline transition hover:text-[#f28c28]" href="#">Terms of Service</a>
+              <Link
+                aria-label="Admin panel login"
+                className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/10 px-3 py-1.5 font-semibold text-[#adc7f9] no-underline transition hover:border-[#f28c28] hover:bg-[#f28c28] hover:text-white"
+                to="/login"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                Admin Login
+              </Link>
             </div>
           </div>
         </div>

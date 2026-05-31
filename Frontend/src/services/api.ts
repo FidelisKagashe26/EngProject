@@ -584,6 +584,10 @@ export interface MeResponse {
   user: AuthUser;
 }
 
+export interface UpdateMyProfileResponse extends MeResponse {
+  token: string;
+}
+
 export interface UpdateMyProfilePayload {
   fullName: string;
   email: string;
@@ -1121,7 +1125,7 @@ export const api = {
     }),
   me: () => apiRequest<MeResponse>("/auth/me", { notifyError: false }),
   updateMyProfile: (payload: UpdateMyProfilePayload) =>
-    apiRequest<MeResponse>("/auth/me", {
+    apiRequest<UpdateMyProfileResponse>("/auth/me", {
       method: "PUT",
       body: JSON.stringify(payload),
       notifyError: false,

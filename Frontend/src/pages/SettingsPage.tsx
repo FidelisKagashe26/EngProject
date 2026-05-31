@@ -957,7 +957,7 @@ export const SettingsPage = () => {
     setMyAccountSaving(true);
     try {
       const response = await api.updateMyProfile(payload);
-      updateCurrentUser(response.user);
+      updateCurrentUser(response.user, response.token);
       setMyFullName(response.user.fullName);
       setMyEmail(response.user.email);
       markSaved();

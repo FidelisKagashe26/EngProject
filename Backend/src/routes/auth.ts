@@ -604,6 +604,14 @@ router.put(
     );
 
     const updatedUser = updatedResult.rows[0];
+    const tokenPayload: AuthTokenPayload = {
+      userId: updatedUser.id,
+      companyId: updatedUser.company_id,
+      email: updatedUser.email,
+      fullName: updatedUser.full_name,
+      role: updatedUser.role,
+    };
+    const token = signAuthToken(tokenPayload);
 
     await db.query(
       `
@@ -618,7 +626,7 @@ router.put(
       ],
     );
 
-    res.json({ user: mapUser(updatedUser) });
+    res.json({ token, user: mapUser(updatedUser) });
   }),
 );
 

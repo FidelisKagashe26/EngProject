@@ -29,6 +29,16 @@ const persistToken = (token: string, remember: boolean): void => {
   localStorage.removeItem(LOCAL_TOKEN_KEY);
 };
 
+const replaceStoredToken = (token: string): void => {
+  if (localStorage.getItem(LOCAL_TOKEN_KEY)) {
+    localStorage.setItem(LOCAL_TOKEN_KEY, token);
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    return;
+  }
+
+  sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+};
+
 const clearTokenStorage = (): void => {
   localStorage.removeItem(LOCAL_TOKEN_KEY);
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
@@ -46,7 +56,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: (input: LoginInput) => Promise<void>;
   logout: () => Promise<void>;
-  updateCurrentUser: (nextUser: AuthUser) => void;
+  updateCurrentUser: (nextUser: AuthUser, nextToken?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -117,7 +127,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [resetAuth]);
 
-  const updateCurrentUser = useCallback((nextUser: AuthUser) => {
+  const updateCurrentUser = useCallback((nextUser: AuthUser, nextToken?: string) => {
+    if (nextToken) {
+      setApiAuthToken(nextToken);
+      replaceStoredToken(nextToken);
+    }
     setUser(nextUser);
   }, []);
 

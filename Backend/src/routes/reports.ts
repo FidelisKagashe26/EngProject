@@ -485,18 +485,14 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
     }>(
       `
       SELECT
-        cp.project_id,
+        p.id AS project_id,
         p.name AS project_name,
-        COALESCE(SUM(cp.amount_expected), 0)::text AS total_expected,
-        COALESCE(SUM(cp.amount_received), 0)::text AS total_received,
-        COALESCE(SUM(cp.amount_expected - cp.amount_received), 0)::text AS total_balance
-      FROM engicost.client_payments cp
-      LEFT JOIN engicost.projects p ON p.id = cp.project_id
-      WHERE cp.company_id = $1
-        AND cp.is_deleted = FALSE
-        AND cp.approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
-      GROUP BY cp.project_id, p.name
-      ORDER BY SUM(cp.amount_expected) DESC
+        p.contract_value::text AS total_expected,
+        p.amount_received::text AS total_received,
+        GREATEST(p.contract_value - p.amount_received, 0)::text AS total_balance
+      FROM engicost.projects p
+      WHERE p.company_id = $1
+      ORDER BY p.contract_value DESC
       `,
       [companyId],
     ),
@@ -520,9 +516,16 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
     ),
     db.query<{ month: string; total: string }>(
       `
-      WITH months AS (
+      WITH anchor AS (
+        SELECT DATE_TRUNC('month', COALESCE(MAX(expense_date), CURRENT_DATE)) AS anchor_month
+        FROM engicost.expenses
+        WHERE company_id = $1
+          AND is_deleted = FALSE
+          AND approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
+      ),
+      months AS (
         SELECT
-          DATE_TRUNC('month', CURRENT_DATE) - (INTERVAL '1 month' * month_offset) AS month_start
+          (SELECT anchor_month FROM anchor) - (INTERVAL '1 month' * month_offset) AS month_start
         FROM generate_series(11, 0, -1) AS month_offset
       )
       SELECT
@@ -1089,6 +1092,113 @@ const writeTable = <RowType>(
   doc.moveDown(0.5);
 };
 
+type CardField<RowType> = {
+  label: string;
+  value: (row: RowType, index: number) => string;
+};
+
+// Renders each record as a bordered card with stacked label/value rows that
+// wrap to full width (no truncation) — used instead of wide tables where long
+// text (names, descriptions) would otherwise be clipped.
+const writeRecordCards = <RowType>(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  rows: RowType[],
+  fields: CardField<RowType>[],
+  headingField?: (row: RowType, index: number) => string,
+): void => {
+  writeSectionTitle(doc, title);
+  if (rows.length === 0) {
+    writeNoData(doc);
+    return;
+  }
+
+  const left = getContentLeft(doc);
+  const width = getContentWidth(doc);
+  const padX = 10;
+  const padY = 9;
+  const rowGap = 4;
+  const colGap = 8;
+  const innerWidth = width - padX * 2;
+  const labelWidth = Math.round(innerWidth * 0.34);
+  const valueWidth = innerWidth - labelWidth - colGap;
+  const labelSize = 9.5;
+  const valueSize = 11;
+  const headingSize = 12;
+
+  rows.forEach((row, rowIndex) => {
+    const heading = headingField ? sanitizePdfText(headingField(row, rowIndex)) : "";
+    const cells = fields.map((field) => ({
+      label: field.label.toUpperCase(),
+      value: sanitizePdfText(field.value(row, rowIndex)) || "-",
+    }));
+
+    // Measure the card height first so we can keep it on one page.
+    let innerHeight = 0;
+    if (heading) {
+      doc.font("Times-Bold").fontSize(headingSize);
+      innerHeight += doc.heightOfString(heading, { width: innerWidth }) + 6;
+    }
+    const measured = cells.map((cell) => {
+      doc.font("Times-Bold").fontSize(labelSize);
+      const labelHeight = doc.heightOfString(cell.label, { width: labelWidth });
+      doc.font("Times-Roman").fontSize(valueSize);
+      const valueHeight = doc.heightOfString(cell.value, { width: valueWidth });
+      return { ...cell, height: Math.max(labelHeight, valueHeight) };
+    });
+    measured.forEach((cell) => {
+      innerHeight += cell.height + rowGap;
+    });
+    const cardHeight = padY * 2 + innerHeight;
+
+    if (doc.y + cardHeight > getBottomLimit(doc)) {
+      doc.addPage();
+    }
+
+    const cardY = doc.y;
+    doc
+      .save()
+      .roundedRect(left, cardY, width, cardHeight, 6)
+      .fillColor(REPORT_COLORS.slate100)
+      .fill()
+      .restore();
+    doc
+      .save()
+      .roundedRect(left, cardY, width, cardHeight, 6)
+      .lineWidth(0.8)
+      .strokeColor(REPORT_COLORS.slate200)
+      .stroke()
+      .restore();
+
+    let cursorY = cardY + padY;
+    if (heading) {
+      doc
+        .font("Times-Bold")
+        .fontSize(headingSize)
+        .fillColor(REPORT_COLORS.navy)
+        .text(heading, left + padX, cursorY, { width: innerWidth });
+      cursorY = doc.y + 6;
+    }
+    measured.forEach((cell) => {
+      doc
+        .font("Times-Bold")
+        .fontSize(labelSize)
+        .fillColor(REPORT_COLORS.slate600)
+        .text(cell.label, left + padX, cursorY, { width: labelWidth });
+      doc
+        .font("Times-Roman")
+        .fontSize(valueSize)
+        .fillColor(REPORT_COLORS.slate900)
+        .text(cell.value, left + padX + labelWidth + colGap, cursorY, { width: valueWidth });
+      cursorY += cell.height + rowGap;
+    });
+
+    doc.y = cardY + cardHeight + 6;
+  });
+
+  doc.moveDown(0.3);
+};
+
 const renderReportHeader = (
   doc: PDFKit.PDFDocument,
   branding: ReportBranding,
@@ -1259,123 +1369,136 @@ const renderSummaryBlock = (doc: PDFKit.PDFDocument, payload: ReportsPayload): v
 };
 
 const renderProjectCostSummary = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Project Cost Summary",
     payload.projectCostSummary,
     [
-      { header: "Project", widthRatio: 0.34, value: (row) => row.projectName },
-      { header: "Income", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.amountReceived) },
-      { header: "Expenses", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalSpent) },
-      { header: "Profit/Loss", widthRatio: 0.18, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
-      { header: "Status", widthRatio: 0.10, value: (row) => row.status },
+      { label: "Contract Value", value: (row) => formatCurrency(row.contractValue) },
+      { label: "Income Received", value: (row) => formatCurrency(row.amountReceived) },
+      { label: "Total Expenses", value: (row) => formatCurrency(row.totalSpent) },
+      { label: "Profit / Loss", value: (row) => formatCurrency(row.estimatedProfitLoss) },
+      { label: "Pending Client Payment", value: (row) => formatCurrency(row.pendingClientPayments) },
+      { label: "Status", value: (row) => row.status },
     ],
+    (row) => row.projectName,
   );
 };
 
 const renderIncomeExpense = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
+    doc,
+    "Financial Totals",
+    [payload.totals],
+    [
+      { label: "Total Income Received", value: (totals) => formatCurrency(totals.amountReceived) },
+      { label: "Total Expenses", value: (totals) => formatCurrency(totals.totalSpent) },
+      { label: "Net Profit / Loss", value: (totals) => formatCurrency(totals.estimatedProfitLoss) },
+    ],
+  );
+
+  writeRecordCards(
     doc,
     "Income vs Expense Statement",
     payload.projectCostSummary,
     [
-      { header: "Project", widthRatio: 0.36, value: (row) => row.projectName },
-      { header: "Income", widthRatio: 0.22, align: "right", value: (row) => formatCurrency(row.amountReceived) },
-      { header: "Expenses", widthRatio: 0.22, align: "right", value: (row) => formatCurrency(row.totalSpent) },
-      { header: "Net", widthRatio: 0.20, align: "right", value: (row) => formatCurrency(row.estimatedProfitLoss) },
+      { label: "Income", value: (row) => formatCurrency(row.amountReceived) },
+      { label: "Expenses", value: (row) => formatCurrency(row.totalSpent) },
+      { label: "Net", value: (row) => formatCurrency(row.estimatedProfitLoss) },
     ],
+    (row) => row.projectName,
   );
 
   if (payload.monthlyExpenseTrend.length > 0) {
-    writeTable(
+    writeRecordCards(
       doc,
       "Monthly Expense Trend",
       payload.monthlyExpenseTrend,
       [
-        { header: "Month", widthRatio: 0.48, value: (row) => row.month },
-        { header: "Total Expense", widthRatio: 0.52, align: "right", value: (row) => formatCurrency(row.total) },
+        { label: "Total Expense", value: (row) => formatCurrency(row.total) },
       ],
+      (row) => row.month,
     );
   }
 };
 
 const renderPayments = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Client Payment Collection Report",
     payload.paymentByProject,
     [
-      { header: "Project", widthRatio: 0.27, value: (row) => row.projectName },
-      { header: "Expected", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalExpected) },
-      { header: "Received", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalReceived) },
-      { header: "Balance", widthRatio: 0.19, align: "right", value: (row) => formatCurrency(row.totalBalance) },
+      { label: "Total Expected (Contract)", value: (row) => formatCurrency(row.totalExpected) },
+      { label: "Total Received", value: (row) => formatCurrency(row.totalReceived) },
+      { label: "Outstanding Balance", value: (row) => formatCurrency(row.totalBalance) },
       {
-        header: "Collection",
-        widthRatio: 0.16,
-        align: "right",
+        label: "Collection Rate",
         value: (row) => (row.totalExpected > 0 ? `${Math.round((row.totalReceived / row.totalExpected) * 100)}%` : "0%"),
       },
     ],
+    (row) => row.projectName,
   );
 };
 
 const renderLabor = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Labor Cost Report",
     payload.laborDetails,
     [
-      { header: "Worker", widthRatio: 0.23, value: (row) => row.workerName },
-      { header: "Project", widthRatio: 0.21, value: (row) => row.projectName },
-      { header: "Payment Type", widthRatio: 0.14, value: (row) => row.paymentType },
-      { header: "Rate", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.rateAmount) },
-      { header: "Paid", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.totalPaid) },
-      { header: "Outstanding", widthRatio: 0.14, align: "right", value: (row) => formatCurrency(row.outstandingAmount) },
+      { label: "Project / Site", value: (row) => row.projectName },
+      { label: "Payment Type", value: (row) => row.paymentType },
+      { label: "Rate", value: (row) => formatCurrency(row.rateAmount) },
+      { label: "Total Paid", value: (row) => formatCurrency(row.totalPaid) },
+      { label: "Outstanding", value: (row) => formatCurrency(row.outstandingAmount) },
+      { label: "Status", value: (row) => row.status },
     ],
+    (row) => row.workerName,
   );
 };
 
 const renderMaterials = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Material Purchase Report",
     payload.materialPurchaseDetails,
     [
-      { header: "Date", widthRatio: 0.14, value: (row) => formatDateForReport(row.purchaseDate) },
-      { header: "Project", widthRatio: 0.18, value: (row) => row.projectName },
-      { header: "Material", widthRatio: 0.26, value: (row) => row.materialName },
-      { header: "Qty", widthRatio: 0.10, align: "right", value: (row) => row.quantityPurchased.toLocaleString("en-TZ") },
-      { header: "Unit Cost", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.unitCost) },
-      { header: "Total", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.totalCost) },
+      { label: "Date", value: (row) => formatDateForReport(row.purchaseDate) },
+      { label: "Project / Site", value: (row) => row.projectName },
+      { label: "Supplier", value: (row) => row.supplierName },
+      { label: "Quantity", value: (row) => row.quantityPurchased.toLocaleString("en-TZ") },
+      { label: "Unit Cost", value: (row) => formatCurrency(row.unitCost) },
+      { label: "Total Cost", value: (row) => formatCurrency(row.totalCost) },
     ],
+    (row) => row.materialName,
   );
 };
 
 const renderExpenseCategories = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Expense Category Report",
     payload.expenseByCategory,
     [
-      { header: "Category", widthRatio: 0.46, value: (row) => row.category },
-      { header: "Entries", widthRatio: 0.20, align: "right", value: (row) => String(row.count) },
-      { header: "Total", widthRatio: 0.34, align: "right", value: (row) => formatCurrency(row.total) },
+      { label: "Entries", value: (row) => String(row.count) },
+      { label: "Total Amount", value: (row) => formatCurrency(row.total) },
     ],
+    (row) => row.category,
   );
 };
 
 const renderBudgetVariance = (doc: PDFKit.PDFDocument, payload: ReportsPayload): void => {
-  writeTable(
+  writeRecordCards(
     doc,
     "Budget Variance Report",
     payload.budgetVariance,
     [
-      { header: "Project", widthRatio: 0.31, value: (row) => row.projectName },
-      { header: "Contract", widthRatio: 0.23, align: "right", value: (row) => formatCurrency(row.contractValue) },
-      { header: "Spent", widthRatio: 0.20, align: "right", value: (row) => formatCurrency(row.totalSpent) },
-      { header: "Variance", widthRatio: 0.16, align: "right", value: (row) => formatCurrency(row.variance) },
-      { header: "Used", widthRatio: 0.10, align: "right", value: (row) => `${row.variancePct}%` },
+      { label: "Contract Value", value: (row) => formatCurrency(row.contractValue) },
+      { label: "Total Spent", value: (row) => formatCurrency(row.totalSpent) },
+      { label: "Variance", value: (row) => formatCurrency(row.variance) },
+      { label: "Budget Used", value: (row) => `${row.variancePct}%` },
     ],
+    (row) => row.projectName,
   );
 };
 
@@ -1445,7 +1568,11 @@ const buildPdfReport = (
         filters,
       );
 
-      renderSummaryBlock(doc, payload);
+      // Executive Summary belongs only on the all-in-one comprehensive report.
+      // Specific reports show just their own relevant figures (no repeated block).
+      if (reportType === "comprehensive") {
+        renderSummaryBlock(doc, payload);
+      }
 
       if (reportType === "comprehensive" || reportType === "project-cost-summary") {
         renderProjectCostSummary(doc, payload);

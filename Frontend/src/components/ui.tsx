@@ -147,10 +147,27 @@ export const KpiCard = ({
   </article>
 );
 
-export const ProgressBar = ({ value }: { value: number }) => {
+export const ProgressBar = ({
+  value,
+  positive = false,
+}: {
+  value: number;
+  // positive: higher is good (e.g. payment collection) → green when high.
+  // default: higher is concerning (e.g. budget used) → red when high.
+  positive?: boolean;
+}) => {
   const safe = Math.max(0, Math.min(100, value));
-  const color =
-    safe >= 85 ? "bg-red-500" : safe >= 65 ? "bg-amber-500" : "bg-[#0b2a53]";
+  const color = positive
+    ? safe >= 85
+      ? "bg-emerald-500"
+      : safe >= 50
+        ? "bg-amber-500"
+        : "bg-[#0b2a53]"
+    : safe >= 85
+      ? "bg-red-500"
+      : safe >= 65
+        ? "bg-amber-500"
+        : "bg-[#0b2a53]";
   return (
     <div className="flex items-center gap-2">
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
@@ -704,6 +721,71 @@ export const ConfirmModal = ({
           </button>
           <button className={confirmClassName} onClick={onConfirm} type="button">
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export type DetailRow = {
+  label: string;
+  value: ReactNode;
+  full?: boolean;
+};
+
+export const DetailModal = ({
+  open,
+  title,
+  subtitle,
+  onClose,
+  rows,
+  footer,
+}: {
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  rows: DetailRow[];
+  footer?: ReactNode;
+}) => {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-80 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            {subtitle && <p className="mt-1 break-words text-xs text-slate-500">{subtitle}</p>}
+          </div>
+          <button
+            aria-label="Close"
+            className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div className={row.full ? "sm:col-span-2" : "min-w-0"} key={row.label}>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                {row.label}
+              </dt>
+              <dd className="mt-0.5 wrap-break-word text-sm text-slate-800">
+                {row.value === null || row.value === undefined || row.value === "" ? "-" : row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
+          {footer}
+          <button className="btn-secondary" onClick={onClose} type="button">
+            Close
           </button>
         </div>
       </div>

@@ -3,11 +3,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
+  DetailModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
   SectionTitle,
   SkeletonTable,
+  StatusBadge,
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
@@ -55,6 +57,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState("");
+  const [viewExpense, setViewExpense] = useState<ExpenseApiRecord | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<ExpenseApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -371,6 +374,9 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
                       </td>
                       <td>
                         <div className="flex gap-2">
+                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewExpense(item)} type="button">
+                            View
+                          </button>
                           <button className="btn-secondary py-1 px-3 text-xs" onClick={() => openEditModal(item)} type="button">
                             Edit
                           </button>
@@ -499,6 +505,24 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
           </SurfaceCard>
         </div>
       )}
+      <DetailModal
+        onClose={() => setViewExpense(null)}
+        open={viewExpense !== null}
+        rows={viewExpense ? [
+          { label: "Project / Site", value: viewExpense.projectName },
+          { label: "Category", value: viewExpense.category },
+          { label: "Amount", value: formatTzs(viewExpense.amount) },
+          { label: "Date", value: formatDate(viewExpense.date) },
+          { label: "Paid By", value: viewExpense.paidBy },
+          { label: "Payment Method", value: viewExpense.paymentMethod },
+          { label: "Receipt Reference", value: viewExpense.receiptRef || "-" },
+          { label: "Status", value: <StatusBadge status={viewExpense.status} /> },
+          { label: "Description", value: viewExpense.description, full: true },
+          { label: "Notes", value: viewExpense.notes || "-", full: true },
+        ] : []}
+        subtitle={viewExpense ? `${viewExpense.category} expense` : ""}
+        title="Expense Details"
+      />
       <ConfirmModal
         cancelLabel="Cancel"
         confirmClassName="btn-danger"

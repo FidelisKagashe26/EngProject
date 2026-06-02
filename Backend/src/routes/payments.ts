@@ -19,7 +19,9 @@ const paymentSchema = z.object({
   clientName: z.string().min(2),
   paymentType: z.enum(["Advance", "Milestone", "Stage", "Final", "Other"]),
   milestone: z.string().optional().default(""),
-  amountExpected: z.number().nonnegative(),
+  // amountExpected is legacy; the page is now a received-money transaction log.
+  // When omitted it defaults to the received amount (see POST handler).
+  amountExpected: z.number().nonnegative().optional(),
   amountReceived: z.number().nonnegative(),
   paymentDate: z.string().date(),
   paymentMethod: z.string().min(2),
@@ -90,11 +92,12 @@ router.get(
           COALESCE(SUM(cp.amount_received), 0)::text AS total_received,
           COALESCE(SUM(cp.amount_expected - cp.amount_received), 0)::text AS pending_receivables,
           COALESCE((
-            SELECT SUM(amount)
-            FROM engicost.expenses
+            -- Total cash outflow = all project execution spending (labour,
+            -- materials, equipment AND other expenses), which is already
+            -- aggregated into projects.total_spent — not just the expenses table.
+            SELECT SUM(total_spent)
+            FROM engicost.projects
             WHERE company_id = $1
-              AND is_deleted = FALSE
-              AND approval_status IN ${APPLIED_APPROVAL_STATUS_SQL}
           ), 0)::text AS total_outflow
         FROM engicost.client_payments cp
         WHERE cp.company_id = $1
@@ -170,9 +173,12 @@ router.post(
     const companyId = await getSingleTenantCompanyId();
     const parsed = paymentSchema.parse({
       ...req.body,
-      amountExpected: toMoney(req.body.amountExpected),
+      amountExpected:
+        req.body.amountExpected !== undefined ? toMoney(req.body.amountExpected) : undefined,
       amountReceived: toMoney(req.body.amountReceived),
     });
+    // Transactions-only model: expected mirrors received when not supplied.
+    const amountExpected = parsed.amountExpected ?? parsed.amountReceived;
     const needsApproval = requiresApproval("client_payments", parsed.amountReceived);
     const approvalStatus = getApprovalStatusForAmount("client_payments", parsed.amountReceived);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "System";
@@ -215,7 +221,7 @@ router.post(
         parsed.clientName,
         parsed.paymentType,
         parsed.milestone,
-        parsed.amountExpected,
+        amountExpected,
         parsed.amountReceived,
         parsed.paymentDate,
         parsed.paymentMethod,

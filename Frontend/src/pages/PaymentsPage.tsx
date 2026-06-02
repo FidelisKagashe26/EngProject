@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
+  DetailModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
+  ProgressBar,
   SectionTitle,
   SkeletonTable,
+  StatusBadge,
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
@@ -20,34 +23,18 @@ import {
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
 
-const paymentTabs = [
-  "Client Payments",
-  "Cash Outflows",
-  "Pending Payments",
-  "Milestone Payments",
+const paymentMethodOptions = [
+  "Not specified",
+  "Bank Transfer",
+  "Cash",
+  "Mobile Money",
+  "Cheque",
 ] as const;
-
-const resolveNextExpectedPayment = (
-  rows: PaymentApiRecord[],
-  fallback: PaymentsResponse["topCards"]["nextExpectedPayment"],
-) => {
-  const fromRows = [...rows]
-    .filter((row) => row.balance > 0)
-    .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))[0];
-  if (fromRows) return { amount: fromRows.balance, projectName: fromRows.projectName, paymentDate: fromRows.paymentDate };
-  if (!fallback) return null;
-  return {
-    amount: (Number(fallback.amount_expected) || 0) - (Number(fallback.amount_received) || 0),
-    projectName: fallback.project_name ?? "Unknown Project",
-    paymentDate: fallback.payment_date ?? "",
-  };
-};
 
 export const PaymentsPage = () => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
-  const [activeTab, setActiveTab] = useState<(typeof paymentTabs)[number]>("Client Payments");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -66,9 +53,13 @@ export const PaymentsPage = () => {
     projectBalances: [],
   });
 
+  // Transactions table filter
+  const [tableProjectFilter, setTableProjectFilter] = useState(projectFromQuery || "All");
+
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState("");
+  const [viewPayment, setViewPayment] = useState<PaymentApiRecord | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<PaymentApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -77,10 +68,9 @@ export const PaymentsPage = () => {
   const [clientName, setClientName] = useState("");
   const [paymentType, setPaymentType] = useState<"Advance" | "Milestone" | "Stage" | "Final" | "Other">("Advance");
   const [milestone, setMilestone] = useState("");
-  const [amountExpected, setAmountExpected] = useState("");
   const [amountReceived, setAmountReceived] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Bank Transfer");
+  const [paymentMethod, setPaymentMethod] = useState("Not specified");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [status, setStatus] = useState("Received");
   const [notes, setNotes] = useState("");
@@ -131,41 +121,56 @@ export const PaymentsPage = () => {
     setCashFlow(response.cashFlow);
   };
 
-  const balance = useMemo(() => Math.max((Number(amountExpected) || 0) - (Number(amountReceived) || 0), 0), [amountExpected, amountReceived]);
+  // ── Project collection totals (received vs still outstanding) ──
+  const projectTotals = useMemo(
+    () =>
+      projects.reduce(
+        (acc, p) => {
+          acc.contract += p.contractValue;
+          acc.received += p.amountReceived;
+          acc.outstanding += p.pendingClientPayments;
+          return acc;
+        },
+        { contract: 0, received: 0, outstanding: 0 },
+      ),
+    [projects],
+  );
+
+  const collectionRate = projectTotals.contract > 0
+    ? Math.round((projectTotals.received / projectTotals.contract) * 100)
+    : 0;
+  const outflow = topCards.totalCashOutflow;
+  const netCashPosition = projectTotals.received - outflow;
+
+  const projectTracker = useMemo(
+    () =>
+      [...projects]
+        .filter((p) => p.contractValue > 0 || p.amountReceived > 0)
+        .sort((a, b) => b.pendingClientPayments - a.pendingClientPayments),
+    [projects],
+  );
 
   const filteredRows = useMemo(() => {
-    if (activeTab === "Pending Payments") return paymentRows.filter((r) => r.balance > 0);
-    if (activeTab === "Milestone Payments") return paymentRows.filter((r) => r.paymentType === "Milestone" || r.paymentType === "Stage");
-    return paymentRows;
-  }, [activeTab, paymentRows]);
+    if (tableProjectFilter === "All") return paymentRows;
+    return paymentRows.filter((row) => row.projectId === tableProjectFilter);
+  }, [tableProjectFilter, paymentRows]);
 
   const paymentPagination = useTablePagination(filteredRows);
 
-  const nextExpectedPayment = useMemo(
-    () => resolveNextExpectedPayment(paymentRows, topCards.nextExpectedPayment),
-    [paymentRows, topCards.nextExpectedPayment],
-  );
-
   const income = cashFlow.incomeVsOutflow.income;
-  const outflow = cashFlow.incomeVsOutflow.outflow;
-  const totalFlow = income + outflow;
+  const outflowBar = cashFlow.incomeVsOutflow.outflow;
+  const totalFlow = income + outflowBar;
   const incomeWidth = totalFlow > 0 ? (income / totalFlow) * 100 : 0;
-  const outflowWidth = totalFlow > 0 ? (outflow / totalFlow) * 100 : 0;
-
-  const pendingPayments = useMemo(
-    () => paymentRows.filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance).slice(0, 3),
-    [paymentRows],
-  );
+  const outflowWidth = totalFlow > 0 ? (outflowBar / totalFlow) * 100 : 0;
 
   const resetForm = () => {
     setEditingPaymentId("");
     setClientName("");
     setPaymentType("Advance");
     setMilestone("");
-    setAmountExpected("");
     setAmountReceived("");
     setPaymentDate("");
-    setPaymentMethod("Bank Transfer");
+    setPaymentMethod("Not specified");
     setReferenceNumber("");
     setStatus("Received");
     setNotes("");
@@ -174,6 +179,11 @@ export const PaymentsPage = () => {
 
   const openAddModal = () => {
     resetForm();
+    if (projects.length > 0) {
+      const first = projects.find((p) => p.id === projectId) ?? projects[0];
+      setProjectId(first.id);
+      setClientName(first.clientName);
+    }
     setShowAddModal(true);
   };
 
@@ -188,10 +198,9 @@ export const PaymentsPage = () => {
     setClientName(payment.client);
     setPaymentType(payment.paymentType as "Advance" | "Milestone" | "Stage" | "Final" | "Other");
     setMilestone(payment.milestone);
-    setAmountExpected(String(payment.amountExpected));
     setAmountReceived(String(payment.amountReceived));
     setPaymentDate(payment.paymentDate);
-    setPaymentMethod(payment.paymentMethod);
+    setPaymentMethod(payment.paymentMethod || "Not specified");
     setReferenceNumber(payment.referenceNumber);
     setStatus(payment.status);
     setNotes(payment.notes);
@@ -215,11 +224,11 @@ export const PaymentsPage = () => {
     if (
       projectId.trim().length === 0 ||
       clientName.trim().length < 2 ||
-      (Number(amountExpected) || 0) <= 0 ||
+      (Number(amountReceived) || 0) <= 0 ||
       paymentDate.trim().length === 0 ||
       paymentMethod.trim().length < 2
     ) {
-      setError("Please provide project, client, amount expected, payment date and payment method.");
+      setError("Please provide project, client, amount received, payment date and payment method.");
       return;
     }
     setSaving(true);
@@ -240,13 +249,15 @@ export const PaymentsPage = () => {
         attachmentFields.attachmentType = paymentAttachmentFile.type || uploaded.mimetype;
       }
 
+      const received = Number(amountReceived) || 0;
       const payload = {
         projectId,
         clientName: clientName.trim(),
         paymentType,
         milestone: milestone.trim(),
-        amountExpected: Number(amountExpected) || 0,
-        amountReceived: Number(amountReceived) || 0,
+        // Transactions-only log: expected mirrors the received amount.
+        amountExpected: received,
+        amountReceived: received,
         paymentDate,
         paymentMethod: paymentMethod.trim(),
         referenceNumber: referenceNumber.trim(),
@@ -289,71 +300,117 @@ export const PaymentsPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Track incoming client funds versus outgoing project execution payments."
+        subtitle="Track client funds received per project — see whether each project has paid in full or still has a balance."
         title="Payments & Cash Flow"
       />
 
-      {/* Summary cards */}
+      {/* Summary cards: received vs outstanding */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Total Received">
-          <p className="text-2xl font-bold text-slate-900">{formatTzs(topCards.totalReceived)}</p>
+          <p className="text-2xl font-bold text-emerald-700">{formatTzs(projectTotals.received)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Pending Receivables">
-          <p className="text-2xl font-bold text-amber-700">{formatTzs(topCards.pendingReceivables)}</p>
+        <SurfaceCard title="Outstanding (Still Expected)">
+          <p className="text-2xl font-bold text-amber-700">{formatTzs(projectTotals.outstanding)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Collection Rate">
+          <p className="text-2xl font-bold text-[#0b2a53]">{collectionRate}%</p>
+          <p className="mt-1 text-xs text-slate-500">Received of total contract value</p>
         </SurfaceCard>
         <SurfaceCard title="Total Cash Outflow">
-          <p className="text-2xl font-bold text-slate-900">{formatTzs(topCards.totalCashOutflow)}</p>
+          <p className="text-2xl font-bold text-slate-900">{formatTzs(outflow)}</p>
         </SurfaceCard>
         <SurfaceCard title="Net Cash Position">
-          <p className="text-2xl font-bold text-emerald-700">{formatTzs(topCards.netCashPosition)}</p>
-        </SurfaceCard>
-        <SurfaceCard title="Next Expected Payment">
-          <p className="text-lg font-bold text-[#0b2a53]">{formatTzs(nextExpectedPayment?.amount ?? 0)}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {nextExpectedPayment
-              ? `${nextExpectedPayment.projectName} - ${nextExpectedPayment.paymentDate ? formatDate(nextExpectedPayment.paymentDate) : "No date"}`
-              : "No pending expected payments"}
+          <p className={`text-2xl font-bold ${netCashPosition >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+            {formatTzs(netCashPosition)}
           </p>
         </SurfaceCard>
       </div>
 
-      {/* Tabs */}
-      <SurfaceCard>
-        <div className="flex flex-wrap gap-2">
-          {paymentTabs.map((tab) => (
-            <button
-              className={tab === activeTab
-                ? "rounded-full bg-[#0b2a53] px-3 py-1.5 text-xs font-semibold text-white"
-                : "rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600"}
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              type="button"
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
+      {/* Project collection tracker */}
+      <SurfaceCard
+        subtitle="Per project: how much has been received and how much is still expected."
+        title="Project Collection Tracker"
+      >
+        {loading ? (
+          <SkeletonTable rows={3} />
+        ) : projectTracker.length === 0 ? (
+          <EmptyState description="No projects to track yet." title="No projects" />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {projectTracker.map((project) => {
+              const rate = project.contractValue > 0
+                ? Math.round((project.amountReceived / project.contractValue) * 100)
+                : 0;
+              return (
+                <div
+                  className="rounded-xl border border-slate-200 bg-white p-4"
+                  key={`tracker-${project.id}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{project.name}</p>
+                      <p className="truncate text-xs text-slate-500">{project.clientName}</p>
+                    </div>
+                    <span className={`shrink-0 text-xs font-semibold ${project.pendingClientPayments <= 0 ? "text-emerald-700" : "text-amber-700"}`}>
+                      {project.pendingClientPayments <= 0 ? "Fully paid" : "Pending"}
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <ProgressBar positive value={rate} />
+                  </div>
+                  <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <dt className="text-slate-400">Contract</dt>
+                      <dd className="font-semibold text-slate-700">{formatTzs(project.contractValue)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-400">Received</dt>
+                      <dd className="font-semibold text-emerald-700">{formatTzs(project.amountReceived)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-400">Outstanding</dt>
+                      <dd className="font-semibold text-amber-700">{formatTzs(project.pendingClientPayments)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </SurfaceCard>
 
-      {/* Add Payment button - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
+      {/* Transactions header: filter + add */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+        <label className="form-field sm:w-72">
+          <span className="text-sm">Filter by project</span>
+          <GuiSelect
+            className="input-field"
+            onChange={(e) => setTableProjectFilter(e.target.value)}
+            value={tableProjectFilter}
+          >
+            <option value="All">All Projects</option>
+            {projects.map((p) => (
+              <option key={`filter-${p.id}`} value={p.id}>{p.name}</option>
+            ))}
+          </GuiSelect>
+        </label>
         <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
           + Add Payment
         </button>
       </div>
 
-      {/* Payments Table */}
-      <SurfaceCard title={activeTab}>
+      {/* Payments transactions log */}
+      <SurfaceCard title="Client Payment Transactions">
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
         {loading ? (
           <SkeletonTable rows={5} />
         ) : filteredRows.length === 0 ? (
-          <EmptyState description="No payments found for the current tab." title="No payments" />
+          <EmptyState description="No payment transactions recorded yet." title="No payments" />
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table min-w-[1200px]">
+              <table className="data-table min-w-[1000px]">
                 <thead>
                   <tr>
                     <th>S/N</th>
@@ -362,12 +419,10 @@ export const PaymentsPage = () => {
                     <th>Client</th>
                     <th>Payment Type</th>
                     <th>Milestone/Stage</th>
-                    <th>Amount Expected</th>
                     <th>Amount Received</th>
-                    <th>Balance</th>
                     <th>Payment Method</th>
                     <th>Reference</th>
-                    <th>Attachment</th>
+                    <th>Receipt</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -381,9 +436,7 @@ export const PaymentsPage = () => {
                       <td>{payment.client}</td>
                       <td>{payment.paymentType}</td>
                       <td>{payment.milestone || "-"}</td>
-                      <td>{formatTzs(payment.amountExpected)}</td>
-                      <td>{formatTzs(payment.amountReceived)}</td>
-                      <td>{formatTzs(payment.balance)}</td>
+                      <td className="font-medium text-emerald-700">{formatTzs(payment.amountReceived)}</td>
                       <td>{payment.paymentMethod}</td>
                       <td>{payment.referenceNumber || "-"}</td>
                       <td>
@@ -413,6 +466,9 @@ export const PaymentsPage = () => {
                       </td>
                       <td>
                         <div className="flex gap-2">
+                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewPayment(payment)} type="button">
+                            View
+                          </button>
                           <button className="btn-secondary py-1 px-3 text-xs" onClick={() => openEditModal(payment)} type="button">
                             Edit
                           </button>
@@ -441,40 +497,47 @@ export const PaymentsPage = () => {
         )}
       </SurfaceCard>
 
-      {/* Cash Flow Summary */}
-      <SurfaceCard title="Cash Flow Visual Summary">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Income vs Outflow</p>
-            <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-200">
-              <div className="bg-[#0b2a53]" style={{ width: `${incomeWidth}%` }} />
-              <div className="bg-[#f28c28]" style={{ width: `${outflowWidth}%` }} />
-            </div>
-            <p className="mt-2 text-xs text-slate-600">Income: {formatTzs(income)} | Outflow: {formatTzs(outflow)}</p>
+      {/* Income vs Outflow */}
+      <SurfaceCard title="Income vs Outflow">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="mt-1 flex h-3 overflow-hidden rounded-full bg-slate-200">
+            <div className="bg-[#0b2a53]" style={{ width: `${incomeWidth}%` }} />
+            <div className="bg-[#f28c28]" style={{ width: `${outflowWidth}%` }} />
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Project Balances</p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {cashFlow.projectBalances.slice(0, 4).map((row) => (
-                <li className="flex justify-between" key={row.projectName}>
-                  <span>{row.projectName}</span>
-                  <span>{formatTzs(row.balance)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pending Client Payments</p>
-            <ul className="mt-2 space-y-1 text-sm text-amber-700">
-              {pendingPayments.map((row) => (
-                <li key={`pending-${row.id}`}>{row.projectName} - {formatTzs(row.balance)}</li>
-              ))}
-            </ul>
-          </div>
+          <p className="mt-2 text-xs text-slate-600">Income: {formatTzs(income)} | Outflow: {formatTzs(outflowBar)}</p>
         </div>
       </SurfaceCard>
 
-      {/* Add Payment Modal */}
+      {/* View Payment Modal */}
+      <DetailModal
+        onClose={() => setViewPayment(null)}
+        open={viewPayment !== null}
+        rows={viewPayment ? [
+          { label: "Project", value: viewPayment.projectName },
+          { label: "Client", value: viewPayment.client },
+          { label: "Payment Type", value: viewPayment.paymentType },
+          { label: "Milestone / Stage", value: viewPayment.milestone || "-" },
+          { label: "Amount Received", value: formatTzs(viewPayment.amountReceived) },
+          { label: "Payment Date", value: formatDate(viewPayment.paymentDate) },
+          { label: "Payment Method", value: viewPayment.paymentMethod },
+          { label: "Reference", value: viewPayment.referenceNumber || "-" },
+          { label: "Status", value: <StatusBadge status={viewPayment.status} /> },
+          {
+            label: "Receipt / Bank Slip",
+            value: viewPayment.attachmentUrl ? (
+              <a className="font-semibold text-[#0b2a53] hover:underline" href={viewPayment.attachmentUrl} rel="noreferrer" target="_blank">
+                {viewPayment.attachmentName || "View attachment"}
+              </a>
+            ) : "No receipt uploaded",
+            full: true,
+          },
+          { label: "Notes", value: viewPayment.notes || "-", full: true },
+        ] : []}
+        subtitle={viewPayment ? `Recorded on ${formatDate(viewPayment.paymentDate)}` : ""}
+        title="Payment Details"
+      />
+
+      {/* Add / Edit Payment Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title={editingPaymentId ? "Edit Payment" : "Add Payment"}>
@@ -503,12 +566,7 @@ export const PaymentsPage = () => {
                 <span>Milestone / Stage</span>
                 <input className="input-field" onChange={(e) => setMilestone(e.target.value)} placeholder="Optional milestone reference" value={milestone} />
               </label>
-              <FinancialInput label="Amount Expected" onChange={setAmountExpected} placeholder="24000000" value={amountExpected} />
               <FinancialInput label="Amount Received" onChange={setAmountReceived} placeholder="20000000" value={amountReceived} />
-              <label className="form-field">
-                <span>Balance</span>
-                <input className="input-field bg-slate-50" readOnly value={formatTzs(balance)} />
-              </label>
               <label className="form-field">
                 <span>Payment Date</span>
                 <input className="input-field" onChange={(e) => setPaymentDate(e.target.value)} type="date" value={paymentDate} />
@@ -516,10 +574,9 @@ export const PaymentsPage = () => {
               <label className="form-field">
                 <span>Payment Method</span>
                 <GuiSelect className="input-field" onChange={(e) => setPaymentMethod(e.target.value)} value={paymentMethod}>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Mobile Money">Mobile Money</option>
-                  <option value="Cheque">Cheque</option>
+                  {paymentMethodOptions.map((method) => (
+                    <option key={`method-${method}`} value={method}>{method}</option>
+                  ))}
                 </GuiSelect>
               </label>
               <label className="form-field">

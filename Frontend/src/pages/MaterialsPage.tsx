@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  DetailModal,
   EmptyState,
   FinancialInput,
   ProgressBar,
@@ -307,6 +308,8 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     setPurchaseNotes("");
   };
 
+  const [viewMaterial, setViewMaterial] = useState<MaterialTableRow | null>(null);
+
   const openEditRequirement = (row: MaterialTableRow) => {
     setEditingRequirementId(row.id);
     setRequirementProjectId(row.projectId);
@@ -574,6 +577,9 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-2">
+                          <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => setViewMaterial(row)} type="button">
+                            View
+                          </button>
                           <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => openEditRequirement(row)} type="button">
                             Edit
                           </button>
@@ -606,6 +612,31 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
           </>
         )}
       </SurfaceCard>
+
+      <DetailModal
+        onClose={() => setViewMaterial(null)}
+        open={viewMaterial !== null}
+        rows={viewMaterial ? [
+          { label: "Project / Site", value: viewMaterial.projectName },
+          { label: "Material", value: viewMaterial.materialName },
+          { label: "Supply Source", value: viewMaterial.supplySource },
+          { label: "Needed", value: `${formatNumber(viewMaterial.needed)} ${viewMaterial.unit}` },
+          { label: "Purchased", value: `${formatNumber(viewMaterial.purchased)} ${viewMaterial.unit}` },
+          { label: "Remaining", value: `${formatNumber(viewMaterial.remaining)} ${viewMaterial.unit}` },
+          { label: "Company / Client", value: `${formatNumber(viewMaterial.companyPurchased)} / ${formatNumber(viewMaterial.clientSupplied)} ${viewMaterial.unit}` },
+          { label: "Supplier", value: viewMaterial.supplier || "-" },
+          { label: "Unit Cost", value: formatTzs(viewMaterial.unitCost) },
+          { label: "Total Cost", value: formatTzs(viewMaterial.totalCost) },
+          { label: "Latest Purchase Date", value: viewMaterial.purchaseDate ? formatDate(viewMaterial.purchaseDate) : "-" },
+          { label: "Delivery Status", value: viewMaterial.deliveryStatus },
+          { label: "Supply Status", value: viewMaterial.supplyStatus },
+          { label: "Priority", value: viewMaterial.priority },
+          { label: "Needed By", value: viewMaterial.neededByDate ? formatDate(viewMaterial.neededByDate) : "-" },
+          { label: "Notes", value: viewMaterial.notes || "-", full: true },
+        ] : []}
+        subtitle={viewMaterial ? viewMaterial.materialName : ""}
+        title="Material Details"
+      />
 
       {/* Add Requirement Modal */}
       {showRequirementModal && (

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
+  DetailModal,
   EmptyState,
   FinancialInput,
   SectionTitle,
   SkeletonTable,
+  StatusBadge,
   SurfaceCard,
   TablePagination,
   GuiSelect,
@@ -88,6 +90,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [showAddWorkerModal, setShowAddWorkerModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedWorkerForPayment, setSelectedWorkerForPayment] = useState<WorkerApiRecord | null>(null);
+  const [viewWorker, setViewWorker] = useState<WorkerApiRecord | null>(null);
   const [workerToDelete, setWorkerToDelete] = useState<WorkerApiRecord | null>(null);
   const [deletingWorker, setDeletingWorker] = useState(false);
 
@@ -660,6 +663,13 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                       <td>
                         <div className="flex gap-2">
                           <button
+                            className="btn-secondary py-1 px-3 text-xs"
+                            onClick={() => setViewWorker(worker)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                          <button
                             className="btn-primary py-1 px-3 text-xs"
                             disabled={worker.status === "Inactive"}
                             onClick={() => openPaymentModal(worker)}
@@ -1051,6 +1061,28 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           </SurfaceCard>
         </div>
       )}
+      <DetailModal
+        onClose={() => setViewWorker(null)}
+        open={viewWorker !== null}
+        rows={viewWorker ? [
+          { label: "Full Name", value: viewWorker.fullName },
+          { label: "Phone", value: viewWorker.phone },
+          { label: "Skill / Role", value: viewWorker.skillRole },
+          { label: "Assigned Project", value: viewWorker.assignedProjectName || "Unassigned" },
+          { label: "Payment Type", value: viewWorker.paymentType },
+          { label: "Rate", value: formatTzs(viewWorker.rateAmount) },
+          { label: "Total Paid", value: formatTzs(viewWorker.totalPaid) },
+          { label: "Outstanding", value: formatTzs(viewWorker.outstandingAmount) },
+          { label: "Pay Cycle Start", value: viewWorker.payCycleStartDate ? formatDate(viewWorker.payCycleStartDate) : "-" },
+          { label: "Next Payment Due", value: viewWorker.nextPaymentDueDate ? formatDate(viewWorker.nextPaymentDueDate) : "-" },
+          { label: "Last Payment Covered", value: viewWorker.lastPaymentCoveredDate ? formatDate(viewWorker.lastPaymentCoveredDate) : "-" },
+          { label: "Status", value: <StatusBadge status={viewWorker.status} /> },
+          { label: "Notes", value: viewWorker.notes || "-", full: true },
+        ] : []}
+        subtitle={viewWorker ? viewWorker.skillRole : ""}
+        title="Worker Details"
+      />
+
       {/* Confirm Delete Modal */}
       <ConfirmModal
         cancelLabel="Cancel"

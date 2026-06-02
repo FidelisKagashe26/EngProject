@@ -1,13 +1,18 @@
 import { db } from "../db/pool";
 import { getSingleTenantCompanyId } from "../db/init";
 
-// Approval thresholds in TZS
+// Approval thresholds in TZS.
+// The approval gate is currently DISABLED: every record auto-approves and is
+// applied to project totals / reports immediately, regardless of amount. This
+// was turned off because large (but legitimate) records were sitting in
+// "Pending approval" and disappearing from reports and project totals.
+// To re-enable the gate for a module, set its threshold back to a finite value.
 export const APPROVAL_THRESHOLDS = {
-  expenses: 5_000_000,
-  material_purchases: 5_000_000,
-  equipment_usage: 3_000_000,
-  labor_payments: 2_000_000,
-  client_payments: 5_000_000,
+  expenses: Number.POSITIVE_INFINITY,
+  material_purchases: Number.POSITIVE_INFINITY,
+  equipment_usage: Number.POSITIVE_INFINITY,
+  labor_payments: Number.POSITIVE_INFINITY,
+  client_payments: Number.POSITIVE_INFINITY,
 };
 
 export type ApprovalModule =

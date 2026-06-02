@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ConfirmModal,
+  DetailModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
   SectionTitle,
   SkeletonTable,
+  StatusBadge,
   SurfaceCard,
   TablePagination,
 } from "../components/ui";
@@ -48,6 +50,7 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEquipmentId, setEditingEquipmentId] = useState("");
+  const [viewEquipment, setViewEquipment] = useState<EquipmentApiRecord | null>(null);
   const [equipmentToDelete, setEquipmentToDelete] = useState<EquipmentApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -349,6 +352,13 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
                         <div className="flex gap-2">
                           <button
                             className="btn-secondary py-1 px-3 text-xs"
+                            onClick={() => setViewEquipment(equipment)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                          <button
+                            className="btn-secondary py-1 px-3 text-xs"
                             onClick={() => openEditModal(equipment)}
                             type="button"
                           >
@@ -464,6 +474,28 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
           </SurfaceCard>
         </div>
       )}
+
+      <DetailModal
+        onClose={() => setViewEquipment(null)}
+        open={viewEquipment !== null}
+        rows={viewEquipment ? [
+          { label: "Project / Site", value: viewEquipment.projectName },
+          { label: "Equipment", value: viewEquipment.equipmentName },
+          { label: "Type", value: viewEquipment.equipmentType },
+          { label: "Ownership", value: viewEquipment.ownershipType },
+          { label: "Owner / Provider", value: viewEquipment.ownerName || "-" },
+          { label: "Usage Period", value: `${formatDate(viewEquipment.startDate)} – ${formatDate(viewEquipment.endDate)}` },
+          { label: "Usage Days", value: String(viewEquipment.usageDays) },
+          { label: "Daily Rate", value: formatTzs(viewEquipment.dailyRate) },
+          { label: "Rental Cost", value: formatTzs(viewEquipment.rentalCost) },
+          { label: "Maintenance Cost", value: formatTzs(viewEquipment.maintenanceCost) },
+          { label: "Total Cost", value: formatTzs(viewEquipment.totalCost) },
+          { label: "Status", value: <StatusBadge status={viewEquipment.status} /> },
+          { label: "Maintenance Notes", value: viewEquipment.maintenanceNotes || "-", full: true },
+        ] : []}
+        subtitle={viewEquipment ? viewEquipment.equipmentName : ""}
+        title="Equipment Details"
+      />
 
       {/* Confirm Delete */}
       <ConfirmModal

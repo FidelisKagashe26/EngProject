@@ -281,6 +281,37 @@ router.post(
       ],
     );
 
+    // Record the initial advance as a client payment transaction so it shows up
+    // in the Payments & Cash Flow log. The project INSERT above already set
+    // amount_received / pending_client_payments, so we DO NOT touch project
+    // totals here (otherwise the advance would be double-counted).
+    if (parsed.amountReceived > 0) {
+      await db.query(
+        `
+        INSERT INTO engicost.client_payments (
+          id, company_id, project_id, client_name, payment_type, milestone,
+          amount_expected, amount_received, payment_date, payment_method,
+          reference_number, status, notes, approval_status,
+          approval_requested_by, approval_requested_at
+        ) VALUES (
+          $1, $2, $3, $4, 'Advance', 'Initial advance (project setup)',
+          $5, $5, $6, 'Not specified',
+          '', 'Received', '', 'AUTO_APPROVED',
+          $7, NOW()
+        )
+        `,
+        [
+          makeId("PAY"),
+          companyId,
+          id,
+          parsed.clientName,
+          parsed.amountReceived,
+          parsed.startDate,
+          req.authUser?.fullName || "System",
+        ],
+      );
+    }
+
     await logProjectActivity(
       companyId,
       "Created Project",

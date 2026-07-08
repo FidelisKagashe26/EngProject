@@ -3,7 +3,7 @@ export const SERVICES = [
     iconName: "Zap",
     title: "Electrical Installation",
     desc: "State-of-the-art wiring, intelligent lighting systems, and comprehensive power distribution for modern smart homes.",
-    image: "/photo9.jpeg",
+    image: "/ElectricalInstallation.jpg",
   },
   {
     iconName: "ShieldCheck",
@@ -15,7 +15,7 @@ export const SERVICES = [
     iconName: "Droplets",
     title: "Plumbing Solutions",
     desc: "Advanced water management, eco-friendly fixtures, and robust piping infrastructure for lasting performance.",
-    image: "/photo8.jpeg",
+    image: "/PlumbingSolutions.jpg",
   },
   {
     iconName: "Camera",

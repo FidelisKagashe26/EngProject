@@ -62,7 +62,7 @@ export const HomePage = () => {
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#f28c28] px-8 py-4 text-sm font-bold text-slate-900 shadow-lg shadow-orange-500/30 no-underline transition hover:-translate-y-0.5 hover:bg-orange-500 sm:w-auto"
               to="/contact"
             >
-              Get a Free Quote <ArrowRight size={16} />
+              Get a Free Quote <ChevronRight size={16} />
             </Link>
             <Link
               className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-white/50 px-8 py-4 text-sm font-semibold text-white no-underline backdrop-blur-sm transition hover:border-white hover:bg-white/10 sm:w-auto"
@@ -224,7 +224,7 @@ export const HomePage = () => {
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#f28c28] px-8 py-4 text-sm font-bold text-slate-900 shadow-lg shadow-orange-500/30 no-underline transition hover:bg-orange-500 sm:w-auto"
               to="/contact"
             >
-              Get a Free Quote <ArrowRight size={16} />
+              Get a Free Quote <ChevronRight size={16} />
             </Link>
             <Link
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-white px-8 py-4 text-sm font-semibold text-slate-900 shadow-lg shadow-white/30 no-underline transition hover:bg-slate-100 sm:w-auto"

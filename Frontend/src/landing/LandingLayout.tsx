@@ -1,15 +1,24 @@
-import { LogIn, Menu, MessageSquare, X, Home, Image, Info, Mail, Wrench, Zap, Droplet, Camera, Building2, Phone } from "lucide-react";
-import { useState } from "react";
 import {
-  FaEnvelope,
-  FaFacebook,
-  FaInstagram,
-  FaLinkedinIn,
-  FaLocationDot,
-  FaWhatsapp,
-  FaXTwitter,
-} from "react-icons/fa6";
-import { MdAccessTime } from "react-icons/md";
+  Building2,
+  Camera,
+  Clock,
+  Droplet,
+  Home,
+  Image,
+  Info,
+  LogIn,
+  Mail,
+  MapPin,
+  Menu,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Wrench,
+  X,
+  Zap,
+} from "lucide-react";
+import { useState } from "react";
+import { FaFacebook, FaInstagram, FaLinkedinIn, FaXTwitter } from "react-icons/fa6";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { useWebsiteSettings } from "./WebsiteSettingsContext";
@@ -96,7 +105,7 @@ export const LandingLayout = () => {
                 target="_blank"
                 title={settings.phone_whatsapp}
               >
-                <FaWhatsapp size={18} />
+                <MessageCircle size={18} />
               </a>
             )}
           </div>
@@ -240,7 +249,7 @@ export const LandingLayout = () => {
                         rel="noopener noreferrer"
                         target="_blank"
                       >
-                        <FaWhatsapp className="h-3.5 w-3.5 shrink-0 text-green-400" />
+                        <MessageCircle className="h-3.5 w-3.5 shrink-0 text-green-400" />
                         {settings.phone_whatsapp}
                       </a>
                     </li>
@@ -251,20 +260,20 @@ export const LandingLayout = () => {
                         className="flex items-center gap-2.5 text-sm text-[#adc7f9] no-underline transition hover:text-white"
                         href={`mailto:${settings.email_main}`}
                       >
-                        <FaEnvelope className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                        <Mail className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
                         {settings.email_main}
                       </a>
                     </li>
                   )}
                   {settings.location && (
                     <li className="flex items-start gap-2.5 text-sm text-[#adc7f9]">
-                      <FaLocationDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                      <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
                       {settings.location}
                     </li>
                   )}
                   {settings.hours && (
                     <li className="flex items-center gap-2.5 text-sm text-[#adc7f9]">
-                      <MdAccessTime className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
+                      <Clock className="h-3.5 w-3.5 shrink-0 text-[#f28c28]" />
                       {settings.hours}
                     </li>
                   )}

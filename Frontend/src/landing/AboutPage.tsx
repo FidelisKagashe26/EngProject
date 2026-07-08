@@ -18,10 +18,10 @@ const VALUES = [
 ];
 
 const TEAM = [
-  { name: "Eng. James Mwangi",    role: "Chief Executive Officer", initials: "JM" },
+  { name: "Eng. Godfrey Avodius Akitanta", role: "Chief Executive Officer", initials: "GAA" },
   { name: "Arch. Fatuma Salim",   role: "Lead Architect",          initials: "FS" },
-  { name: "Eng. Peter Odhiambo", role: "Head of Electrical",      initials: "PO" },
-  { name: "Eng. Grace Kimani",    role: "Plumbing & Civil Lead",   initials: "GK" },
+  { name: "Eng. Erick Mlelwa",             role: "Head of Electrical",      initials: "EM" },
+  { name: "Eng. Noel",                    role: "Plumbing & Civil Lead",   initials: "N" },
 ];
 
 export const AboutPage = () => (

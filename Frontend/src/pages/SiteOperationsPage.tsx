@@ -226,7 +226,6 @@ export const SiteOperationsPage = () => {
   return (
     <div className="space-y-6">
       <SectionTitle
-        subtitle="Run all daily site operations from one place."
         title="Site Operations"
       />
       <OperationsTabBar

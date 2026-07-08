@@ -23,11 +23,6 @@ import {
 } from "../services/api";
 import { formatDate, formatNumber, formatTzs } from "../utils/format";
 
-const materialIndicator = (needed: number, purchased: number) => {
-  if (purchased >= needed) return "Fully purchased";
-  if (purchased > 0) return "Partially purchased";
-  return "Not purchased";
-};
 
 type MaterialTableRow = {
   id: string;
@@ -283,18 +278,22 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
 
   const resetRequirementForm = () => {
     setEditingRequirementId("");
+    setRequirementProjectId(projectFromQuery || projects[0]?.id || "");
     setRequirementMaterialName("");
     setRequiredQuantity("");
+    setRequirementUnit("Bags");
     setEstimatedUnitCost("");
     setRequirementSupplySource("Company Purchased");
     setRequestedQuantity("");
     setSupplyStatus("Planned");
+    setPriority("High");
     setNeededByDate("");
     setRequirementNotes("");
   };
 
   const resetPurchaseForm = () => {
     setEditingPurchaseId("");
+    setPurchaseProjectId(projectFromQuery || projects[0]?.id || "");
     setPurchaseRequirementId("");
     setPurchaseMaterialName("");
     setQtyPurchased("");
@@ -446,6 +445,9 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
       await refreshMaterials();
       markSaved();
       setRequestTarget(null);
+      setRequestQuantity("");
+      setRequestDate("");
+      setRequestNotes("");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to request material supply.");
     } finally {
@@ -517,48 +519,33 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
           <EmptyState description="No material requirements found for the selected project." title="No materials" />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[1420px]">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[1120px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
-                    <th>Material Name</th>
+                    <th className="ops-sticky-sn">S/N</th>
+                    <th>Material</th>
                     <th>Project/Site</th>
                     <th>Source</th>
-                    <th>Qty Needed</th>
-                    <th>Company Qty</th>
-                    <th>Client Qty</th>
+                    <th>Needed</th>
+                    <th>Purchased</th>
                     <th>Remaining</th>
-                    <th>Requested</th>
-                    <th>Unit</th>
-                    <th>Supplier</th>
-                    <th>Unit Cost</th>
-                    <th>Total Cost</th>
-                    <th>Purchase Date</th>
-                    <th>Delivery Status</th>
-                    <th>Indicator</th>
-                    <th>Actions</th>
+                    <th>Status</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {materialsPagination.paginatedRows.map((row, index) => (
                     <tr key={row.id}>
-                      <td>{materialsPagination.startIndex + index + 1}</td>
-                      <td>{row.materialName}</td>
-                      <td>{row.projectName}</td>
+                      <td className="ops-sticky-sn">{materialsPagination.startIndex + index + 1}</td>
+                      <td><span className="ops-cell-strong">{row.materialName}</span></td>
+                      <td><span className="ops-cell-text">{row.projectName}</span></td>
                       <td>{row.supplySource}</td>
-                      <td>{formatNumber(row.needed)}</td>
-                      <td>{formatNumber(row.companyPurchased)}</td>
-                      <td>{formatNumber(row.clientSupplied)}</td>
+                      <td>{formatNumber(row.needed)} {row.unit}</td>
+                      <td>{formatNumber(row.purchased)} {row.unit}</td>
                       <td className={row.remaining > 0 ? "text-amber-700" : "text-emerald-700"}>
-                        {formatNumber(row.remaining)}
+                        {formatNumber(row.remaining)} {row.unit}
                       </td>
-                      <td>{formatNumber(row.requestedQuantity)}</td>
-                      <td>{row.unit}</td>
-                      <td>{row.supplier}</td>
-                      <td>{formatTzs(row.unitCost)}</td>
-                      <td>{formatTzs(row.totalCost)}</td>
-                      <td>{row.purchaseDate ? formatDate(row.purchaseDate) : "-"}</td>
                       <td>
                         <span className={
                           row.deliveryStatus === "Delivered"
@@ -570,13 +557,8 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
                           {row.deliveryStatus}
                         </span>
                       </td>
-                      <td>
-                        <span className="text-xs font-semibold text-slate-700">
-                          {materialIndicator(row.needed, row.purchased)}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="flex flex-wrap gap-2">
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
                           <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => setViewMaterial(row)} type="button">
                             View
                           </button>

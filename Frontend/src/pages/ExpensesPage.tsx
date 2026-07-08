@@ -330,35 +330,29 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[1100px]">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[980px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
+                    <th className="ops-sticky-sn">S/N</th>
                     <th>Date</th>
                     <th>Project/Site</th>
                     <th>Category</th>
                     <th>Description</th>
                     <th>Amount</th>
-                    <th>Paid By</th>
-                    <th>Payment Method</th>
-                    <th>Receipt</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {expensePagination.paginatedRows.map((item, index) => (
                     <tr key={item.id}>
-                      <td>{expensePagination.startIndex + index + 1}</td>
+                      <td className="ops-sticky-sn">{expensePagination.startIndex + index + 1}</td>
                       <td>{formatDate(item.date)}</td>
-                      <td>{item.projectName}</td>
+                      <td><span className="ops-cell-text">{item.projectName}</span></td>
                       <td>{item.category}</td>
-                      <td>{item.description}</td>
+                      <td><span className="ops-cell-wide">{item.description}</span></td>
                       <td>{formatTzs(item.amount)}</td>
-                      <td>{item.paidBy}</td>
-                      <td>{item.paymentMethod}</td>
-                      <td>{item.receiptRef || "-"}</td>
                       <td>
                         <span
                           className={
@@ -372,8 +366,8 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
                           {item.status}
                         </span>
                       </td>
-                      <td>
-                        <div className="flex gap-2">
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
                           <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewExpense(item)} type="button">
                             View
                           </button>

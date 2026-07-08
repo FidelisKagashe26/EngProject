@@ -91,6 +91,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedWorkerForPayment, setSelectedWorkerForPayment] = useState<WorkerApiRecord | null>(null);
   const [viewWorker, setViewWorker] = useState<WorkerApiRecord | null>(null);
+  const [viewPayment, setViewPayment] = useState<LaborPaymentApiRecord | null>(null);
   const [workerToDelete, setWorkerToDelete] = useState<WorkerApiRecord | null>(null);
   const [deletingWorker, setDeletingWorker] = useState(false);
 
@@ -602,40 +603,28 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-full">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[1040px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
-                    <th>Worker Name</th>
-                    <th>Phone</th>
-                    <th>Skill/Role</th>
+                    <th className="ops-sticky-sn">S/N</th>
+                    <th>Worker</th>
+                    <th>Role</th>
                     <th>Site</th>
-                    <th>Wage Type</th>
-                    <th>Next Due</th>
                     <th>Rate</th>
                     <th>Total Paid</th>
                     <th>Outstanding</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {workersPagination.paginatedRows.map((worker, index) => (
                     <tr key={worker.id}>
-                      <td>{workersPagination.startIndex + index + 1}</td>
-                      <td>{worker.fullName}</td>
-                      <td>{worker.phone}</td>
-                      <td>{worker.skillRole}</td>
-                      <td>{worker.assignedProjectName || "Unassigned"}</td>
-                      <td>{worker.paymentType}</td>
-                      <td>
-                        {worker.nextPaymentDueDate
-                          ? worker.nextPaymentDueDate
-                          : worker.paymentType === "Hourly" || worker.paymentType === "Contract"
-                            ? "-"
-                            : worker.payCycleStartDate}
-                      </td>
+                      <td className="ops-sticky-sn">{workersPagination.startIndex + index + 1}</td>
+                      <td><span className="ops-cell-strong">{worker.fullName}</span></td>
+                      <td><span className="ops-cell-text">{worker.skillRole}</span></td>
+                      <td><span className="ops-cell-text">{worker.assignedProjectName || "Unassigned"}</span></td>
                       <td>{formatTzs(worker.rateAmount)}</td>
                       <td>{formatTzs(worker.totalPaid)}</td>
                       <td
@@ -660,8 +649,8 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                           {worker.status}
                         </span>
                       </td>
-                      <td>
-                        <div className="flex gap-2">
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
                           <button
                             className="btn-secondary py-1 px-3 text-xs"
                             onClick={() => setViewWorker(worker)}
@@ -673,12 +662,14 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                             className="btn-primary py-1 px-3 text-xs"
                             disabled={worker.status === "Inactive"}
                             onClick={() => openPaymentModal(worker)}
+                            type="button"
                           >
                             Pay
                           </button>
                           <button
                             className="btn-danger py-1 px-3 text-xs"
                             onClick={() => setWorkerToDelete(worker)}
+                            type="button"
                           >
                             Delete
                           </button>
@@ -714,42 +705,41 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[1050px]">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[980px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
+                    <th className="ops-sticky-sn">S/N</th>
                     <th>Worker</th>
                     <th>Site</th>
                     <th>Period</th>
-                    <th>Cycle</th>
-                    <th>Rate</th>
                     <th>Total Payable</th>
                     <th>Paid</th>
                     <th>Balance</th>
-                    <th>Method</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paymentsPagination.paginatedRows.map((payment, index) => (
                     <tr key={payment.id}>
-                      <td>{paymentsPagination.startIndex + index + 1}</td>
-                      <td>{payment.workerName}</td>
-                      <td>{payment.projectName || "Unassigned"}</td>
+                      <td className="ops-sticky-sn">{paymentsPagination.startIndex + index + 1}</td>
+                      <td><span className="ops-cell-strong">{payment.workerName}</span></td>
+                      <td><span className="ops-cell-text">{payment.projectName || "Unassigned"}</span></td>
                       <td>
                         {formatDate(payment.workStart)} - {formatDate(payment.workEnd)}
                       </td>
-                      <td>
-                        {payment.payCycleType}
-                        {payment.payCycleCount > 0 ? ` x ${payment.payCycleCount}` : ""}
-                      </td>
-                      <td>{formatTzs(payment.rateAmount)}</td>
                       <td>{formatTzs(payment.totalPayable)}</td>
                       <td className="text-emerald-700">{formatTzs(payment.amountPaid)}</td>
                       <td className={payment.balance > 0 ? "text-amber-700" : "text-emerald-700"}>
                         {formatTzs(payment.balance)}
                       </td>
-                      <td>{payment.paymentMethod}</td>
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
+                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewPayment(payment)} type="button">
+                            View
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1081,6 +1071,25 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         ] : []}
         subtitle={viewWorker ? viewWorker.skillRole : ""}
         title="Worker Details"
+      />
+
+      <DetailModal
+        onClose={() => setViewPayment(null)}
+        open={viewPayment !== null}
+        rows={viewPayment ? [
+          { label: "Worker", value: viewPayment.workerName },
+          { label: "Project / Site", value: viewPayment.projectName || "Unassigned" },
+          { label: "Work Period", value: formatDate(viewPayment.workStart) + " - " + formatDate(viewPayment.workEnd) },
+          { label: "Cycle", value: viewPayment.payCycleType + (viewPayment.payCycleCount > 0 ? " x " + viewPayment.payCycleCount : "") },
+          { label: "Rate", value: formatTzs(viewPayment.rateAmount) },
+          { label: "Total Payable", value: formatTzs(viewPayment.totalPayable) },
+          { label: "Paid", value: formatTzs(viewPayment.amountPaid) },
+          { label: "Balance", value: formatTzs(viewPayment.balance) },
+          { label: "Payment Method", value: viewPayment.paymentMethod },
+          { label: "Notes", value: viewPayment.notes || "-", full: true },
+        ] : []}
+        subtitle={viewPayment ? viewPayment.workerName : ""}
+        title="Labor Payment Details"
       />
 
       {/* Confirm Delete Modal */}

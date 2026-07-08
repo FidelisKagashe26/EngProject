@@ -235,6 +235,53 @@ a {
     @apply border-b border-slate-100 px-3 py-3 text-slate-700;
   }
 
+  .ops-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .ops-table th,
+  .ops-table td {
+    @apply whitespace-nowrap align-middle;
+  }
+
+  .ops-table-wrap {
+    @apply relative overflow-x-auto;
+  }
+
+  .ops-sticky-sn {
+    @apply sticky left-0 z-20 w-16 min-w-16 bg-white;
+  }
+
+  .ops-sticky-actions {
+    @apply sticky right-0 z-20 min-w-56 bg-white text-right;
+  }
+
+  thead .ops-sticky-sn,
+  thead .ops-sticky-actions {
+    @apply z-30 bg-slate-50;
+  }
+
+  .ops-actions-row {
+    @apply flex flex-nowrap items-center justify-end gap-2;
+  }
+
+  .ops-actions-row button {
+    @apply shrink-0 whitespace-nowrap;
+  }
+
+  .ops-cell-strong {
+    @apply block max-w-[220px] truncate font-semibold text-slate-900;
+  }
+
+  .ops-cell-text {
+    @apply block max-w-[220px] truncate;
+  }
+
+  .ops-cell-wide {
+    @apply block max-w-[280px] truncate;
+  }
+
   .metric-tile {
     @apply rounded-xl border border-slate-200 bg-slate-50 p-3;
   }
@@ -375,6 +422,20 @@ a {
 
   .dark .data-table td {
     @apply border-slate-800 text-slate-200;
+  }
+
+  .dark .ops-sticky-sn,
+  .dark .ops-sticky-actions {
+    @apply bg-slate-900;
+  }
+
+  .dark thead .ops-sticky-sn,
+  .dark thead .ops-sticky-actions {
+    @apply bg-slate-900;
+  }
+
+  .dark .ops-cell-strong {
+    @apply text-slate-100;
   }
 
   .dark .metric-tile {

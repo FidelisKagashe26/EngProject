@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ConfirmModal,
+  DetailModal,
   EmptyState,
   FinancialInput,
   GuiSelect,
@@ -44,6 +45,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
+  const [viewEntry, setViewEntry] = useState<PettyCashApiRecord | null>(null);
   const [entryToDelete, setEntryToDelete] = useState<PettyCashApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -243,29 +245,27 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[1100px]">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[980px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
+                    <th className="ops-sticky-sn">S/N</th>
                     <th>Date</th>
                     <th>Project/Site</th>
                     <th>Description</th>
                     <th>Type</th>
                     <th>Amount</th>
-                    <th>Recorded By</th>
-                    <th>Receipt Ref</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagination.paginatedRows.map((row, index) => (
                     <tr key={row.id}>
-                      <td>{pagination.startIndex + index + 1}</td>
+                      <td className="ops-sticky-sn">{pagination.startIndex + index + 1}</td>
                       <td>{formatDate(row.transactionDate)}</td>
-                      <td>{row.projectName}</td>
-                      <td>{row.description}</td>
+                      <td><span className="ops-cell-text">{row.projectName}</span></td>
+                      <td><span className="ops-cell-wide">{row.description}</span></td>
                       <td>
                         <span
                           className={
@@ -286,8 +286,6 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
                       >
                         {formatTzs(row.amount)}
                       </td>
-                      <td>{row.recordedBy}</td>
-                      <td>{row.receiptRef || "-"}</td>
                       <td>
                         <span
                           className={
@@ -299,14 +297,23 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
                           {row.status}
                         </span>
                       </td>
-                      <td>
-                        <button
-                          className="btn-danger py-1 px-3 text-xs"
-                          onClick={() => setEntryToDelete(row)}
-                          type="button"
-                        >
-                          Delete
-                        </button>
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
+                          <button
+                            className="btn-secondary py-1 px-3 text-xs"
+                            onClick={() => setViewEntry(row)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                          <button
+                            className="btn-danger py-1 px-3 text-xs"
+                            onClick={() => setEntryToDelete(row)}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -456,6 +463,25 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
           </SurfaceCard>
         </div>
       )}
+
+      <DetailModal
+        onClose={() => setViewEntry(null)}
+        open={viewEntry !== null}
+        rows={viewEntry ? [
+          { label: "Project / Site", value: viewEntry.projectName },
+          { label: "Date", value: formatDate(viewEntry.transactionDate) },
+          { label: "Type", value: viewEntry.transactionType },
+          { label: "Amount", value: formatTzs(viewEntry.amount) },
+          { label: "Recorded By", value: viewEntry.recordedBy },
+          { label: "Receipt Reference", value: viewEntry.receiptRef || "-" },
+          { label: "Status", value: viewEntry.status },
+          { label: "Description", value: viewEntry.description, full: true },
+          { label: "Notes", value: viewEntry.notes || "-", full: true },
+        ] : []}
+        subtitle={viewEntry ? formatTzs(viewEntry.amount) : ""}
+        title="Petty Cash Entry Details"
+      />
+
 
       {/* Confirm Delete */}
       <ConfirmModal

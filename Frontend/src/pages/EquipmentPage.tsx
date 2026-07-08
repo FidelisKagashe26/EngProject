@@ -302,38 +302,30 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[1280px]">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[1040px]">
                 <thead>
                   <tr>
-                    <th>S/N</th>
-                    <th>Equipment Name</th>
+                    <th className="ops-sticky-sn">S/N</th>
+                    <th>Equipment</th>
                     <th>Type</th>
                     <th>Project/Site</th>
-                    <th>Ownership</th>
-                    <th>Owner</th>
-                    <th>Usage Dates</th>
+                    <th>Usage</th>
                     <th>Days</th>
-                    <th>Rental Cost</th>
-                    <th>Maintenance</th>
                     <th>Total Cost</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {equipmentPagination.paginatedRows.map((equipment, index) => (
                     <tr key={equipment.id}>
-                      <td>{equipmentPagination.startIndex + index + 1}</td>
-                      <td>{equipment.equipmentName}</td>
-                      <td>{equipment.equipmentType}</td>
-                      <td>{equipment.projectName}</td>
-                      <td>{equipment.ownershipType}</td>
-                      <td>{equipment.ownerName}</td>
-                      <td>{formatDate(equipment.startDate)} – {formatDate(equipment.endDate)}</td>
+                      <td className="ops-sticky-sn">{equipmentPagination.startIndex + index + 1}</td>
+                      <td><span className="ops-cell-strong">{equipment.equipmentName}</span></td>
+                      <td><span className="ops-cell-text">{equipment.equipmentType}</span></td>
+                      <td><span className="ops-cell-text">{equipment.projectName}</span></td>
+                      <td>{formatDate(equipment.startDate)} - {formatDate(equipment.endDate)}</td>
                       <td>{equipment.usageDays}</td>
-                      <td>{formatTzs(equipment.rentalCost)}</td>
-                      <td>{formatTzs(equipment.maintenanceCost)}</td>
                       <td>{formatTzs(equipment.totalCost)}</td>
                       <td>
                         <span
@@ -348,8 +340,8 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
                           {equipment.status}
                         </span>
                       </td>
-                      <td>
-                        <div className="flex gap-2">
+                      <td className="ops-sticky-actions">
+                        <div className="ops-actions-row">
                           <button
                             className="btn-secondary py-1 px-3 text-xs"
                             onClick={() => setViewEquipment(equipment)}

@@ -17,6 +17,10 @@ const equipmentSchema = z.object({
   projectId: z.string().min(3),
   equipmentName: z.string().min(2),
   equipmentType: z.string().min(2),
+  assetTag: z.string().optional().default(""),
+  quantity: z.number().int().min(1).optional().default(1),
+  assignedTo: z.string().optional().default(""),
+  conditionStatus: z.string().optional().default("Good"),
   ownershipType: z.enum(["Owned", "Rented"]),
   ownerName: z.string().min(2),
   startDate: z.string().date(),
@@ -29,6 +33,7 @@ const equipmentSchema = z.object({
     .optional()
     .default("In Use"),
   maintenanceNotes: z.string().optional().default(""),
+  checkInDate: z.string().date().optional(),
 });
 
 router.get(
@@ -42,6 +47,11 @@ router.get(
       project_name: string;
       equipment_name: string;
       equipment_type: string;
+      asset_tag: string | null;
+      quantity: number;
+      assigned_to: string | null;
+      condition_status: string;
+      check_in_date: string | null;
       ownership_type: string;
       owner_name: string;
       start_date: string;
@@ -55,6 +65,7 @@ router.get(
       maintenance_notes: string | null;
       created_at: string;
       updated_at: string;
+      approval_status: string;
     }>(
       `
       SELECT
@@ -63,6 +74,11 @@ router.get(
         p.name AS project_name,
         e.equipment_name,
         e.equipment_type,
+        e.asset_tag,
+        e.quantity,
+        e.assigned_to,
+        e.condition_status,
+        e.check_in_date::text,
         e.ownership_type,
         e.owner_name,
         e.start_date::text,
@@ -75,7 +91,8 @@ router.get(
         e.status,
         e.maintenance_notes,
         e.created_at::text,
-        e.updated_at::text
+        e.updated_at::text,
+        e.approval_status
       FROM engicost.equipment_usage e
       JOIN engicost.projects p ON p.id = e.project_id
       WHERE e.company_id = $1 AND e.is_deleted = FALSE
@@ -90,6 +107,11 @@ router.get(
       projectName: row.project_name,
       equipmentName: row.equipment_name,
       equipmentType: row.equipment_type,
+      assetTag: row.asset_tag ?? "",
+      quantity: row.quantity,
+      assignedTo: row.assigned_to ?? "",
+      conditionStatus: row.condition_status,
+      checkInDate: row.check_in_date,
       ownershipType: row.ownership_type,
       ownerName: row.owner_name,
       startDate: row.start_date,
@@ -103,6 +125,7 @@ router.get(
       maintenanceNotes: row.maintenance_notes ?? "",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      approvalStatus: row.approval_status,
     }));
 
     const summary = rows.reduce(
@@ -133,6 +156,7 @@ router.post(
     const parsed = equipmentSchema.parse({
       ...req.body,
       usageDays: toInteger(req.body.usageDays),
+      quantity: req.body.quantity !== undefined ? toInteger(req.body.quantity) : undefined,
       dailyRate: toMoney(req.body.dailyRate),
       maintenanceCost: toMoney(req.body.maintenanceCost),
     });
@@ -170,7 +194,7 @@ router.post(
     }
 
     const rentalCost =
-      parsed.ownershipType === "Rented" ? usageDays * parsed.dailyRate : 0;
+      parsed.ownershipType === "Rented" ? usageDays * parsed.dailyRate * parsed.quantity : 0;
     const totalCost = rentalCost + parsed.maintenanceCost;
     const needsApproval = requiresApproval("equipment_usage", totalCost);
     const approvalStatus = getApprovalStatusForAmount("equipment_usage", totalCost);
@@ -181,6 +205,11 @@ router.post(
       project_id: string;
       equipment_name: string;
       equipment_type: string;
+      asset_tag: string | null;
+      quantity: number;
+      assigned_to: string | null;
+      condition_status: string;
+      check_in_date: string | null;
       ownership_type: string;
       owner_name: string;
       start_date: string;
@@ -198,19 +227,26 @@ router.post(
     }>(
       `
       INSERT INTO engicost.equipment_usage (
-        id, company_id, project_id, equipment_name, equipment_type, ownership_type, owner_name,
+        id, company_id, project_id, equipment_name, equipment_type, asset_tag, quantity,
+        assigned_to, condition_status, ownership_type, owner_name,
         start_date, end_date, usage_days, daily_rate, rental_cost, maintenance_cost, total_cost,
-        status, maintenance_notes, approval_status, approval_requested_by, approval_requested_at
+        status, maintenance_notes, check_in_date, approval_status, approval_requested_by, approval_requested_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, NOW()
+        $8, $9, $10, $11, $12,
+        $13, $14, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, NOW()
       )
       RETURNING
         id,
         project_id,
         equipment_name,
         equipment_type,
+        asset_tag,
+        quantity,
+        assigned_to,
+        condition_status,
+        check_in_date::text,
         ownership_type,
         owner_name,
         start_date::text,
@@ -232,6 +268,10 @@ router.post(
         parsed.projectId,
         parsed.equipmentName,
         parsed.equipmentType,
+        parsed.assetTag,
+        parsed.quantity,
+        parsed.assignedTo,
+        parsed.conditionStatus,
         parsed.ownershipType,
         parsed.ownerName,
         parsed.startDate,
@@ -243,6 +283,7 @@ router.post(
         totalCost,
         parsed.status,
         parsed.maintenanceNotes,
+        parsed.checkInDate ?? null,
         approvalStatus,
         requestedBy,
       ],
@@ -282,6 +323,11 @@ router.post(
       projectName: projectResult.rows[0].name,
       equipmentName: row.equipment_name,
       equipmentType: row.equipment_type,
+      assetTag: row.asset_tag ?? "",
+      quantity: row.quantity,
+      assignedTo: row.assigned_to ?? "",
+      conditionStatus: row.condition_status,
+      checkInDate: row.check_in_date,
       ownershipType: row.ownership_type,
       ownerName: row.owner_name,
       startDate: row.start_date,
@@ -312,6 +358,7 @@ router.patch(
     const parsed = updateSchema.parse({
       ...req.body,
       usageDays: req.body.usageDays !== undefined ? toInteger(req.body.usageDays) : undefined,
+      quantity: req.body.quantity !== undefined ? toInteger(req.body.quantity) : undefined,
       dailyRate: req.body.dailyRate !== undefined ? toMoney(req.body.dailyRate) : undefined,
       maintenanceCost: req.body.maintenanceCost !== undefined ? toMoney(req.body.maintenanceCost) : undefined,
     });
@@ -321,6 +368,7 @@ router.patch(
       start_date: string;
       end_date: string;
       usage_days: number;
+      quantity: number;
       daily_rate: string;
       maintenance_cost: string;
       ownership_type: string;
@@ -328,7 +376,7 @@ router.patch(
       approval_status: string | null;
     }>(
       `
-      SELECT project_id, start_date::text, end_date::text, usage_days, daily_rate::text, maintenance_cost::text, ownership_type, total_cost::text, approval_status
+      SELECT project_id, start_date::text, end_date::text, usage_days, quantity, daily_rate::text, maintenance_cost::text, ownership_type, total_cost::text, approval_status
       FROM engicost.equipment_usage
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
@@ -373,11 +421,12 @@ router.patch(
     const computedDays =
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     const newUsageDays = parsed.usageDays ?? computedDays;
+    const newQuantity = parsed.quantity ?? oldEquipment.quantity;
     const newDailyRate = parsed.dailyRate ?? Number(oldEquipment.daily_rate);
     const newMaintenanceCost = parsed.maintenanceCost ?? Number(oldEquipment.maintenance_cost);
     const newOwnershipType = parsed.ownershipType ?? oldEquipment.ownership_type;
     
-    const newRentalCost = newOwnershipType === "Rented" ? newUsageDays * newDailyRate : 0;
+    const newRentalCost = newOwnershipType === "Rented" ? newUsageDays * newDailyRate * newQuantity : 0;
     const newTotalCost = newRentalCost + newMaintenanceCost;
     const costDifference = newTotalCost - oldTotalCost;
 
@@ -400,6 +449,22 @@ router.patch(
       if (parsed.equipmentType) {
         setClauses.push(`equipment_type = $${paramIndex++}`);
         params.push(parsed.equipmentType);
+      }
+      if (parsed.assetTag !== undefined) {
+        setClauses.push(`asset_tag = $${paramIndex++}`);
+        params.push(parsed.assetTag);
+      }
+      if (parsed.quantity !== undefined) {
+        setClauses.push(`quantity = $${paramIndex++}`);
+        params.push(newQuantity);
+      }
+      if (parsed.assignedTo !== undefined) {
+        setClauses.push(`assigned_to = $${paramIndex++}`);
+        params.push(parsed.assignedTo);
+      }
+      if (parsed.conditionStatus !== undefined) {
+        setClauses.push(`condition_status = $${paramIndex++}`);
+        params.push(parsed.conditionStatus);
       }
       if (parsed.ownershipType) {
         setClauses.push(`ownership_type = $${paramIndex++}`);
@@ -433,6 +498,10 @@ router.patch(
         setClauses.push(`maintenance_notes = $${paramIndex++}`);
         params.push(parsed.maintenanceNotes);
       }
+      if (parsed.checkInDate !== undefined) {
+        setClauses.push(`check_in_date = $${paramIndex++}`);
+        params.push(parsed.checkInDate ?? null);
+      }
 
       setClauses.push(`rental_cost = $${paramIndex++}`);
       params.push(newRentalCost);
@@ -440,6 +509,8 @@ router.patch(
       params.push(newTotalCost);
       setClauses.push(`usage_days = $${paramIndex++}`);
       params.push(newUsageDays);
+      setClauses.push(`quantity = $${paramIndex++}`);
+      params.push(newQuantity);
 
       if (setClauses.length > 0) {
         await client.query(

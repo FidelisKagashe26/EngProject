@@ -38,6 +38,7 @@ router.get(
       receipt_ref: string | null;
       status: string;
       notes: string | null;
+      approval_status: string;
       created_at: string;
     }>(
       `
@@ -54,6 +55,7 @@ router.get(
         e.receipt_ref,
         e.status,
         e.notes,
+        e.approval_status,
         e.created_at::text
       FROM engicost.expenses e
       JOIN engicost.projects p ON p.id = e.project_id
@@ -113,6 +115,7 @@ router.get(
         receiptRef: row.receipt_ref ?? "",
         status: row.status,
         notes: row.notes ?? "",
+        approvalStatus: row.approval_status,
         createdAt: row.created_at,
       })),
       charts: {

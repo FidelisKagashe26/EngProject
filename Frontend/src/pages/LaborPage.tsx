@@ -93,6 +93,13 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
   const [viewWorker, setViewWorker] = useState<WorkerApiRecord | null>(null);
   const [viewPayment, setViewPayment] = useState<LaborPaymentApiRecord | null>(null);
   const [workerToDelete, setWorkerToDelete] = useState<WorkerApiRecord | null>(null);
+  const [editingPayment, setEditingPayment] = useState<LaborPaymentApiRecord | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<LaborPaymentApiRecord | null>(null);
+  const [editingPaymentAmount, setEditingPaymentAmount] = useState('');
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState('Cash');
+  const [editingPaymentNotes, setEditingPaymentNotes] = useState('');
+  const [savingPaymentUpdate, setSavingPaymentUpdate] = useState(false);
+  const [deletingPayment, setDeletingPayment] = useState(false);
   const [deletingWorker, setDeletingWorker] = useState(false);
 
   const [workerFullName, setWorkerFullName] = useState("");
@@ -396,6 +403,20 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     setSelectedWorkerForPayment(null);
   };
 
+  const openEditPayment = (payment: LaborPaymentApiRecord) => {
+    setEditingPayment(payment);
+    setEditingPaymentAmount(String(payment.amountPaid));
+    setEditingPaymentMethod(payment.paymentMethod || 'Cash');
+    setEditingPaymentNotes(payment.notes || '');
+  };
+
+  const closeEditPayment = () => {
+    setEditingPayment(null);
+    setEditingPaymentAmount('');
+    setEditingPaymentMethod('Cash');
+    setEditingPaymentNotes('');
+  };
+
   const handleSaveWorker = async () => {
     if (
       workerFullName.trim().length < 2 ||
@@ -501,6 +522,66 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
       setError(message);
     } finally {
       setSavingPayment(false);
+    }
+  };
+
+  const handleUpdatePayment = async () => {
+    if (editingPayment === null) return;
+
+    const nextAmountPaid = Number(editingPaymentAmount);
+    if (Number.isFinite(nextAmountPaid) === false || nextAmountPaid < 0) {
+      setError('Please enter a valid amount paid.');
+      return;
+    }
+
+    if (nextAmountPaid > editingPayment.totalPayable) {
+      setError('Amount paid cannot exceed total payable for this labor payment.');
+      return;
+    }
+
+    setSavingPaymentUpdate(true);
+    setError('');
+
+    try {
+      await api.updateLaborPayment(editingPayment.id, {
+        amountPaid: nextAmountPaid,
+        paymentMethod: editingPaymentMethod,
+        notes: editingPaymentNotes.trim(),
+      });
+      await refreshWorkers();
+      markSaved();
+      closeEditPayment();
+    } catch (updateError) {
+      const message =
+        updateError instanceof Error
+          ? updateError.message
+          : 'Failed to update labor payment.';
+      setError(message);
+    } finally {
+      setSavingPaymentUpdate(false);
+    }
+  };
+
+  const handleDeletePayment = async () => {
+    if (paymentToDelete === null) return;
+
+    setDeletingPayment(true);
+    setError('');
+
+    try {
+      await api.deleteLaborPayment(paymentToDelete.id);
+      await refreshWorkers();
+      markSaved();
+      setPaymentToDelete(null);
+    } catch (deleteError) {
+      const message =
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Failed to delete labor payment.';
+      setError(message);
+      setPaymentToDelete(null);
+    } finally {
+      setDeletingPayment(false);
     }
   };
 
@@ -737,6 +818,12 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                         <div className="ops-actions-row">
                           <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewPayment(payment)} type="button">
                             View
+                          </button>
+                          <button className='btn-secondary py-1 px-3 text-xs' onClick={() => openEditPayment(payment)} type='button'>
+                            Edit
+                          </button>
+                          <button className='btn-danger py-1 px-3 text-xs' onClick={() => setPaymentToDelete(payment)} type='button'>
+                            Delete
                           </button>
                         </div>
                       </td>
@@ -1051,6 +1138,55 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           </SurfaceCard>
         </div>
       )}
+      {editingPayment && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4'>
+          <SurfaceCard className='w-full max-w-xl max-h-[90vh] overflow-y-auto' title='Edit Labor Payment'>
+            <form className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+              <p className='text-sm font-semibold text-slate-700 sm:col-span-2'>{editingPayment.workerName}</p>
+              <FinancialInput
+                label='Amount Paid'
+                onChange={setEditingPaymentAmount}
+                placeholder='180000'
+                value={editingPaymentAmount}
+              />
+              <label className='form-field'>
+                <span>Payment Method</span>
+                <GuiSelect
+                  className='input-field'
+                  onChange={(event) => setEditingPaymentMethod(event.target.value)}
+                  value={editingPaymentMethod}
+                >
+                  <option value='Cash'>Cash</option>
+                  <option value='Mobile Money'>Mobile Money</option>
+                  <option value='Bank Transfer'>Bank Transfer</option>
+                  <option value='Cheque'>Cheque</option>
+                </GuiSelect>
+              </label>
+              <label className='form-field sm:col-span-2'>
+                <span>Notes</span>
+                <textarea
+                  className='input-field min-h-20'
+                  onChange={(event) => setEditingPaymentNotes(event.target.value)}
+                  value={editingPaymentNotes}
+                />
+              </label>
+              <div className='rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:col-span-2'>
+                <p>Total payable: <span className='font-semibold'>{formatTzs(editingPayment.totalPayable)}</span></p>
+                <p>Balance after edit: <span className='font-semibold'>{formatTzs(Math.max(editingPayment.totalPayable - (Number(editingPaymentAmount) || 0), 0))}</span></p>
+              </div>
+              <div className='flex justify-end gap-2 sm:col-span-2'>
+                <button className='btn-secondary' onClick={closeEditPayment} type='button'>
+                  Cancel
+                </button>
+                <button className='btn-primary' disabled={savingPaymentUpdate} onClick={() => void handleUpdatePayment()} type='button'>
+                  {savingPaymentUpdate ? 'Updating...' : 'Update Payment'}
+                </button>
+              </div>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
+
       <DetailModal
         onClose={() => setViewWorker(null)}
         open={viewWorker !== null}
@@ -1093,6 +1229,21 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
       />
 
       {/* Confirm Delete Modal */}
+      <ConfirmModal
+        cancelLabel='Cancel'
+        confirmClassName='btn-danger'
+        confirmLabel={deletingPayment ? 'Deleting...' : 'Delete'}
+        description={
+          paymentToDelete
+            ? 'Delete labor payment for ' + paymentToDelete.workerName + ' (' + formatTzs(paymentToDelete.amountPaid) + ')? Project and worker totals will be reversed.'
+            : ''
+        }
+        onCancel={() => setPaymentToDelete(null)}
+        onConfirm={() => void handleDeletePayment()}
+        open={paymentToDelete !== null}
+        title='Delete Labor Payment'
+      />
+
       <ConfirmModal
         cancelLabel="Cancel"
         confirmClassName="btn-danger"

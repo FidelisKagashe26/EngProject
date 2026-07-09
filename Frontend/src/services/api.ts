@@ -236,6 +236,7 @@ export interface LaborPaymentApiRecord {
   notes: string;
   createdAt: string;
   nextPaymentDueDate: string | null;
+  approvalStatus: string;
 }
 
 export type MaterialSupplySource = "Company Purchased" | "Client Supplied";
@@ -247,6 +248,8 @@ export interface MaterialRequirementApiRecord {
   materialName: string;
   requiredQuantity: number;
   purchasedQuantity: number;
+  orderedQuantity: number;
+  deliveredQuantity: number;
   companyPurchasedQuantity: number;
   clientSuppliedQuantity: number;
   remainingQuantity: number;
@@ -268,6 +271,7 @@ export interface MaterialPurchaseApiRecord {
   requirementId: string | null;
   materialName: string;
   quantityPurchased: number;
+  deliveredQuantity: number;
   supplierName: string;
   unitCost: number;
   totalCost: number;
@@ -277,11 +281,25 @@ export interface MaterialPurchaseApiRecord {
   deliveryStatus: string;
   receiptRef: string;
   notes: string;
+  approvalStatus: string;
+}
+
+export interface MaterialSupplyRequestApiRecord {
+  id: string;
+  requirementId: string;
+  projectId: string;
+  requestedQuantity: number;
+  requestDate: string;
+  status: string;
+  requestedBy: string;
+  notes: string;
+  createdAt: string;
 }
 
 export interface MaterialsResponse {
   requirements: MaterialRequirementApiRecord[];
   purchases: MaterialPurchaseApiRecord[];
+  supplyRequests: MaterialSupplyRequestApiRecord[];
 }
 
 export interface ExpenseApiRecord {
@@ -297,6 +315,7 @@ export interface ExpenseApiRecord {
   receiptRef: string;
   status: string;
   notes: string;
+  approvalStatus: string;
   createdAt: string;
 }
 
@@ -429,6 +448,11 @@ export interface EquipmentApiRecord {
   projectName: string;
   equipmentName: string;
   equipmentType: string;
+  assetTag: string;
+  quantity: number;
+  assignedTo: string;
+  conditionStatus: string;
+  checkInDate: string | null;
   ownershipType: "Owned" | "Rented";
   ownerName: string;
   startDate: string;
@@ -442,6 +466,7 @@ export interface EquipmentApiRecord {
   maintenanceNotes: string;
   createdAt: string;
   updatedAt: string;
+  approvalStatus: string;
 }
 
 export interface EquipmentResponse {
@@ -459,6 +484,11 @@ export interface CreateEquipmentPayload {
   projectId: string;
   equipmentName: string;
   equipmentType: string;
+  assetTag: string;
+  quantity: number;
+  assignedTo: string;
+  conditionStatus: string;
+  checkInDate?: string;
   ownershipType: "Owned" | "Rented";
   ownerName: string;
   startDate: string;
@@ -540,6 +570,7 @@ export interface CreateMaterialPurchasePayload {
   requirementId: string;
   materialName: string;
   quantityPurchased: number;
+  deliveredQuantity: number;
   supplierName: string;
   unitCost: number;
   supplySource: MaterialSupplySource;
@@ -790,6 +821,7 @@ export interface PettyCashApiRecord {
   status: "Pending" | "Reconciled";
   notes: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface PettyCashResponse {
@@ -812,6 +844,10 @@ export interface CreatePettyCashPayload {
   status: "Pending" | "Reconciled";
   notes: string;
 }
+
+export type UpdatePettyCashPayload = CreatePettyCashPayload;
+
+export type UpdateLaborPaymentPayload = Partial<Pick<LaborPaymentPayload, "amountPaid" | "rateAmount" | "paymentMethod" | "notes">>;
 
 export interface QuoteRequestApiRecord {
   id: string;
@@ -1210,6 +1246,10 @@ export const api = {
     apiRequest<{ message: string; reversedAmount: number }>(`/expenses/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+  restoreExpense: (id: string) =>
+    apiRequest<{ message: string }>(`/expenses/${encodeURIComponent(id)}/restore`, {
+      method: "PATCH",
+    }),
   getPayments: () => apiRequest<PaymentsResponse>("/payments"),
   createPayment: (payload: CreatePaymentPayload) =>
     apiRequest<CreatePaymentResponse>("/payments", {
@@ -1245,6 +1285,10 @@ export const api = {
   deleteEquipment: (id: string) =>
     apiRequest<{ message: string; reversedAmount: number }>(`/equipment/${encodeURIComponent(id)}`, {
       method: "DELETE",
+    }),
+  restoreEquipment: (id: string) =>
+    apiRequest<{ message: string }>(`/equipment/${encodeURIComponent(id)}/restore`, {
+      method: "PATCH",
     }),
   getSuppliers: () => apiRequest<SuppliersResponse>("/suppliers"),
   createSupplier: (payload: CreateSupplierPayload) =>
@@ -1282,6 +1326,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getLaborPayments: () => apiRequest<LaborPaymentApiRecord[]>("/workers/payments"),
+  updateLaborPayment: (id: string, payload: UpdateLaborPaymentPayload) =>
+    apiRequest<{ message: string; amountDifference: number; newAmountPaid: number }>(
+      `/workers/labor-payments/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+    ),
+  deleteLaborPayment: (id: string) =>
+    apiRequest<{ message: string; reversedAmount: number }>(`/workers/labor-payments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  restoreLaborPayment: (id: string) =>
+    apiRequest<{ message: string }>(`/workers/labor-payments/${encodeURIComponent(id)}/restore`, {
+      method: "PATCH",
+    }),
   getMaterials: () => apiRequest<MaterialsResponse>("/materials"),
   createMaterialRequirement: (payload: CreateMaterialRequirementPayload) =>
     apiRequest<MaterialRequirementApiRecord>("/materials/requirements", {
@@ -1398,9 +1455,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updatePettyCash: (id: string, payload: UpdatePettyCashPayload) =>
+    apiRequest<PettyCashApiRecord>(`/petty-cash/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   deletePettyCash: (id: string) =>
     apiRequest<{ message: string }>(`/petty-cash/${encodeURIComponent(id)}`, {
       method: "DELETE",
+    }),
+  restorePettyCash: (id: string) =>
+    apiRequest<{ message: string }>(`/petty-cash/${encodeURIComponent(id)}/restore`, {
+      method: "PATCH",
     }),
   getUsers: () => apiRequest<UsersResponse>("/users"),
   createUser: (payload: CreateUserPayload) =>

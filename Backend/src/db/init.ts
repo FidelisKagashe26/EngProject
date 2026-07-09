@@ -176,7 +176,11 @@ export const initializeDatabase = async (): Promise<void> => {
       receipt_ref VARCHAR(120),
       status VARCHAR(40) NOT NULL DEFAULT 'Pending',
       notes TEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      deleted_at TIMESTAMP,
+      deleted_by VARCHAR(160)
     );
   `);
 
@@ -327,7 +331,31 @@ export const initializeDatabase = async (): Promise<void> => {
   `);
   await db.query(`
     ALTER TABLE engicost.material_purchases
-    ADD COLUMN IF NOT EXISTS supply_source VARCHAR(40) NOT NULL DEFAULT 'Company Purchased'
+    ADD COLUMN IF NOT EXISTS supply_source VARCHAR(40) NOT NULL DEFAULT 'Company Purchased',
+    ADD COLUMN IF NOT EXISTS delivered_quantity NUMERIC(16, 2) NOT NULL DEFAULT 0
+  `);
+
+  await db.query(`
+    UPDATE engicost.material_purchases
+    SET delivered_quantity = quantity_purchased
+    WHERE delivered_quantity = 0
+      AND delivery_status = 'Delivered'
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.material_supply_requests (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      requirement_id VARCHAR(40) NOT NULL REFERENCES engicost.material_requirements(id) ON DELETE CASCADE,
+      project_id VARCHAR(40) NOT NULL REFERENCES engicost.projects(id) ON DELETE CASCADE,
+      requested_quantity NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      request_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      status VARCHAR(40) NOT NULL DEFAULT 'Requested',
+      requested_by VARCHAR(160) NOT NULL DEFAULT 'Store Keeper',
+      notes TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
   `);
 
   await db.query(`
@@ -410,6 +438,10 @@ export const initializeDatabase = async (): Promise<void> => {
       project_id VARCHAR(40) NOT NULL REFERENCES engicost.projects(id) ON DELETE CASCADE,
       equipment_name VARCHAR(180) NOT NULL,
       equipment_type VARCHAR(120) NOT NULL,
+      asset_tag VARCHAR(80),
+      quantity INTEGER NOT NULL DEFAULT 1,
+      assigned_to VARCHAR(160),
+      condition_status VARCHAR(60) NOT NULL DEFAULT 'Good',
       ownership_type VARCHAR(30) NOT NULL,
       owner_name VARCHAR(180) NOT NULL,
       start_date DATE NOT NULL,
@@ -424,6 +456,15 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await db.query(`
+    ALTER TABLE engicost.equipment_usage
+    ADD COLUMN IF NOT EXISTS asset_tag VARCHAR(80),
+    ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(160),
+    ADD COLUMN IF NOT EXISTS condition_status VARCHAR(60) NOT NULL DEFAULT 'Good',
+    ADD COLUMN IF NOT EXISTS check_in_date DATE
   `);
 
   await db.query(`
@@ -442,6 +483,15 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+
+  await db.query(`
+    ALTER TABLE engicost.petty_cash_transactions
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160)
+  `);
+
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.password_reset_otps (

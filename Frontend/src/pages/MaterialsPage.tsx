@@ -38,6 +38,7 @@ type MaterialTableRow = {
   totalCost: number;
   purchaseDate: string;
   deliveryStatus: string;
+  deliveredQuantity: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
   lastRequestDate: string | null;
@@ -105,6 +106,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
   const [purchaseDate, setPurchaseDate] = useState("");
   const [deliveryNoteNumber, setDeliveryNoteNumber] = useState("");
   const [deliveryStatus, setDeliveryStatus] = useState("Pending Delivery");
+  const [deliveredQuantity, setDeliveredQuantity] = useState("");
   const [receiptRef, setReceiptRef] = useState("");
   const [purchaseNotes, setPurchaseNotes] = useState("");
   const [savingPurchase, setSavingPurchase] = useState(false);
@@ -210,6 +212,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         totalCost: latest?.totalCost ?? 0,
         purchaseDate: latest?.purchaseDate ?? "",
         deliveryStatus: latest?.deliveryStatus ?? "Pending Delivery",
+        deliveredQuantity: latest?.deliveredQuantity ?? 0,
         supplySource: req.supplySource,
         requestedQuantity: req.requestedQuantity,
         lastRequestDate: req.lastRequestDate,
@@ -303,6 +306,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     setPurchaseDate("");
     setDeliveryNoteNumber("");
     setDeliveryStatus("Pending Delivery");
+    setDeliveredQuantity("");
     setReceiptRef("");
     setPurchaseNotes("");
   };
@@ -339,6 +343,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     setPurchaseDate(purchase.purchaseDate);
     setDeliveryNoteNumber(purchase.deliveryNoteNumber);
     setDeliveryStatus(purchase.deliveryStatus);
+    setDeliveredQuantity(purchase.deliveredQuantity > 0 ? String(purchase.deliveredQuantity) : "");
     setReceiptRef(purchase.receiptRef);
     setPurchaseNotes(purchase.notes);
     setShowPurchaseModal(true);
@@ -388,6 +393,13 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
     }
   };
 
+  const effectiveDeliveredQuantity = useMemo(() => {
+    const purchased = Number(qtyPurchased) || 0;
+    if (deliveryStatus === "Delivered") return purchased;
+    if (deliveryStatus === "Pending Delivery") return 0;
+    return Math.min(Math.max(Number(deliveredQuantity) || 0, 0), purchased);
+  }, [deliveredQuantity, deliveryStatus, qtyPurchased]);
+
   const handleSavePurchase = async () => {
     const effectiveSupplierName = purchaseSupplySource === "Client Supplied"
       ? (supplierName.trim() || "Client Supplied")
@@ -404,6 +416,7 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         requirementId: purchaseRequirementId,
         materialName: purchaseMaterialName.trim(),
         quantityPurchased: Number(qtyPurchased) || 0,
+        deliveredQuantity: effectiveDeliveredQuantity,
         supplierName: effectiveSupplierName,
         unitCost: purchaseSupplySource === "Client Supplied" ? 0 : Number(unitCost) || 0,
         supplySource: purchaseSupplySource,
@@ -744,6 +757,17 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
               <label className="form-field">
                 <span>Quantity Purchased</span>
                 <input className="input-field" onChange={(e) => setQtyPurchased(e.target.value)} type="number" value={qtyPurchased} />
+              </label>
+              <label className="form-field">
+                <span>Delivered Quantity</span>
+                <input
+                  className="input-field"
+                  disabled={deliveryStatus !== "Partially Delivered"}
+                  onChange={(e) => setDeliveredQuantity(e.target.value)}
+                  placeholder={deliveryStatus === "Delivered" ? qtyPurchased || "0" : "Quantity received"}
+                  type="number"
+                  value={deliveryStatus === "Delivered" ? qtyPurchased : deliveryStatus === "Pending Delivery" ? "0" : deliveredQuantity}
+                />
               </label>
               <label className="form-field">
                 <span>Supplier</span>

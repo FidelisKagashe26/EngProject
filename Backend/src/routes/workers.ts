@@ -245,6 +245,7 @@ router.get(
             FROM engicost.labor_payments lp
             WHERE lp.company_id = $1
               AND lp.is_deleted = FALSE
+              AND lp.approval_status IN ('APPROVED', 'AUTO_APPROVED')
               AND DATE_TRUNC('month', lp.work_end) = DATE_TRUNC('month', CURRENT_DATE)
           ) AS total_paid_month,
           (
@@ -410,6 +411,7 @@ router.get(
       payment_method: string;
       notes: string | null;
       created_at: string;
+      approval_status: string;
     }>(
       `
       SELECT
@@ -430,7 +432,8 @@ router.get(
         lp.balance::text,
         lp.payment_method,
         lp.notes,
-        lp.created_at::text
+        lp.created_at::text,
+        lp.approval_status
       FROM engicost.labor_payments lp
       INNER JOIN engicost.workers w ON w.id = lp.worker_id
       LEFT JOIN engicost.projects p ON p.id = lp.project_id
@@ -460,6 +463,7 @@ router.get(
       paymentMethod: row.payment_method,
       notes: row.notes ?? "",
       createdAt: row.created_at,
+      approvalStatus: row.approval_status,
       nextPaymentDueDate: null,
     })));
   }),

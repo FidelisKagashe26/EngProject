@@ -45,6 +45,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState("");
   const [viewEntry, setViewEntry] = useState<PettyCashApiRecord | null>(null);
   const [entryToDelete, setEntryToDelete] = useState<PettyCashApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -118,6 +119,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
   }, [amount, currentBalance, transactionType]);
 
   const resetForm = () => {
+    setEditingEntryId("");
     setFormProjectId("");
     setTransactionDate("");
     setTransactionType("Cash Out");
@@ -139,6 +141,20 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
     resetForm();
   };
 
+  const openEditModal = (entry: PettyCashApiRecord) => {
+    setEditingEntryId(entry.id);
+    setFormProjectId(entry.projectId ?? "");
+    setTransactionDate(entry.transactionDate);
+    setTransactionType(entry.transactionType);
+    setDescription(entry.description);
+    setAmount(String(entry.amount));
+    setRecordedBy(entry.recordedBy);
+    setReceiptRef(entry.receiptRef);
+    setFormStatus(entry.status);
+    setNotes(entry.notes);
+    setShowAddModal(true);
+  };
+
   const handleSave = async () => {
     if (
       description.trim().length < 3 ||
@@ -152,7 +168,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
     setSaving(true);
     setError("");
     try {
-      await api.createPettyCash({
+      const payload = {
         projectId: formProjectId,
         transactionDate,
         transactionType,
@@ -162,7 +178,12 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
         receiptRef: receiptRef.trim(),
         status: formStatus,
         notes: notes.trim(),
-      });
+      };
+      if (editingEntryId) {
+        await api.updatePettyCash(editingEntryId, payload);
+      } else {
+        await api.createPettyCash(payload);
+      }
       await refreshData();
       markSaved();
       closeAddModal();
@@ -307,6 +328,13 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
                             View
                           </button>
                           <button
+                            className="btn-secondary py-1 px-3 text-xs"
+                            onClick={() => openEditModal(row)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
                             className="btn-danger py-1 px-3 text-xs"
                             onClick={() => setEntryToDelete(row)}
                             type="button"
@@ -338,7 +366,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
       {/* Add Transaction Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" title="Add Petty Cash Transaction">
+          <SurfaceCard className='w-full max-w-2xl max-h-[90vh] overflow-y-auto' title={editingEntryId ? 'Edit Petty Cash Transaction' : 'Add Petty Cash Transaction'}>
             <form className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project / Site</span>
@@ -456,7 +484,7 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
                   onClick={() => void handleSave()}
                   type="button"
                 >
-                  Save Transaction
+                  {editingEntryId ? 'Update Transaction' : 'Save Transaction'}
                 </button>
               </div>
             </form>

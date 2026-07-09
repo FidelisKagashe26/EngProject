@@ -32,6 +32,7 @@ const requirementSchema = z.object({
 const requestSupplySchema = z.object({
   requestedQuantity: z.number().positive(),
   requestDate: z.string().date().optional(),
+  requestedBy: z.string().optional().default(""),
   notes: z.string().optional().default(""),
 });
 
@@ -46,6 +47,7 @@ const purchaseSchema = z.object({
   purchaseDate: z.string().date(),
   deliveryNoteNumber: z.string().optional().default(""),
   deliveryStatus: z.string().optional().default("Pending Delivery"),
+  deliveredQuantity: z.number().nonnegative().optional().default(0),
   receiptRef: z.string().optional().default(""),
   notes: z.string().optional().default(""),
 });
@@ -60,6 +62,8 @@ type RequirementLookup = {
   project_id: string;
   material_name: string;
   supply_source: string;
+  required_quantity: string;
+  requested_quantity: string;
 };
 
 type QueryExecutor = {
@@ -70,6 +74,18 @@ const normalizeText = (value: string): string =>
   value.trim().toLowerCase().replace(/\s+/g, " ");
 
 const getTodaySqlDate = (): string => new Date().toISOString().slice(0, 10);
+
+const normalizeDeliveredQuantity = (
+  deliveryStatus: string,
+  quantityPurchased: number,
+  deliveredQuantity: number | undefined,
+): number => {
+  if (deliveryStatus === "Pending Delivery") return 0;
+  if (deliveryStatus === "Delivered") {
+    return quantityPurchased;
+  }
+  return Math.min(Math.max(Number(deliveredQuantity ?? 0), 0), quantityPurchased);
+};
 
 const getProjectById = async (
   companyId: number,
@@ -93,7 +109,7 @@ const getRequirementById = async (
 ): Promise<RequirementLookup | null> => {
   const result = await db.query<RequirementLookup>(
     `
-    SELECT id, project_id, material_name, supply_source
+    SELECT id, project_id, material_name, supply_source, required_quantity::text, requested_quantity::text
     FROM engicost.material_requirements
     WHERE company_id = $1 AND id = $2
     LIMIT 1
@@ -124,11 +140,13 @@ const refreshRequirementSupplyStatus = async (
       END,
       updated_at = NOW()
     FROM (
-      SELECT COALESCE(SUM(quantity_purchased), 0) AS quantity
+      SELECT COALESCE(SUM(LEAST(delivered_quantity, quantity_purchased)), 0) AS quantity
       FROM engicost.material_purchases
       WHERE company_id = $1
         AND requirement_id = $2
         AND is_deleted = FALSE
+        AND approval_status IN ('APPROVED', 'AUTO_APPROVED')
+        AND delivery_status IN ('Delivered', 'Partially Delivered')
     ) delivered
     WHERE mr.company_id = $1 AND mr.id = $2
     `,
@@ -141,7 +159,7 @@ router.get(
   handleAsync(async (_req, res) => {
     const companyId = await getSingleTenantCompanyId();
 
-    const [requirementsResult, purchasesResult] = await Promise.all([
+    const [requirementsResult, purchasesResult, requestsResult] = await Promise.all([
       db.query<{
         id: string;
         project_id: string;
@@ -188,6 +206,7 @@ router.get(
         requirement_id: string | null;
         material_name: string;
         quantity_purchased: string;
+        delivered_quantity: string;
         supplier_name: string;
         unit_cost: string;
         total_cost: string;
@@ -207,6 +226,7 @@ router.get(
           mp.requirement_id,
           mp.material_name,
           mp.quantity_purchased::text,
+          mp.delivered_quantity::text,
           mp.supplier_name,
           mp.unit_cost::text,
           mp.total_cost::text,
@@ -215,7 +235,8 @@ router.get(
           mp.delivery_note_number,
           mp.delivery_status,
           mp.receipt_ref,
-          mp.notes
+          mp.notes,
+          mp.approval_status
         FROM engicost.material_purchases mp
         JOIN engicost.projects p ON p.id = mp.project_id
         WHERE mp.company_id = $1 AND mp.is_deleted = FALSE
@@ -223,13 +244,55 @@ router.get(
         `,
         [companyId],
       ),
+      db.query<{
+        id: string;
+        requirement_id: string;
+        project_id: string;
+        requested_quantity: string;
+        request_date: string;
+        status: string;
+        requested_by: string;
+        notes: string | null;
+        created_at: string;
+      }>(
+        `
+        SELECT
+          msr.id,
+          msr.requirement_id,
+          msr.project_id,
+          msr.requested_quantity::text,
+          msr.request_date::text,
+          msr.status,
+          msr.requested_by,
+          msr.notes,
+          msr.created_at::text
+        FROM engicost.material_supply_requests msr
+        WHERE msr.company_id = $1
+        ORDER BY msr.request_date DESC, msr.created_at DESC
+        LIMIT 300
+        `,
+        [companyId],
+      ),
     ]);
 
-    const purchasedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
+    const isAppliedPurchase = (item: { approval_status?: string | null }) =>
+      isAppliedApprovalStatus(item.approval_status);
+
+    const orderedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
       (acc, item) => {
-        if (item.requirement_id) {
+        if (item.requirement_id && isAppliedPurchase(item)) {
           acc[item.requirement_id] =
             (acc[item.requirement_id] ?? 0) + Number(item.quantity_purchased);
+        }
+        return acc;
+      },
+      {},
+    );
+    const deliveredByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
+      (acc, item) => {
+        if (item.requirement_id && isAppliedPurchase(item)) {
+          acc[item.requirement_id] =
+            (acc[item.requirement_id] ?? 0) + Math.min(Number(item.delivered_quantity), Number(item.quantity_purchased));
         }
         return acc;
       },
@@ -237,9 +300,9 @@ router.get(
     );
     const clientSuppliedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
       (acc, item) => {
-        if (item.requirement_id && item.supply_source === "Client Supplied") {
+        if (item.requirement_id && item.supply_source === "Client Supplied" && isAppliedPurchase(item)) {
           acc[item.requirement_id] =
-            (acc[item.requirement_id] ?? 0) + Number(item.quantity_purchased);
+            (acc[item.requirement_id] ?? 0) + Math.min(Number(item.delivered_quantity), Number(item.quantity_purchased));
         }
         return acc;
       },
@@ -247,9 +310,9 @@ router.get(
     );
     const companyPurchasedByRequirement = purchasesResult.rows.reduce<Record<string, number>>(
       (acc, item) => {
-        if (item.requirement_id && item.supply_source !== "Client Supplied") {
+        if (item.requirement_id && item.supply_source !== "Client Supplied" && isAppliedPurchase(item)) {
           acc[item.requirement_id] =
-            (acc[item.requirement_id] ?? 0) + Number(item.quantity_purchased);
+            (acc[item.requirement_id] ?? 0) + Math.min(Number(item.delivered_quantity), Number(item.quantity_purchased));
         }
         return acc;
       },
@@ -258,7 +321,8 @@ router.get(
 
     res.json({
       requirements: requirementsResult.rows.map((row) => {
-        const purchased = purchasedByRequirement[row.id] ?? 0;
+        const ordered = orderedByRequirement[row.id] ?? 0;
+        const delivered = deliveredByRequirement[row.id] ?? 0;
         const required = Number(row.required_quantity);
         return {
           id: row.id,
@@ -266,10 +330,12 @@ router.get(
           projectName: row.project_name,
           materialName: row.material_name,
           requiredQuantity: required,
-          purchasedQuantity: purchased,
+          purchasedQuantity: delivered,
+          orderedQuantity: ordered,
+          deliveredQuantity: delivered,
           companyPurchasedQuantity: companyPurchasedByRequirement[row.id] ?? 0,
           clientSuppliedQuantity: clientSuppliedByRequirement[row.id] ?? 0,
-          remainingQuantity: Math.max(required - purchased, 0),
+          remainingQuantity: Math.max(required - delivered, 0),
           unit: row.unit,
           estimatedUnitCost: Number(row.estimated_unit_cost),
           supplySource: row.supply_source,
@@ -288,6 +354,7 @@ router.get(
         requirementId: row.requirement_id,
         materialName: row.material_name,
         quantityPurchased: Number(row.quantity_purchased),
+        deliveredQuantity: Number(row.delivered_quantity),
         supplierName: row.supplier_name,
         unitCost: Number(row.unit_cost),
         totalCost: Number(row.total_cost),
@@ -297,6 +364,18 @@ router.get(
         deliveryStatus: row.delivery_status,
         receiptRef: row.receipt_ref ?? "",
         notes: row.notes ?? "",
+        approvalStatus: row.approval_status,
+      })),
+      supplyRequests: requestsResult.rows.map((row) => ({
+        id: row.id,
+        requirementId: row.requirement_id,
+        projectId: row.project_id,
+        requestedQuantity: Number(row.requested_quantity),
+        requestDate: row.request_date,
+        status: row.status,
+        requestedBy: row.requested_by,
+        notes: row.notes ?? "",
+        createdAt: row.created_at,
       })),
     });
   }),
@@ -540,57 +619,123 @@ router.patch(
       requestedQuantity: toMoney(req.body.requestedQuantity),
     });
 
-    const updated = await db.query<{
+    const requirement = await getRequirementById(companyId, requirementId);
+    if (!requirement) {
+      res.status(404).json({ message: "Material requirement not found." });
+      return;
+    }
+
+    const deliveredResult = await db.query<{ delivered: string }>(
+      `
+      SELECT COALESCE(SUM(LEAST(delivered_quantity, quantity_purchased)), 0)::text AS delivered
+      FROM engicost.material_purchases
+      WHERE company_id = $1
+        AND requirement_id = $2
+        AND is_deleted = FALSE
+        AND approval_status IN ('APPROVED', 'AUTO_APPROVED')
+        AND delivery_status IN ('Delivered', 'Partially Delivered')
+      `,
+      [companyId, requirementId],
+    );
+    const requiredQuantity = Number(requirement.required_quantity);
+    const deliveredQuantity = Number(deliveredResult.rows[0]?.delivered ?? 0);
+    const remainingQuantity = Math.max(requiredQuantity - deliveredQuantity, 0);
+    if (remainingQuantity <= 0) {
+      res.status(400).json({ message: "This material requirement is already fulfilled." });
+      return;
+    }
+    if (parsed.requestedQuantity > remainingQuantity) {
+      res.status(400).json({
+        message: `Requested quantity cannot exceed remaining quantity (${remainingQuantity.toLocaleString("en-TZ")}).`,
+      });
+      return;
+    }
+
+    const requestedBy = parsed.requestedBy.trim() || req.authUser?.fullName || "Store Keeper";
+    const client = await db.connect();
+    let row: {
       id: string;
       project_id: string;
       material_name: string;
       requested_quantity: string;
       last_request_date: string | null;
       supply_status: string;
-    }>(
-      `
-      UPDATE engicost.material_requirements
-      SET
-        requested_quantity = requested_quantity + $3,
-        last_request_date = $4,
-        supply_status = 'Requested',
-        notes = CASE
-          WHEN $5::text = '' THEN notes
-          WHEN COALESCE(notes, '') = '' THEN $5
-          ELSE notes || E'\n' || $5
-        END,
-        updated_at = NOW()
-      WHERE company_id = $1 AND id = $2
-      RETURNING id, project_id, material_name, requested_quantity::text, last_request_date::text, supply_status
-      `,
-      [
-        companyId,
-        requirementId,
-        parsed.requestedQuantity,
-        parsed.requestDate ?? getTodaySqlDate(),
-        parsed.notes.trim(),
-      ],
-    );
+    } | undefined;
 
-    if (updated.rowCount === 0) {
-      res.status(404).json({ message: "Material requirement not found." });
-      return;
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `
+        INSERT INTO engicost.material_supply_requests (
+          id, company_id, requirement_id, project_id, requested_quantity,
+          request_date, status, requested_by, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'Requested', $7, $8)
+        `,
+        [
+          makeId("MSR"),
+          companyId,
+          requirementId,
+          requirement.project_id,
+          parsed.requestedQuantity,
+          parsed.requestDate ?? getTodaySqlDate(),
+          requestedBy,
+          parsed.notes.trim(),
+        ],
+      );
+
+      const updated = await client.query<{ id: string; project_id: string; material_name: string; requested_quantity: string; last_request_date: string | null; supply_status: string }>(
+        `
+        UPDATE engicost.material_requirements
+        SET
+          requested_quantity = LEAST(required_quantity, requested_quantity + $3),
+          last_request_date = $4,
+          supply_status = CASE WHEN supply_status = 'Fulfilled' THEN supply_status ELSE 'Requested' END,
+          notes = CASE
+            WHEN $5::text = '' THEN notes
+            WHEN COALESCE(notes, '') = '' THEN $5
+            ELSE notes || E'\n' || $5
+          END,
+          updated_at = NOW()
+        WHERE company_id = $1 AND id = $2
+        RETURNING id, project_id, material_name, requested_quantity::text, last_request_date::text, supply_status
+        `,
+        [
+          companyId,
+          requirementId,
+          parsed.requestedQuantity,
+          parsed.requestDate ?? getTodaySqlDate(),
+          parsed.notes.trim(),
+        ],
+      );
+      row = updated.rows[0];
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Requested Material Supply', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          requestedBy,
+          requirement.project_id,
+          `Requested ${parsed.requestedQuantity.toLocaleString("en-TZ")} more ${requirement.material_name}.`,
+        ],
+      );
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
 
-    const row = updated.rows[0];
-    await db.query(
-      `
-      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, $3, 'Requested Material Supply', 'Materials', $4, $5, '127.0.0.1 / Local Dev')
-      `,
-      [
-        makeId("ACT"),
-        companyId,
-        req.authUser?.fullName || "Store Keeper",
-        row.project_id,
-        `Requested ${parsed.requestedQuantity.toLocaleString("en-TZ")} more ${row.material_name}.`,
-      ],
-    );
+    if (!row) {
+      res.status(500).json({ message: "Failed to request material supply." });
+      return;
+    }
 
     res.json({
       id: row.id,
@@ -608,6 +753,7 @@ router.post(
     const parsed = purchaseSchema.parse({
       ...req.body,
       quantityPurchased: toMoney(req.body.quantityPurchased),
+      deliveredQuantity: req.body.deliveredQuantity !== undefined ? toMoney(req.body.deliveredQuantity) : undefined,
       unitCost: toMoney(req.body.unitCost),
     });
 
@@ -649,6 +795,15 @@ router.post(
 
     const isClientSupplied = parsed.supplySource === "Client Supplied";
     const totalCost = isClientSupplied ? 0 : parsed.quantityPurchased * parsed.unitCost;
+    const deliveredQuantity = normalizeDeliveredQuantity(
+      parsed.deliveryStatus,
+      parsed.quantityPurchased,
+      parsed.deliveredQuantity,
+    );
+    if (parsed.deliveryStatus === "Partially Delivered" && deliveredQuantity <= 0) {
+      res.status(400).json({ message: "Partially delivered receipts require delivered quantity greater than zero." });
+      return;
+    }
     const needsApproval = !isClientSupplied && requiresApproval("material_purchases", totalCost);
     const approvalStatus = getApprovalStatusForAmount("material_purchases", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Store Keeper";
@@ -660,6 +815,7 @@ router.post(
           requirement_id: string | null;
           material_name: string;
           quantity_purchased: string;
+          delivered_quantity: string;
           supplier_name: string;
           unit_cost: string;
           total_cost: string;
@@ -682,6 +838,7 @@ router.post(
         requirement_id: string | null;
         material_name: string;
         quantity_purchased: string;
+        delivered_quantity: string;
         supplier_name: string;
         unit_cost: string;
         total_cost: string;
@@ -697,13 +854,13 @@ router.post(
         INSERT INTO engicost.material_purchases (
           id, company_id, project_id, requirement_id, material_name, quantity_purchased,
           supplier_name, unit_cost, total_cost, supply_source, purchase_date, delivery_note_number,
-          delivery_status, receipt_ref, notes,
+          delivery_status, receipt_ref, notes, delivered_quantity,
           approval_status, approval_requested_by, approval_requested_at
         ) VALUES (
           $1, $2, $3, NULLIF($4, ''), $5, $6,
           $7, $8, $9, $10, $11,
-          $12, $13, $14, $15,
-          $16, $17, NOW()
+          $12, $13, $14, $15, $16,
+          $17, $18, NOW()
         )
         RETURNING
           id,
@@ -711,6 +868,7 @@ router.post(
           requirement_id,
           material_name,
           quantity_purchased::text,
+          delivered_quantity::text,
           supplier_name,
           unit_cost::text,
           total_cost::text,
@@ -738,6 +896,7 @@ router.post(
           parsed.deliveryStatus,
           parsed.receiptRef,
           parsed.notes,
+          deliveredQuantity,
           approvalStatus,
           requestedBy,
         ],
@@ -796,6 +955,7 @@ router.post(
       requirementId: row.requirement_id,
       materialName: row.material_name,
       quantityPurchased: Number(row.quantity_purchased),
+      deliveredQuantity: Number(row.delivered_quantity),
       supplierName: row.supplier_name,
       unitCost: Number(row.unit_cost),
       totalCost: Number(row.total_cost),
@@ -831,6 +991,8 @@ router.patch(
       requirement_id: string | null;
       material_name: string;
       quantity_purchased: string;
+      delivered_quantity: string;
+      delivery_status: string;
       unit_cost: string;
       total_cost: string;
       supply_source: string;
@@ -842,6 +1004,8 @@ router.patch(
         requirement_id,
         material_name,
         quantity_purchased::text,
+        delivered_quantity::text,
+        delivery_status,
         unit_cost::text,
         total_cost::text,
         supply_source,
@@ -873,6 +1037,16 @@ router.patch(
         ? 0
         : parsed.unitCost ?? Number(oldPurchase.unit_cost);
     const newTotalCost = newSupplySource === "Client Supplied" ? 0 : newQuantity * newUnitCost;
+    const newDeliveryStatus = parsed.deliveryStatus ?? oldPurchase.delivery_status;
+    const newDeliveredQuantity = normalizeDeliveredQuantity(
+      newDeliveryStatus,
+      newQuantity,
+      parsed.deliveredQuantity ?? Number(oldPurchase.delivered_quantity),
+    );
+    if (newDeliveryStatus === "Partially Delivered" && newDeliveredQuantity <= 0) {
+      res.status(400).json({ message: "Partially delivered receipts require delivered quantity greater than zero." });
+      return;
+    }
     const costDifference = newTotalCost - oldTotalCost;
 
     if (parsed.projectId) {
@@ -968,6 +1142,8 @@ router.patch(
         params.push(parsed.notes);
       }
 
+      setClauses.push(`delivered_quantity = $${paramIndex++}`);
+      params.push(newDeliveredQuantity);
       setClauses.push(`total_cost = $${paramIndex++}`);
       params.push(newTotalCost);
 

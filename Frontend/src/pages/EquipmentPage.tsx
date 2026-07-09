@@ -58,6 +58,11 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
   const [projectId, setProjectId] = useState(projectFromQuery);
   const [equipmentName, setEquipmentName] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
+  const [assetTag, setAssetTag] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [conditionStatus, setConditionStatus] = useState("Good");
+  const [checkInDate, setCheckInDate] = useState("");
   const [ownershipType, setOwnershipType] = useState<"Owned" | "Rented">("Owned");
   const [ownerName, setOwnerName] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -116,6 +121,9 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         r.equipmentType.toLowerCase().includes(q) ||
         r.projectName.toLowerCase().includes(q) ||
         r.ownerName.toLowerCase().includes(q) ||
+        r.assetTag.toLowerCase().includes(q) ||
+        r.assignedTo.toLowerCase().includes(q) ||
+        r.conditionStatus.toLowerCase().includes(q) ||
         r.status.toLowerCase().includes(q),
     );
   }, [equipmentRows, search]);
@@ -142,14 +150,20 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     const days = computedUsageDays;
     const rate = Number(dailyRate) || 0;
     const maintenance = Number(maintenanceCost) || 0;
-    const rental = ownershipType === "Rented" ? days * rate : 0;
+    const qty = Math.max(Number(quantity) || 1, 1);
+    const rental = ownershipType === "Rented" ? days * rate * qty : 0;
     return rental + maintenance;
-  }, [computedUsageDays, dailyRate, maintenanceCost, ownershipType]);
+  }, [computedUsageDays, dailyRate, maintenanceCost, ownershipType, quantity]);
 
   const resetForm = () => {
     setEditingEquipmentId("");
     setEquipmentName("");
     setEquipmentType("");
+    setAssetTag("");
+    setQuantity("1");
+    setAssignedTo("");
+    setConditionStatus("Good");
+    setCheckInDate("");
     setOwnershipType("Owned");
     setOwnerName("");
     setStartDate("");
@@ -175,6 +189,11 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
     setProjectId(equipment.projectId);
     setEquipmentName(equipment.equipmentName);
     setEquipmentType(equipment.equipmentType);
+    setAssetTag(equipment.assetTag);
+    setQuantity(String(equipment.quantity || 1));
+    setAssignedTo(equipment.assignedTo);
+    setConditionStatus(equipment.conditionStatus);
+    setCheckInDate(equipment.checkInDate ?? "");
     setOwnershipType(equipment.ownershipType);
     setOwnerName(equipment.ownerName);
     setStartDate(equipment.startDate);
@@ -209,6 +228,11 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         projectId,
         equipmentName: equipmentName.trim(),
         equipmentType: equipmentType.trim(),
+        assetTag: assetTag.trim(),
+        quantity: Math.max(Number(quantity) || 1, 1),
+        assignedTo: assignedTo.trim(),
+        conditionStatus,
+        checkInDate: checkInDate || undefined,
         ownershipType,
         ownerName: ownerName.trim(),
         startDate,
@@ -405,6 +429,31 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
                 <input className="input-field" onChange={(e) => setEquipmentType(e.target.value)} placeholder="Excavator / Mixer / Vehicle" value={equipmentType} />
               </label>
               <label className="form-field">
+                <span>Asset Tag / Plate</span>
+                <input className="input-field" onChange={(e) => setAssetTag(e.target.value)} placeholder="EQ-001 / T123 ABC" value={assetTag} />
+              </label>
+              <label className="form-field">
+                <span>Quantity</span>
+                <input className="input-field" min="1" onChange={(e) => setQuantity(e.target.value)} type="number" value={quantity} />
+              </label>
+              <label className="form-field">
+                <span>Assigned To</span>
+                <input className="input-field" onChange={(e) => setAssignedTo(e.target.value)} placeholder="Operator / team" value={assignedTo} />
+              </label>
+              <label className="form-field">
+                <span>Condition</span>
+                <GuiSelect className="input-field" onChange={(e) => setConditionStatus(e.target.value)} value={conditionStatus}>
+                  <option value="Good">Good</option>
+                  <option value="Fair">Fair</option>
+                  <option value="Needs Repair">Needs Repair</option>
+                  <option value="Damaged">Damaged</option>
+                </GuiSelect>
+              </label>
+              <label className="form-field">
+                <span>Check-in Date</span>
+                <input className="input-field" onChange={(e) => setCheckInDate(e.target.value)} type="date" value={checkInDate} />
+              </label>
+              <label className="form-field">
                 <span>Owned / Rented</span>
                 <GuiSelect className="input-field" onChange={(e) => setOwnershipType(e.target.value as "Owned" | "Rented")} value={ownershipType}>
                   <option value="Owned">Owned</option>
@@ -474,6 +523,11 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
           { label: "Project / Site", value: viewEquipment.projectName },
           { label: "Equipment", value: viewEquipment.equipmentName },
           { label: "Type", value: viewEquipment.equipmentType },
+          { label: "Asset Tag", value: viewEquipment.assetTag || "-" },
+          { label: "Quantity", value: String(viewEquipment.quantity) },
+          { label: "Assigned To", value: viewEquipment.assignedTo || "-" },
+          { label: "Condition", value: viewEquipment.conditionStatus },
+          { label: "Check-in Date", value: viewEquipment.checkInDate ? formatDate(viewEquipment.checkInDate) : "-" },
           { label: "Ownership", value: viewEquipment.ownershipType },
           { label: "Owner / Provider", value: viewEquipment.ownerName || "-" },
           { label: "Usage Period", value: `${formatDate(viewEquipment.startDate)} – ${formatDate(viewEquipment.endDate)}` },

@@ -11,6 +11,7 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -808,6 +809,20 @@ router.post(
     const needsApproval = !isClientSupplied && requiresApproval("material_purchases", totalCost);
     const approvalStatus = getApprovalStatusForAmount("material_purchases", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Store Keeper";
+
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      parsed.projectId,
+      totalCost,
+      "material purchase",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
+
     const client = await db.connect();
     let insertedRow:
       | {
@@ -1082,6 +1097,34 @@ router.patch(
       }
     }
 
+    const costFieldsChanged =
+      parsed.projectId ||
+      parsed.supplySource !== undefined ||
+      parsed.quantityPurchased !== undefined ||
+      parsed.unitCost !== undefined;
+    const isAppliedPurchase = isAppliedApprovalStatus(oldPurchase.approval_status);
+    const spendAmountToCheck = newSupplySource === "Client Supplied"
+      ? 0
+      : isAppliedPurchase
+        ? newProjectId !== oldPurchase.project_id
+          ? newTotalCost
+          : Math.max(costDifference, 0)
+        : costFieldsChanged
+          ? newTotalCost
+          : 0;
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      newProjectId,
+      spendAmountToCheck,
+      "material purchase update",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
+
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -1155,7 +1198,7 @@ router.patch(
         );
       }
 
-      if (isAppliedApprovalStatus(oldPurchase.approval_status)) {
+      if (isAppliedPurchase) {
         if (newProjectId !== oldPurchase.project_id) {
           await client.query(
             `
@@ -1249,6 +1292,21 @@ router.delete(
 
     const purchase = result.rows[0];
     const totalCost = Number(purchase.total_cost);
+
+    if (isAppliedApprovalStatus(purchase.approval_status)) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        purchase.project_id,
+        totalCost,
+        "material purchase restore",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {

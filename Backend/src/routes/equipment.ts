@@ -11,6 +11,7 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -200,6 +201,19 @@ router.post(
     const needsApproval = requiresApproval("equipment_usage", totalCost);
     const approvalStatus = getApprovalStatusForAmount("equipment_usage", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
+
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      parsed.projectId,
+      totalCost,
+      "equipment usage",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
 
     const inserted = await db.query<{
       id: string;
@@ -430,6 +444,35 @@ router.patch(
     const newRentalCost = newOwnershipType === "Rented" ? newUsageDays * newDailyRate * newQuantity : 0;
     const newTotalCost = newRentalCost + newMaintenanceCost;
     const costDifference = newTotalCost - oldTotalCost;
+    const costFieldsChanged =
+      parsed.projectId ||
+      parsed.startDate ||
+      parsed.endDate ||
+      parsed.usageDays !== undefined ||
+      parsed.quantity !== undefined ||
+      parsed.dailyRate !== undefined ||
+      parsed.maintenanceCost !== undefined ||
+      parsed.ownershipType !== undefined;
+    const isAppliedEquipment = isAppliedApprovalStatus(oldEquipment.approval_status);
+    const spendAmountToCheck = isAppliedEquipment
+      ? newProjectId !== oldEquipment.project_id
+        ? newTotalCost
+        : Math.max(costDifference, 0)
+      : costFieldsChanged
+        ? newTotalCost
+        : 0;
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      newProjectId,
+      spendAmountToCheck,
+      "equipment usage update",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
 
     const client = await db.connect();
     try {
@@ -520,7 +563,7 @@ router.patch(
         );
       }
 
-      if (isAppliedApprovalStatus(oldEquipment.approval_status)) {
+      if (isAppliedEquipment) {
         if (newProjectId !== oldEquipment.project_id) {
           await client.query(
             `
@@ -608,6 +651,21 @@ router.delete(
 
     const equipment = result.rows[0];
     const totalCost = Number(equipment.total_cost);
+
+    if (isAppliedApprovalStatus(equipment.approval_status)) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        equipment.project_id,
+        totalCost,
+        "equipment usage restore",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {

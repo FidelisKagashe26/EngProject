@@ -179,6 +179,7 @@ export interface WorkerApiRecord {
   status: string;
   payCycleStartDate: string;
   nextPaymentDueDate: string | null;
+  employmentEndDate: string | null;
   lastPaymentCoveredDate: string | null;
   notes: string;
 }
@@ -199,6 +200,7 @@ export interface CreateWorkerPayload {
   rateAmount: number;
   assignedProjectId: string;
   employmentStartDate: string;
+  employmentEndDate?: string;
   notes: string;
 }
 

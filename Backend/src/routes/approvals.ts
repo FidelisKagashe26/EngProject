@@ -10,6 +10,7 @@ import {
   isApprovalModule,
   type ApprovalModule,
 } from "../services/approval";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -159,6 +160,21 @@ router.patch(
     const amount = Number(record.amount);
     const balance = Number(record.balance ?? 0);
     const projectId = record.project_id;
+
+    if (module !== "client_payments") {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        projectId,
+        amount,
+        "approved transaction",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {

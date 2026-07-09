@@ -5,6 +5,7 @@ import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -125,6 +126,21 @@ router.post(
       projectName = projectResult.rows[0].name;
     }
 
+    if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        parsed.projectId,
+        parsed.amount,
+        "petty cash cash out",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
+
     const inserted = await db.query<{
       id: string;
       project_id: string | null;
@@ -232,6 +248,21 @@ router.patch(
         return;
       }
       projectName = projectResult.rows[0].name;
+    }
+
+    if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        parsed.projectId,
+        parsed.amount,
+        "petty cash cash out update",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
     }
 
     const updated = await db.query<{

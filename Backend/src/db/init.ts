@@ -231,6 +231,7 @@ export const initializeDatabase = async (): Promise<void> => {
       pay_cycle_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
       next_payment_due_date DATE,
       last_payment_covered_date DATE,
+      employment_end_date DATE,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
@@ -246,6 +247,10 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.workers
     ADD COLUMN IF NOT EXISTS last_payment_covered_date DATE
+  `);
+  await db.query(`
+    ALTER TABLE engicost.workers
+    ADD COLUMN IF NOT EXISTS employment_end_date DATE
   `);
   await db.query(`
     ALTER TABLE engicost.workers
@@ -384,6 +389,7 @@ export const initializeDatabase = async (): Promise<void> => {
       description TEXT NOT NULL,
       priority VARCHAR(20) NOT NULL DEFAULT 'Medium',
       status VARCHAR(20) NOT NULL DEFAULT 'Unread',
+      reference_key VARCHAR(180),
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
@@ -396,6 +402,15 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.notifications
     ADD COLUMN IF NOT EXISTS last_reminded_at TIMESTAMP
+  `);
+  await db.query(`
+    ALTER TABLE engicost.notifications
+    ADD COLUMN IF NOT EXISTS reference_key VARCHAR(180)
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS notifications_company_reference_key_uq
+    ON engicost.notifications(company_id, reference_key)
+    WHERE reference_key IS NOT NULL
   `);
 
   await db.query(`

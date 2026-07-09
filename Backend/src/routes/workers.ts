@@ -11,6 +11,7 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -26,6 +27,7 @@ const workerSchema = z.object({
   rateAmount: z.number().nonnegative(),
   assignedProjectId: z.string().optional().default(""),
   employmentStartDate: z.string().date().optional().default(() => getTodayIsoDate()),
+  employmentEndDate: z.string().date().optional(),
   notes: z.string().optional().default(""),
 });
 
@@ -55,6 +57,7 @@ type WorkerLookup = {
   payment_type: string;
   pay_cycle_start_date: string;
   next_payment_due_date: string | null;
+  employment_end_date: string | null;
 };
 
 const isRecurringPaymentType = (paymentType: string): boolean =>
@@ -163,7 +166,7 @@ const getWorkerById = async (
 ): Promise<WorkerLookup | null> => {
   const result = await db.query<WorkerLookup>(
     `
-    SELECT id, full_name, assigned_project_id, payment_type, pay_cycle_start_date::text, next_payment_due_date::text
+    SELECT id, full_name, assigned_project_id, payment_type, pay_cycle_start_date::text, next_payment_due_date::text, employment_end_date::text
     FROM engicost.workers
     WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
     LIMIT 1
@@ -208,6 +211,7 @@ router.get(
         status: string;
         pay_cycle_start_date: string;
         next_payment_due_date: string | null;
+        employment_end_date: string | null;
         last_payment_covered_date: string | null;
         notes: string | null;
       }>(
@@ -226,6 +230,7 @@ router.get(
           w.status,
           w.pay_cycle_start_date::text,
           w.next_payment_due_date::text,
+          w.employment_end_date::text,
           w.last_payment_covered_date::text,
           w.notes
         FROM engicost.workers w
@@ -278,6 +283,7 @@ router.get(
         status: row.status,
         payCycleStartDate: row.pay_cycle_start_date,
         nextPaymentDueDate: row.next_payment_due_date,
+        employmentEndDate: row.employment_end_date,
         lastPaymentCoveredDate: row.last_payment_covered_date,
         notes: row.notes ?? "",
       })),
@@ -293,11 +299,23 @@ router.post(
       ...req.body,
       rateAmount: toMoney(req.body.rateAmount),
       employmentStartDate: req.body.employmentStartDate || getTodayIsoDate(),
+      employmentEndDate: req.body.employmentEndDate || undefined,
     });
 
     const startDate = parseIsoDateUtc(parsed.employmentStartDate);
     if (!startDate) {
       res.status(400).json({ message: "Employment start date must be in YYYY-MM-DD format." });
+      return;
+    }
+
+    const employmentEndDate = parsed.employmentEndDate ? parseIsoDateUtc(parsed.employmentEndDate) : null;
+    if (parsed.employmentEndDate && !employmentEndDate) {
+      res.status(400).json({ message: "Employment end date must be in YYYY-MM-DD format." });
+      return;
+    }
+
+    if (employmentEndDate && employmentEndDate < startDate) {
+      res.status(400).json({ message: "Employment end date must be on or after the start date." });
       return;
     }
 
@@ -321,10 +339,10 @@ router.post(
       `
       INSERT INTO engicost.workers (
         id, company_id, full_name, phone, skill_role, payment_type,
-        rate_amount, assigned_project_id, pay_cycle_start_date, next_payment_due_date, notes
+        rate_amount, assigned_project_id, pay_cycle_start_date, next_payment_due_date, employment_end_date, notes
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, NULLIF($8, ''), $9, $10, $11
+        $7, NULLIF($8, ''), $9, $10, $11, $12
       )
       RETURNING
         id,
@@ -339,6 +357,7 @@ router.post(
         status,
         pay_cycle_start_date::text,
         next_payment_due_date::text,
+        employment_end_date::text,
         last_payment_covered_date::text,
         notes
       `,
@@ -353,6 +372,7 @@ router.post(
         parsed.assignedProjectId,
         payCycleStartDate,
         nextPaymentDueDate,
+        parsed.employmentEndDate ?? null,
         parsed.notes,
       ],
     );
@@ -382,6 +402,7 @@ router.post(
       status: row.status,
       payCycleStartDate: row.pay_cycle_start_date,
       nextPaymentDueDate: row.next_payment_due_date,
+      employmentEndDate: row.employment_end_date,
       lastPaymentCoveredDate: row.last_payment_covered_date,
       notes: row.notes ?? "",
     });
@@ -636,6 +657,24 @@ router.post(
       payCycleType = "Contract";
     }
 
+    const workerEndDate = worker.employment_end_date
+      ? parseIsoDateUtc(worker.employment_end_date)
+      : null;
+
+    if (workerEndDate && workStartDate > workerEndDate) {
+      res.status(400).json({
+        message: "This worker's employment period has ended. Extend the worker end date before recording another payment.",
+      });
+      return;
+    }
+
+    if (workerEndDate && workEndDate > workerEndDate) {
+      res.status(400).json({
+        message: "This payment period extends beyond the worker end date.",
+      });
+      return;
+    }
+
     const totalPayable = unitsWorked * parsed.rateAmount;
     if (totalPayable <= 0) {
       res.status(400).json({ message: "Total payable must be greater than zero." });
@@ -650,13 +689,32 @@ router.post(
     }
 
     const balance = Math.max(totalPayable - parsed.amountPaid, 0);
-    const nextPaymentDueDate =
+    let nextPaymentDueDate =
       isRecurring && !isHourly ? formatIsoDateUtc(addDaysUtc(workEndDate, 1)) : null;
+    if (nextPaymentDueDate && workerEndDate) {
+      const parsedNextDue = parseIsoDateUtc(nextPaymentDueDate);
+      if (parsedNextDue && parsedNextDue > workerEndDate) {
+        nextPaymentDueDate = null;
+      }
+    }
     const lastPaymentCoveredDate =
       isRecurring && !isHourly ? formatIsoDateUtc(workEndDate) : null;
     const needsApproval = requiresApproval("labor_payments", parsed.amountPaid);
     const approvalStatus = getApprovalStatusForAmount("labor_payments", parsed.amountPaid);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
+
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      parsed.projectId,
+      parsed.amountPaid,
+      "labor payment",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
 
     const client = await db.connect();
     let insertedRow:
@@ -771,7 +829,7 @@ router.post(
           [companyId, parsed.workerId, parsed.amountPaid, balance],
         );
 
-        if (nextPaymentDueDate && lastPaymentCoveredDate) {
+        if (lastPaymentCoveredDate) {
           await client.query(
             `
             UPDATE engicost.workers
@@ -960,6 +1018,24 @@ router.patch(
     const oldBalance = Number(oldPayment.balance);
     const newBalance = Math.max(totalPayable - newAmountPaid, 0);
     const balanceDifference = newBalance - oldBalance;
+
+    if (parsed.amountPaid !== undefined) {
+      const spendAmountToCheck = isAppliedApprovalStatus(oldPayment.approval_status)
+        ? Math.max(amountDifference, 0)
+        : newAmountPaid;
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        oldPayment.project_id,
+        spendAmountToCheck,
+        "labor payment update",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {
@@ -1170,6 +1246,21 @@ router.patch(
     const payment = result.rows[0];
     const amountPaid = Number(payment.amount_paid);
     const balance = Number(payment.balance);
+
+    if (isAppliedApprovalStatus(payment.approval_status)) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        payment.project_id,
+        amountPaid,
+        "labor payment restore",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {

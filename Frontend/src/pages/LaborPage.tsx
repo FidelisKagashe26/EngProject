@@ -113,6 +113,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     projectFromQuery,
   );
   const [workerEmploymentStartDate, setWorkerEmploymentStartDate] = useState(todayStr());
+  const [workerEmploymentEndDate, setWorkerEmploymentEndDate] = useState("");
   const [workerNotes, setWorkerNotes] = useState("");
   const [savingWorker, setSavingWorker] = useState(false);
 
@@ -367,6 +368,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     setWorkerPaymentType("Daily");
     setWorkerRateAmount("");
     setWorkerEmploymentStartDate(todayStr());
+    setWorkerEmploymentEndDate("");
     setWorkerNotes("");
   };
 
@@ -380,7 +382,15 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     resetWorkerForm();
   };
 
+  const hasWorkerEnded = (worker: WorkerApiRecord): boolean =>
+    Boolean(worker.employmentEndDate && worker.employmentEndDate < todayStr());
+
   const openPaymentModal = (worker: WorkerApiRecord) => {
+    if (hasWorkerEnded(worker)) {
+      setError("This worker's employment period has ended. Extend the end date before recording another payment.");
+      return;
+    }
+
     const recurringType = ["Daily", "Weekly", "Monthly"].includes(worker.paymentType);
     const startDate = recurringType
       ? worker.nextPaymentDueDate || worker.payCycleStartDate || todayStr()
@@ -427,6 +437,11 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
       return;
     }
 
+    if (workerEmploymentEndDate && workerEmploymentEndDate < workerEmploymentStartDate) {
+      setError("Employment end date must be on or after start date.");
+      return;
+    }
+
     setSavingWorker(true);
     setError("");
 
@@ -439,6 +454,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         rateAmount: Number(workerRateAmount) || 0,
         assignedProjectId: workerAssignedProjectId,
         employmentStartDate: workerEmploymentStartDate,
+        employmentEndDate: workerEmploymentEndDate || undefined,
         notes: workerNotes.trim(),
       });
       await refreshWorkers();
@@ -693,6 +709,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                     <th>Role</th>
                     <th>Site</th>
                     <th>Rate</th>
+                    <th>Next Due</th>
                     <th>Total Paid</th>
                     <th>Outstanding</th>
                     <th>Status</th>
@@ -707,6 +724,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                       <td><span className="ops-cell-text">{worker.skillRole}</span></td>
                       <td><span className="ops-cell-text">{worker.assignedProjectName || "Unassigned"}</span></td>
                       <td>{formatTzs(worker.rateAmount)}</td>
+                      <td>{worker.nextPaymentDueDate ? formatDate(worker.nextPaymentDueDate) : "-"}</td>
                       <td>{formatTzs(worker.totalPaid)}</td>
                       <td
                         className={
@@ -741,7 +759,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                           </button>
                           <button
                             className="btn-primary py-1 px-3 text-xs"
-                            disabled={worker.status === "Inactive"}
+                            disabled={worker.status === "Inactive" || hasWorkerEnded(worker)}
                             onClick={() => openPaymentModal(worker)}
                             type="button"
                           >
@@ -926,6 +944,16 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                   onChange={(event) => setWorkerEmploymentStartDate(event.target.value)}
                   type="date"
                   value={workerEmploymentStartDate}
+                />
+              </label>
+              <label className="form-field">
+                <span>Employment End Date</span>
+                <input
+                  className="input-field"
+                  min={workerEmploymentStartDate}
+                  onChange={(event) => setWorkerEmploymentEndDate(event.target.value)}
+                  type="date"
+                  value={workerEmploymentEndDate}
                 />
               </label>
               <label className="form-field sm:col-span-2">
@@ -1200,6 +1228,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           { label: "Total Paid", value: formatTzs(viewWorker.totalPaid) },
           { label: "Outstanding", value: formatTzs(viewWorker.outstandingAmount) },
           { label: "Pay Cycle Start", value: viewWorker.payCycleStartDate ? formatDate(viewWorker.payCycleStartDate) : "-" },
+          { label: "Employment End Date", value: viewWorker.employmentEndDate ? formatDate(viewWorker.employmentEndDate) : "-" },
           { label: "Next Payment Due", value: viewWorker.nextPaymentDueDate ? formatDate(viewWorker.nextPaymentDueDate) : "-" },
           { label: "Last Payment Covered", value: viewWorker.lastPaymentCoveredDate ? formatDate(viewWorker.lastPaymentCoveredDate) : "-" },
           { label: "Status", value: <StatusBadge status={viewWorker.status} /> },

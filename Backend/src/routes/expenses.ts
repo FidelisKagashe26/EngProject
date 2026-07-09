@@ -6,6 +6,7 @@ import { db } from "../db/pool";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import { isAppliedApprovalStatus, requiresApproval, APPROVAL_THRESHOLDS } from "../services/approval";
+import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
 
 const router = Router();
 
@@ -150,6 +151,19 @@ router.post(
     const needsApproval = requiresApproval("expenses", parsed.amount);
     const approvalStatus = needsApproval ? "PENDING" : "AUTO_APPROVED";
     const requestedBy = req.body.requestedBy || "System";
+
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      parsed.projectId,
+      parsed.amount,
+      "expense",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
 
     const insertedExpenseId = makeId("EXP");
 
@@ -299,6 +313,27 @@ router.patch(
       }
     }
 
+    const isAppliedExpense = isAppliedApprovalStatus(oldExpense.approval_status);
+    const spendAmountToCheck = isAppliedExpense
+      ? newProjectId !== oldExpense.project_id
+        ? newAmount
+        : Math.max(amountDifference, 0)
+      : parsed.amount !== undefined || parsed.projectId
+        ? newAmount
+        : 0;
+    const spendCheck = await checkProjectSpendCapacity(
+      db,
+      companyId,
+      newProjectId,
+      spendAmountToCheck,
+      "expense update",
+    );
+    const spendFailure = spendGuardResponse(spendCheck);
+    if (spendFailure) {
+      res.status(400).json(spendFailure);
+      return;
+    }
+
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -380,7 +415,7 @@ router.patch(
         await client.query(query, params);
       }
 
-      if (isAppliedApprovalStatus(oldExpense.approval_status)) {
+      if (isAppliedExpense) {
         if (newProjectId !== oldExpense.project_id) {
           await client.query(
             `
@@ -498,6 +533,21 @@ router.delete(
 
     const expense = result.rows[0];
     const expenseAmount = Number(expense.amount);
+
+    if (isAppliedApprovalStatus(expense.approval_status)) {
+      const spendCheck = await checkProjectSpendCapacity(
+        db,
+        companyId,
+        expense.project_id,
+        expenseAmount,
+        "expense restore",
+      );
+      const spendFailure = spendGuardResponse(spendCheck);
+      if (spendFailure) {
+        res.status(400).json(spendFailure);
+        return;
+      }
+    }
 
     const client = await db.connect();
     try {

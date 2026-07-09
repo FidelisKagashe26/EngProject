@@ -7,10 +7,203 @@ import { handleAsync } from "./utils";
 
 const router = Router();
 
+type NotificationSeed = {
+  projectId: string | null;
+  type: string;
+  title: string;
+  description: string;
+  priority: "High" | "Medium" | "Low";
+  referenceKey: string;
+};
+
+const todayIso = (): string => new Date().toISOString().slice(0, 10);
+
+const addDaysIso = (days: number): string => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const paymentLabel = (paymentType: string): string => {
+  if (paymentType === "Daily") return "daily";
+  if (paymentType === "Weekly") return "weekly";
+  if (paymentType === "Monthly") return "monthly";
+  return paymentType.toLowerCase();
+};
+
+const insertNotificationOnce = async (companyId: number, notification: NotificationSeed): Promise<void> => {
+  await db.query(
+    [
+      "INSERT INTO engicost.notifications (",
+      "  id, company_id, project_id, alert_type, title, description, priority, reference_key",
+      ")",
+      "SELECT $1::varchar, $2::integer, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::varchar, $8::varchar",
+      "WHERE NOT EXISTS (",
+      "  SELECT 1",
+      "  FROM engicost.notifications",
+      "  WHERE company_id = $2::integer AND reference_key = $8::varchar",
+      ")",
+    ].join("\n"),
+    [
+      makeId("NTF"),
+      companyId,
+      notification.projectId,
+      notification.type,
+      notification.title,
+      notification.description,
+      notification.priority,
+      notification.referenceKey,
+    ],
+  );
+};
+
+const syncSystemNotifications = async (companyId: number): Promise<void> => {
+  const dueWorkers = await db.query<{
+    id: string;
+    full_name: string;
+    payment_type: string;
+    assigned_project_id: string | null;
+    project_name: string | null;
+    next_payment_due_date: string;
+  }>(
+    [
+      "SELECT",
+      "  w.id,",
+      "  w.full_name,",
+      "  w.payment_type,",
+      "  w.assigned_project_id,",
+      "  p.name AS project_name,",
+      "  w.next_payment_due_date::text",
+      "FROM engicost.workers w",
+      "LEFT JOIN engicost.projects p ON p.id = w.assigned_project_id",
+      "WHERE w.company_id = $1",
+      "  AND w.is_deleted = FALSE",
+      "  AND w.status <> 'Inactive'",
+      "  AND w.payment_type IN ('Daily', 'Weekly', 'Monthly')",
+      "  AND w.next_payment_due_date IS NOT NULL",
+      "  AND w.next_payment_due_date <= CURRENT_DATE",
+      "  AND (w.employment_end_date IS NULL OR w.next_payment_due_date <= w.employment_end_date)",
+    ].join("\n"),
+    [companyId],
+  );
+
+  for (const worker of dueWorkers.rows) {
+    await insertNotificationOnce(companyId, {
+      projectId: worker.assigned_project_id,
+      type: "Labor",
+      title: "Payment due for " + worker.full_name,
+      description:
+        worker.full_name +
+        " is due for " +
+        paymentLabel(worker.payment_type) +
+        " labor payment on " +
+        worker.next_payment_due_date +
+        (worker.project_name ? " for " + worker.project_name : "") +
+        ".",
+      priority: "High",
+      referenceKey: "worker-payment-due:" + worker.id + ":" + worker.next_payment_due_date,
+    });
+  }
+
+  const endedWorkers = await db.query<{
+    id: string;
+    full_name: string;
+    assigned_project_id: string | null;
+    project_name: string | null;
+    employment_end_date: string;
+  }>(
+    [
+      "SELECT",
+      "  w.id,",
+      "  w.full_name,",
+      "  w.assigned_project_id,",
+      "  p.name AS project_name,",
+      "  w.employment_end_date::text",
+      "FROM engicost.workers w",
+      "LEFT JOIN engicost.projects p ON p.id = w.assigned_project_id",
+      "WHERE w.company_id = $1",
+      "  AND w.is_deleted = FALSE",
+      "  AND w.status <> 'Inactive'",
+      "  AND w.employment_end_date IS NOT NULL",
+      "  AND w.employment_end_date < CURRENT_DATE",
+    ].join("\n"),
+    [companyId],
+  );
+
+  for (const worker of endedWorkers.rows) {
+    await insertNotificationOnce(companyId, {
+      projectId: worker.assigned_project_id,
+      type: "Labor",
+      title: "Worker contract ended: " + worker.full_name,
+      description:
+        worker.full_name +
+        "'s planned work period ended on " +
+        worker.employment_end_date +
+        (worker.project_name ? " at " + worker.project_name : "") +
+        ". Extend the end date or close the worker from labor operations.",
+      priority: "Medium",
+      referenceKey: "worker-ended:" + worker.id + ":" + worker.employment_end_date,
+    });
+  }
+
+  const projectStarts = await db.query<{ id: string; name: string; start_date: string }>(
+    [
+      "SELECT id, name, start_date::text",
+      "FROM engicost.projects",
+      "WHERE company_id = $1",
+      "  AND is_deleted = FALSE",
+      "  AND start_date BETWEEN CURRENT_DATE AND $2::date",
+    ].join("\n"),
+    [companyId, addDaysIso(7)],
+  );
+
+  for (const project of projectStarts.rows) {
+    await insertNotificationOnce(companyId, {
+      projectId: project.id,
+      type: "Deadline",
+      title: "Project start date: " + project.name,
+      description:
+        project.name +
+        " is scheduled to start on " +
+        project.start_date +
+        ". Confirm site readiness, team allocation, and materials planning.",
+      priority: project.start_date <= todayIso() ? "High" : "Medium",
+      referenceKey: "project-start:" + project.id + ":" + project.start_date,
+    });
+  }
+
+  const projectDeadlines = await db.query<{ id: string; name: string; expected_completion_date: string }>(
+    [
+      "SELECT id, name, expected_completion_date::text",
+      "FROM engicost.projects",
+      "WHERE company_id = $1",
+      "  AND is_deleted = FALSE",
+      "  AND expected_completion_date BETWEEN CURRENT_DATE AND $2::date",
+    ].join("\n"),
+    [companyId, addDaysIso(14)],
+  );
+
+  for (const project of projectDeadlines.rows) {
+    await insertNotificationOnce(companyId, {
+      projectId: project.id,
+      type: "Deadline",
+      title: "Project deadline approaching: " + project.name,
+      description:
+        project.name +
+        " is expected to finish on " +
+        project.expected_completion_date +
+        ". Review progress, pending tasks, and client handover items.",
+      priority: project.expected_completion_date <= todayIso() ? "High" : "Medium",
+      referenceKey: "project-end:" + project.id + ":" + project.expected_completion_date,
+    });
+  }
+};
+
 router.get(
   "/",
   handleAsync(async (_req, res) => {
     const companyId = await getSingleTenantCompanyId();
+    await syncSystemNotifications(companyId);
     const result = await db.query<{
       id: string;
       project_id: string | null;

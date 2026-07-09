@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import { isAppliedApprovalStatus, requiresApproval, APPROVAL_THRESHOLDS } from "../services/approval";
 
@@ -556,6 +557,7 @@ router.delete(
 // Restore a soft-deleted expense
 router.patch(
   "/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const expenseId = String(req.params.id);

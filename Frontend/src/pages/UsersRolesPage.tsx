@@ -201,6 +201,10 @@ export const UsersRolesPage = () => {
 
   const editingSelf = editingUser?.id === currentUser?.id;
   const modalTitle = editingUser ? `Edit User — ${editingUser.fullName}` : "Add New User";
+  const canManageSuperAdmin = currentUser?.role === "Super Admin";
+  const selectableRoles = canManageSuperAdmin
+    ? ROLES
+    : ROLES.filter((roleName) => roleName === "Super Admin" ? false : true);
 
   return (
     <div className="space-y-6">
@@ -263,6 +267,14 @@ export const UsersRolesPage = () => {
                 <tbody>
                   {usersPagination.paginatedRows.map((user, index) => {
                     const isCurrentUser = currentUser?.id === user.id;
+                    const isSuperAdminAccount = user.role === "Super Admin";
+                    const canManageUser = canManageSuperAdmin ? true : isSuperAdminAccount === false;
+                    const suspendDisabled = isCurrentUser ? true : canManageUser === false;
+                    const suspendTitle = isCurrentUser
+                      ? "You cannot suspend your own account"
+                      : canManageUser
+                        ? "Suspend user"
+                        : "Only a Super Admin can suspend Super Admin accounts";
 
                     return (
                     <tr key={user.id}>
@@ -300,8 +312,10 @@ export const UsersRolesPage = () => {
                       <td>
                         <div className="flex gap-2">
                           <button
-                            className="btn-primary py-1 px-3 text-xs"
+                            className="btn-primary py-1 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={canManageUser === false}
                             onClick={() => openEditModal(user)}
+                            title={canManageUser ? "Edit user" : "Only a Super Admin can edit Super Admin accounts"}
                             type="button"
                           >
                             Edit
@@ -309,9 +323,9 @@ export const UsersRolesPage = () => {
                           {user.status !== "Suspended" && (
                             <button
                               className="btn-danger py-1 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={isCurrentUser}
+                              disabled={suspendDisabled}
                               onClick={() => setUserToSuspend(user)}
-                              title={isCurrentUser ? "You cannot suspend your own account" : "Suspend user"}
+                              title={suspendTitle}
                               type="button"
                             >
                               Suspend
@@ -431,7 +445,7 @@ export const UsersRolesPage = () => {
                   onChange={(e) => setRole(e.target.value as Role)}
                   value={role}
                 >
-                  {ROLES.map((r) => (
+                  {selectableRoles.map((r) => (
                     <option key={`role-opt-${r}`} value={r}>{r}</option>
                   ))}
                 </GuiSelect>

@@ -896,6 +896,34 @@ export interface GalleryResponse {
   categories: string[];
 }
 
+export type DeletedItemEntity =
+  | "projects"
+  | "workers"
+  | "users"
+  | "documents"
+  | "suppliers"
+  | "quote-requests"
+  | "gallery"
+  | "expenses"
+  | "payments"
+  | "labor-payments"
+  | "material-purchases"
+  | "equipment"
+  | "petty-cash";
+
+export interface DeletedItemApiRecord {
+  entity: DeletedItemEntity;
+  id: string;
+  module: string;
+  title: string;
+  subtitle: string;
+  deletedAt: string | null;
+  deletedBy: string;
+}
+
+export interface DeletedItemsResponse {
+  rows: DeletedItemApiRecord[];
+}
 export interface CreateGalleryItemPayload {
   title: string;
   subtitle: string;
@@ -1468,6 +1496,30 @@ export const api = {
     apiRequest<{ message: string }>(`/petty-cash/${encodeURIComponent(id)}/restore`, {
       method: "PATCH",
     }),
+  getDeletedItems: () => apiRequest<DeletedItemsResponse>("/deleted-items"),
+  restoreDeletedItem: (entity: DeletedItemEntity, id: string) => {
+    const encodedId = encodeURIComponent(id);
+    const restorePaths: Record<DeletedItemEntity, string> = {
+      projects: "/projects/" + encodedId + "/restore",
+      workers: "/workers/" + encodedId + "/restore",
+      users: "/users/" + encodedId + "/restore",
+      documents: "/documents/" + encodedId + "/restore",
+      suppliers: "/suppliers/" + encodedId + "/restore",
+      "quote-requests": "/quote-requests/" + encodedId + "/restore",
+      gallery: "/gallery/" + encodedId + "/restore",
+      expenses: "/expenses/" + encodedId + "/restore",
+      payments: "/payments/" + encodedId + "/restore",
+      "labor-payments": "/workers/labor-payments/" + encodedId + "/restore",
+      "material-purchases": "/materials/purchases/" + encodedId + "/restore",
+      equipment: "/equipment/" + encodedId + "/restore",
+      "petty-cash": "/petty-cash/" + encodedId + "/restore",
+    };
+
+    return apiRequest<{ message: string }>(restorePaths[entity], {
+      method: "PATCH",
+      successMessage: "Record restored successfully.",
+    });
+  },
   getUsers: () => apiRequest<UsersResponse>("/users"),
   createUser: (payload: CreateUserPayload) =>
     apiRequest<UserApiRecord>("/users", {

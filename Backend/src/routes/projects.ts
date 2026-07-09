@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
-import { requireRoles } from "../middleware/auth";
+import { requireRoles, requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
 
 const router = Router();
@@ -106,7 +106,7 @@ router.get(
     const status = String(req.query.status ?? "").trim();
 
     const params: Array<string | number> = [companyId];
-    const filters: string[] = ["company_id = $1"];
+    const filters: string[] = ['company_id = $1', 'is_deleted = FALSE'];
 
     if (search.length > 0) {
       params.push(`%${search}%`);
@@ -185,7 +185,7 @@ router.get(
         created_at::text,
         updated_at::text
       FROM engicost.projects
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
       `,
       [companyId, projectId],
@@ -366,7 +366,7 @@ router.put(
     });
 
     const existing = await db.query(
-      "SELECT id FROM engicost.projects WHERE company_id = $1 AND id = $2 LIMIT 1",
+      'SELECT id FROM engicost.projects WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE LIMIT 1',
       [companyId, projectId],
     );
     if (existing.rowCount === 0) {
@@ -397,7 +397,7 @@ router.put(
         description,
         notes
       FROM engicost.projects
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
       `,
       [companyId, projectId],
@@ -428,7 +428,7 @@ router.put(
         description = $20,
         notes = $21,
         updated_at = NOW()
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING
         id,
         name,
@@ -496,12 +496,8 @@ router.delete(
     const companyId = await getSingleTenantCompanyId();
     const projectId = String(req.params.id);
     const deleted = await db.query<{ id: string; name: string }>(
-      `
-      DELETE FROM engicost.projects
-      WHERE company_id = $1 AND id = $2
-      RETURNING id, name
-      `,
-      [companyId, projectId],
+      'UPDATE engicost.projects SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE RETURNING id, name',
+      [companyId, projectId, req.authUser?.fullName ?? 'System Admin'],
     );
 
     if (deleted.rowCount === 0) {
@@ -520,5 +516,29 @@ router.delete(
   }),
 );
 
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  requireRoles(...projectManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.params.id);
+
+    const restored = await db.query<{ id: string; name: string }>(
+      'UPDATE engicost.projects SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id, name',
+      [companyId, projectId],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted project not found.' });
+      return;
+    }
+
+    await logProjectActivity(companyId, 'Restored Project', restored.rows[0].id, 'Restored project ' + restored.rows[0].name);
+
+    res.json({ message: 'Project restored successfully.' });
+  }),
+);
 export default router;
 

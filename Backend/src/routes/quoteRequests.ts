@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { sendQuoteNotificationEmail } from "../services/mailer";
 import { handleAsync } from "./utils";
 
@@ -25,7 +26,7 @@ router.get(
       `
       SELECT id, full_name, email, phone, service, message, status, created_at::text
       FROM engicost.quote_requests
-      WHERE company_id = $1
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       ORDER BY created_at DESC
       `,
       [companyId],
@@ -64,7 +65,7 @@ router.patch(
       `
       UPDATE engicost.quote_requests
       SET status = $3
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING id
       `,
       [companyId, id, status],
@@ -87,12 +88,8 @@ router.delete(
     const id = String(req.params.id);
 
     const deleted = await db.query<{ id: string }>(
-      `
-      DELETE FROM engicost.quote_requests
-      WHERE company_id = $1 AND id = $2
-      RETURNING id
-      `,
-      [companyId, id],
+      'UPDATE engicost.quote_requests SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE RETURNING id',
+      [companyId, id, req.authUser?.fullName ?? 'System Admin'],
     );
 
     if (deleted.rowCount === 0) {
@@ -104,4 +101,24 @@ router.delete(
   }),
 );
 
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const restored = await db.query<{ id: string }>(
+      'UPDATE engicost.quote_requests SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id',
+      [companyId, id],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted quote request not found.' });
+      return;
+    }
+
+    res.json({ message: 'Quote request restored successfully.' });
+  }),
+);
 export default router;

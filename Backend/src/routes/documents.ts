@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
@@ -29,7 +30,7 @@ router.get(
         ? req.query.projectId.trim()
         : null;
 
-    const whereClauses = ["d.company_id = $1", "d.project_id IS NOT NULL"];
+    const whereClauses = ['d.company_id = $1', 'd.project_id IS NOT NULL', 'd.is_deleted = FALSE'];
     const params: Array<number | string> = [companyId];
     if (projectId) {
       params.push(projectId);
@@ -98,7 +99,7 @@ router.post(
       `
       SELECT id
       FROM engicost.projects
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
       `,
       [companyId, parsed.projectId],
@@ -164,13 +165,9 @@ router.delete(
   "/:id",
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
-    const deleted = await db.query<{ id: string; file_reference: string | null }>(
-      `
-      DELETE FROM engicost.documents
-      WHERE company_id = $1 AND id = $2
-      RETURNING id, file_reference
-      `,
-      [companyId, req.params.id],
+    const deleted = await db.query<{ id: string }>(
+      'UPDATE engicost.documents SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE RETURNING id',
+      [companyId, req.params.id, req.authUser?.fullName ?? 'System Admin'],
     );
 
     if (deleted.rowCount === 0) {
@@ -178,20 +175,28 @@ router.delete(
       return;
     }
 
-    const fileReference = deleted.rows[0].file_reference ?? "";
-    const publicPrefix = "/uploads/documents/";
-    if (fileReference.startsWith(publicPrefix)) {
-      const relativePath = fileReference.replace(/^\/+/, "");
-      const uploadRoot = path.resolve(process.cwd(), "uploads", "documents");
-      const absolutePath = path.resolve(process.cwd(), relativePath);
-      if (absolutePath.startsWith(uploadRoot) && fs.existsSync(absolutePath)) {
-        fs.unlinkSync(absolutePath);
-      }
-    }
-
     res.json({ message: "Document deleted successfully." });
   }),
 );
 
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const restored = await db.query<{ id: string }>(
+      'UPDATE engicost.documents SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id',
+      [companyId, req.params.id],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted document not found.' });
+      return;
+    }
+
+    res.json({ message: 'Document restored successfully.' });
+  }),
+);
 export default router;
 

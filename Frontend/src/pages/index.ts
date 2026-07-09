@@ -2,6 +2,7 @@ export { ActivityLogPage } from "./ActivityLogPage";
 export { ForgotPasswordOtpPage } from "./ForgotPasswordOtpPage";
 export { ForgotPasswordPage } from "./ForgotPasswordPage";
 export { DashboardPage } from "./DashboardPage";
+export { DeletedItemsPage } from "./DeletedItemsPage";
 export { DocumentsPage } from "./DocumentsPage";
 export { EquipmentPage } from "./EquipmentPage";
 export { ExpensesPage } from "./ExpensesPage";

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requireSuperAdmin } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
@@ -15,6 +15,7 @@ const createUserSchema = z.object({
   email: z.string().email(),
   phone: z.string().min(7).max(60),
   role: z.enum([
+    "Super Admin",
     "Admin",
     "Engineer / Project Manager",
     "Accountant",
@@ -32,6 +33,7 @@ const updateUserSchema = z.object({
   phone: z.string().min(7).max(60).optional(),
   role: z
     .enum([
+      "Super Admin",
       "Admin",
       "Engineer / Project Manager",
       "Accountant",
@@ -79,10 +81,11 @@ const countOtherActiveAdmins = async (
     `
     SELECT COUNT(*)::text AS count
     FROM engicost.users
-    WHERE company_id = $1
+      WHERE company_id = $1
       AND id <> $2
-      AND role = 'Admin'
+      AND role IN ('Super Admin', 'Admin')
       AND status = 'Active'
+      AND is_deleted = FALSE
     `,
     [companyId, userId],
   );
@@ -104,7 +107,7 @@ router.get(
         created_at::text,
         updated_at::text
       FROM engicost.users
-      WHERE company_id = $1
+      WHERE company_id = $1 AND is_deleted = FALSE
       ORDER BY created_at ASC
       `,
       [companyId],
@@ -121,6 +124,11 @@ router.post(
     const companyId = await getSingleTenantCompanyId();
     const parsed = createUserSchema.parse(req.body);
     const normalizedEmail = parsed.email.trim().toLowerCase();
+
+    if (parsed.role === "Super Admin" && req.authUser?.role !== "Super Admin") {
+      res.status(403).json({ message: "Only a Super Admin can create another Super Admin." });
+      return;
+    }
 
     // Check duplicate email
     const existing = await db.query<{ id: number }>(
@@ -202,7 +210,7 @@ router.put(
              NULL::text AS last_login,
              created_at::text, updated_at::text
       FROM engicost.users
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       LIMIT 1
       `,
       [companyId, userId],
@@ -218,15 +226,23 @@ router.put(
     const nextRole = parsed.role ?? existingUser.role;
     const nextStatus = parsed.status ?? existingUser.status;
 
-    if (req.authUser?.userId === userId && (nextRole !== "Admin" || nextStatus !== "Active")) {
+    if (req.authUser?.role !== "Super Admin" && (existingUser.role === "Super Admin" || nextRole === "Super Admin")) {
+      res.status(403).json({ message: "Only a Super Admin can manage Super Admin accounts." });
+      return;
+    }
+
+    if (
+      req.authUser?.userId === userId &&
+      (['Super Admin', 'Admin'].includes(nextRole) === false || nextStatus === 'Active' === false)
+    ) {
       res.status(400).json({ message: "You cannot remove your own active admin access." });
       return;
     }
 
     if (
-      existingUser.role === "Admin" &&
+      ['Super Admin', 'Admin'].includes(existingUser.role) &&
       existingUser.status === "Active" &&
-      (nextRole !== "Admin" || nextStatus !== "Active")
+      (['Super Admin', 'Admin'].includes(nextRole) === false || nextStatus === 'Active' === false)
     ) {
       const otherAdmins = await countOtherActiveAdmins(companyId, userId);
       if (otherAdmins === 0) {
@@ -239,7 +255,7 @@ router.put(
     if (parsed.email) {
       const normalizedEmail = parsed.email.trim().toLowerCase();
       const duplicate = await db.query<{ id: number }>(
-        "SELECT id FROM engicost.users WHERE lower(email) = $1 AND id <> $2 LIMIT 1",
+        'SELECT id FROM engicost.users WHERE lower(email) = $1 AND id <> $2 LIMIT 1',
         [normalizedEmail, userId],
       );
       if (duplicate.rows.length > 0) {
@@ -287,7 +303,7 @@ router.put(
       `
       UPDATE engicost.users
       SET ${setClauses.join(", ")}
-      WHERE company_id = $1 AND id = $2
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING
         id, company_id, full_name, email, phone, role, status,
         assigned_projects,
@@ -335,7 +351,7 @@ router.delete(
     }
 
     const existing = await db.query<{ full_name: string; role: string; status: string }>(
-      "SELECT full_name, role, status FROM engicost.users WHERE company_id = $1 AND id = $2 LIMIT 1",
+      'SELECT full_name, role, status FROM engicost.users WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE LIMIT 1',
       [companyId, userId],
     );
 
@@ -345,7 +361,12 @@ router.delete(
     }
 
     const targetUser = existing.rows[0];
-    if (targetUser.role === "Admin" && targetUser.status === "Active") {
+    if (req.authUser?.role !== "Super Admin" && targetUser.role === "Super Admin") {
+      res.status(403).json({ message: "Only a Super Admin can delete Super Admin accounts." });
+      return;
+    }
+
+    if (['Super Admin', 'Admin'].includes(targetUser.role) && targetUser.status === 'Active') {
       const otherAdmins = await countOtherActiveAdmins(companyId, userId);
       if (otherAdmins === 0) {
         res.status(400).json({ message: "At least one active admin account is required." });
@@ -354,8 +375,8 @@ router.delete(
     }
 
     await db.query(
-      "UPDATE engicost.users SET status = 'Suspended', updated_at = NOW() WHERE company_id = $1 AND id = $2",
-      [companyId, userId],
+      'UPDATE engicost.users SET status = ' + String.fromCharCode(39) + 'Suspended' + String.fromCharCode(39) + ', is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2',
+      [companyId, userId, req.authUser?.fullName ?? 'Admin'],
     );
 
     await db.query(
@@ -371,8 +392,39 @@ router.delete(
       ],
     );
 
-    res.json({ message: "User suspended successfully." });
+    res.json({ message: 'User deleted successfully.' });
   }),
 );
 
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const userId = Number(req.params.id);
+
+    if (Number.isFinite(userId) === false) {
+      res.status(400).json({ message: 'Invalid user ID.' });
+      return;
+    }
+
+    const restored = await db.query<{ full_name: string }>(
+      'UPDATE engicost.users SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, status = ' + String.fromCharCode(39) + 'Active' + String.fromCharCode(39) + ', updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING full_name',
+      [companyId, userId],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted user not found.' });
+      return;
+    }
+
+    await db.query(
+      'INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device) VALUES ($1, $2, $3, ' + String.fromCharCode(39) + 'Restored User' + String.fromCharCode(39) + ', ' + String.fromCharCode(39) + 'Users' + String.fromCharCode(39) + ', NULL, $4, ' + String.fromCharCode(39) + '127.0.0.1 / Local Dev' + String.fromCharCode(39) + ')',
+      [makeId('ACT'), companyId, req.authUser?.fullName ?? 'Super Admin', 'Restored user account: ' + restored.rows[0].full_name],
+    );
+
+    res.json({ message: 'User restored successfully.' });
+  }),
+);
 export default router;

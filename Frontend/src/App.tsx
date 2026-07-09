@@ -15,6 +15,7 @@ import { WebsiteSettingsProvider } from "./landing/WebsiteSettingsContext";
 import { AppShell } from "./layout/AppShell";
 import { ActivityLogPage } from "./pages/ActivityLogPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DeletedItemsPage } from "./pages/DeletedItemsPage";
 import { ForgotPasswordOtpPage } from "./pages/ForgotPasswordOtpPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -362,6 +363,14 @@ function App() {
                 </PermissionOnly>
               }
               path="/activity-log"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["deleted.restore"]}>
+                  <DeletedItemsPage />
+                </PermissionOnly>
+              }
+              path="/deleted-items"
             />
           </Route>
         </Route>

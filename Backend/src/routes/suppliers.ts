@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
-import { requireRoles } from "../middleware/auth";
+import { requireRoles, requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 
 const router = Router();
@@ -67,7 +67,7 @@ router.get(
         WHERE company_id = $1
         GROUP BY lower(trim(supplier_name))
       ) AS p ON p.supplier_key = lower(trim(s.name))
-      WHERE s.company_id = $1
+      WHERE s.company_id = $1 AND s.is_deleted = FALSE
       ORDER BY s.updated_at DESC, s.created_at DESC
       `,
       [companyId],
@@ -209,4 +209,45 @@ router.post(
   }),
 );
 
+
+router.delete(
+  '/:id',
+  requireRoles(...supplierManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const deleted = await db.query<{ id: string; name: string }>(
+      'UPDATE engicost.suppliers SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE RETURNING id, name',
+      [companyId, id, req.authUser?.fullName ?? 'System Admin'],
+    );
+
+    if (deleted.rowCount === 0) {
+      res.status(404).json({ message: 'Supplier not found.' });
+      return;
+    }
+
+    res.json({ message: 'Supplier deleted successfully.' });
+  }),
+);
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  requireRoles(...supplierManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const restored = await db.query<{ id: string; name: string }>(
+      'UPDATE engicost.suppliers SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id, name',
+      [companyId, id],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted supplier not found.' });
+      return;
+    }
+
+    res.json({ message: 'Supplier restored successfully.' });
+  }),
+);
 export default router;

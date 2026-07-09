@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticateToken, requireAdmin, requireRoles } from "../middleware/auth";
+import { authenticateToken, requireAdmin, requireRoles, requireSuperAdmin } from "../middleware/auth";
 import authRouter from "./auth";
 import approvalsRouter from "./approvals";
 import dashboardRouter from "./dashboard";
@@ -21,6 +21,7 @@ import tendersRouter from "./tenders";
 import usersRouter from "./users";
 import websiteSettingsRouter from "./websiteSettings";
 import workersRouter from "./workers";
+import deletedItemsRouter from "./deletedItems";
 import { sendQuoteNotificationEmail } from "../services/mailer";
 import { handleAsync } from "./utils";
 import { getSingleTenantCompanyId } from "../db/init";
@@ -77,7 +78,7 @@ apiRouter.get(
     }>(
       `SELECT id, title, subtitle, category, image_url, sort_order
        FROM engicost.gallery_items
-       WHERE company_id = $1 AND is_visible = TRUE
+       WHERE company_id = $1 AND is_visible = TRUE AND is_deleted = FALSE
        ORDER BY sort_order ASC, created_at DESC`,
       [companyId],
     );
@@ -144,7 +145,7 @@ apiRouter.post(
 
     // Send notification email to admin (fire-and-forget — don't block response)
     const adminEmailResult = await db.query<{ email: string }>(
-      `SELECT email FROM engicost.users WHERE company_id = $1 AND role = 'Admin' AND status = 'Active' ORDER BY id ASC LIMIT 1`,
+      `SELECT email FROM engicost.users WHERE company_id = $1 AND role IN ('Super Admin', 'Admin') AND status = 'Active' AND is_deleted = FALSE ORDER BY id ASC LIMIT 1`,
       [companyId],
     );
     const adminEmail = adminEmailResult.rows[0]?.email;
@@ -184,6 +185,7 @@ apiRouter.use("/users", requireAdmin, usersRouter);
 apiRouter.use("/quote-requests", requireAdmin, quoteRequestsRouter);
 apiRouter.use("/website-settings", requireAdmin, websiteSettingsRouter);
 apiRouter.use("/gallery", requireAdmin, galleryRouter);
+apiRouter.use("/deleted-items", requireSuperAdmin, deletedItemsRouter);
 apiRouter.use("/upload", requireRoles(...documentRoles), uploadRouter);
 
 export default apiRouter;

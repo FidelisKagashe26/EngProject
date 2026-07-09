@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArchiveRestore,
   BriefcaseBusiness,
   Bell,
   Cog,
@@ -38,6 +39,7 @@ export const mainNavItems: NavItem[] = [
 export const utilityNavItems: NavItem[] = [
   { label: "Activity Log", path: "/activity-log", icon: Activity, permissions: ["audit.view"] },
   { label: "Users & Roles", path: "/users", icon: UserCog, permissions: ["users.manage"] },
+  { label: "Recycle Bin", path: "/deleted-items", icon: ArchiveRestore, permissions: ["deleted.restore"] },
   { label: "Settings", path: "/settings", icon: Cog, permissions: ["settings.manage"] },
 ];
 

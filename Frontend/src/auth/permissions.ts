@@ -1,4 +1,5 @@
 export const APP_ROLES = [
+  "Super Admin",
   "Admin",
   "Engineer / Project Manager",
   "Accountant",
@@ -28,6 +29,7 @@ export const APP_PERMISSIONS = [
   "settings.manage",
   "users.manage",
   "audit.view",
+  "deleted.restore",
 ] as const;
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
@@ -52,10 +54,12 @@ export const PERMISSION_LABELS: Record<AppPermission, string> = {
   "settings.manage": "Manage company, website and system settings",
   "users.manage": "Manage users and roles",
   "audit.view": "View activity log/audit trail",
+  "deleted.restore": "Restore deleted records",
 };
 
 export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
-  Admin: APP_PERMISSIONS,
+  "Super Admin": APP_PERMISSIONS,
+  Admin: APP_PERMISSIONS.filter((permission) => permission !== "deleted.restore"),
   "Engineer / Project Manager": [
     "dashboard.view",
     "projects.view",

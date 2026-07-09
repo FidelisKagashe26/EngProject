@@ -61,7 +61,7 @@ export const requireRoles =
       return;
     }
 
-    if (!roles.includes(authUser.role)) {
+    if (authUser.role !== 'Super Admin' && !roles.includes(authUser.role)) {
       forbidden(res, "You do not have permission to access this resource.");
       return;
     }
@@ -69,4 +69,5 @@ export const requireRoles =
     next();
   };
 
-export const requireAdmin = requireRoles("Admin");
+export const requireAdmin = requireRoles('Admin', 'Super Admin');
+export const requireSuperAdmin = requireRoles('Super Admin');

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
 import {
   APPROVAL_THRESHOLDS,
@@ -666,6 +667,7 @@ router.delete(
 // Restore a soft-deleted equipment usage
 router.patch(
   "/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const equipmentId = String(req.params.id);

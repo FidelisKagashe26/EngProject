@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync } from "./utils";
 
 const router = Router();
@@ -121,7 +122,7 @@ router.put(
          sort_order = COALESCE($7, sort_order),
          is_visible = COALESCE($8, is_visible),
          updated_at = NOW()
-       WHERE company_id = $1 AND id = $2
+       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
        RETURNING id, title, subtitle, category, image_url, sort_order, is_visible, created_at::text`,
       [
         companyId, id,
@@ -151,8 +152,8 @@ router.delete(
     const id = String(req.params.id);
 
     const result = await db.query<{ id: string }>(
-      `DELETE FROM engicost.gallery_items WHERE company_id = $1 AND id = $2 RETURNING id`,
-      [companyId, id],
+      'UPDATE engicost.gallery_items SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE RETURNING id',
+      [companyId, id, req.authUser?.fullName ?? 'System Admin'],
     );
 
     if (result.rowCount === 0) {
@@ -164,4 +165,24 @@ router.delete(
   }),
 );
 
+
+router.patch(
+  '/:id/restore',
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const result = await db.query<{ id: string }>(
+      'UPDATE engicost.gallery_items SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id',
+      [companyId, id],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted gallery item not found.' });
+      return;
+    }
+
+    res.json({ message: 'Gallery item restored successfully.' });
+  }),
+);
 export default router;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import {
   APPLIED_APPROVAL_STATUS_SQL,
@@ -577,6 +578,7 @@ router.delete(
 // Restore a soft-deleted client payment
 router.patch(
   "/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const paymentId = String(req.params.id);

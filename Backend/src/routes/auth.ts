@@ -166,6 +166,7 @@ router.post(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE lower(email) = $1
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [normalizedEmail],
@@ -286,6 +287,7 @@ router.post(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE lower(email) = $1
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [normalizedEmail],
@@ -460,6 +462,7 @@ router.post(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE id = $1 AND company_id = $2 AND lower(email) = $3
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [
@@ -521,6 +524,7 @@ router.get(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE id = $1
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [authUser.userId],
@@ -565,6 +569,7 @@ router.put(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE id = $1
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [authUser.userId],
@@ -583,6 +588,7 @@ router.put(
       FROM engicost.users
       WHERE lower(email) = $1
         AND id <> $2
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [nextEmail, user.id],
@@ -647,6 +653,7 @@ router.post(
       SELECT id, company_id, full_name, email, role, status, password_hash
       FROM engicost.users
       WHERE id = $1
+        AND is_deleted = FALSE
       LIMIT 1
       `,
       [authUser.userId],

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import {
   APPROVAL_THRESHOLDS,
@@ -1309,6 +1310,7 @@ router.delete(
 // Restore a soft-deleted material purchase
 router.patch(
   "/purchases/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const purchaseId = String(req.params.id);

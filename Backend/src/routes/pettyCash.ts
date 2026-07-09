@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 
 const router = Router();
@@ -352,6 +353,7 @@ router.delete(
 
 router.patch(
   "/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const { id } = req.params;

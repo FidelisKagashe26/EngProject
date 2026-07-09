@@ -550,6 +550,31 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
+  const softDeleteTables = [
+    'projects',
+    'workers',
+    'users',
+    'documents',
+    'suppliers',
+    'quote_requests',
+    'gallery_items',
+  ];
+
+  for (const tableName of softDeleteTables) {
+    await db.query(
+      'ALTER TABLE engicost.' + tableName +
+      ' ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,' +
+      ' ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,' +
+      ' ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160),' +
+      ' ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+    );
+
+    await db.query(
+      'CREATE INDEX IF NOT EXISTS idx_' + tableName + '_soft_deleted' +
+      ' ON engicost.' + tableName + '(company_id, is_deleted)',
+    );
+  }
+
   const financialTables = [
     "expenses",
     "client_payments",
@@ -633,7 +658,7 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(
     `
     INSERT INTO engicost.users (company_id, full_name, email, phone, role, status, last_login)
-    VALUES ($1, 'Faraja Nyerere', $2, '+255 754 111 992', 'Admin', 'Active', NOW())
+    VALUES ($1, 'Faraja Nyerere', $2, '+255 754 111 992', 'Super Admin', 'Active', NOW())
     ON CONFLICT (email) DO NOTHING
     `,
     [companyId, env.adminSeedEmail.trim().toLowerCase()],
@@ -650,6 +675,11 @@ export const initializeDatabase = async (): Promise<void> => {
     [env.adminSeedEmail.trim().toLowerCase(), adminPasswordHash],
   );
 
+
+  await db.query(
+    'UPDATE engicost.users SET role = ' + String.fromCharCode(39) + 'Super Admin' + String.fromCharCode(39) + ', updated_at = NOW() WHERE lower(email) = $1 AND role = ' + String.fromCharCode(39) + 'Admin' + String.fromCharCode(39),
+    [env.adminSeedEmail.trim().toLowerCase()],
+  );
   const existingProjects = await db.query("SELECT id FROM engicost.projects LIMIT 1");
   if (existingProjects.rowCount === 0 && shouldSeedDemoData) {
     for (const project of seedProjects) {

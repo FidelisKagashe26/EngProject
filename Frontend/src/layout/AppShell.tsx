@@ -36,6 +36,7 @@ const routeTitles: Record<string, string> = {
   "/settings": "Settings",
   "/notifications": "Notifications / Alerts",
   "/activity-log": "Activity Log / Audit Trail",
+  "/deleted-items": "Recycle Bin",
 };
 
 export const AppShell = ({

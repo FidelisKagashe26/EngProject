@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
 import {
   APPROVAL_THRESHOLDS,
@@ -148,7 +149,7 @@ const getProjectById = async (
     `
     SELECT id, name
     FROM engicost.projects
-    WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
     LIMIT 1
     `,
     [companyId, projectId],
@@ -164,7 +165,7 @@ const getWorkerById = async (
     `
     SELECT id, full_name, assigned_project_id, payment_type, pay_cycle_start_date::text, next_payment_due_date::text
     FROM engicost.workers
-    WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
     LIMIT 1
     `,
     [companyId, workerId],
@@ -229,7 +230,7 @@ router.get(
           w.notes
         FROM engicost.workers w
         LEFT JOIN engicost.projects p ON p.id = w.assigned_project_id
-        WHERE w.company_id = $1
+        WHERE w.company_id = $1 AND w.is_deleted = FALSE
         ORDER BY w.created_at DESC
         `,
         [companyId],
@@ -251,7 +252,7 @@ router.get(
           (
             SELECT COALESCE(SUM(w.outstanding_amount), 0)::text
             FROM engicost.workers w
-            WHERE w.company_id = $1
+            WHERE w.company_id = $1 AND w.is_deleted = FALSE
           ) AS outstanding
         `,
         [companyId],
@@ -765,7 +766,7 @@ router.post(
             outstanding_amount = GREATEST(outstanding_amount - $3, 0) + $4,
             status = CASE WHEN GREATEST(outstanding_amount - $3, 0) + $4 > 0 THEN 'Pending' ELSE 'Active' END,
             updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, parsed.workerId, parsed.amountPaid, balance],
         );
@@ -778,7 +779,7 @@ router.post(
               next_payment_due_date = $3,
               last_payment_covered_date = $4,
               updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
             `,
             [companyId, parsed.workerId, nextPaymentDueDate, lastPaymentCoveredDate],
           );
@@ -789,7 +790,7 @@ router.post(
             `
             UPDATE engicost.workers
             SET assigned_project_id = $3, updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
             `,
             [companyId, parsed.workerId, parsed.projectId],
           );
@@ -799,7 +800,7 @@ router.post(
           `
           UPDATE engicost.projects
           SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, parsed.projectId, parsed.amountPaid],
         );
@@ -875,12 +876,8 @@ router.delete(
     }
 
     await db.query(
-      `
-      UPDATE engicost.workers
-      SET status = 'Inactive'
-      WHERE company_id = $1 AND id = $2
-      `,
-      [companyId, workerId],
+      "UPDATE engicost.workers SET status = 'Inactive', is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE",
+      [companyId, workerId, req.authUser?.fullName ?? 'System Admin'],
     );
 
     await logLaborActivity(
@@ -894,6 +891,28 @@ router.delete(
   }),
 );
 
+
+router.patch(
+  '/:workerId/restore',
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const workerId = req.params.workerId as string;
+    const restored = await db.query<{ id: string; full_name: string; assigned_project_id: string | null }>(
+      "UPDATE engicost.workers SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, status = 'Active', updated_at = NOW() WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE RETURNING id, full_name, assigned_project_id",
+      [companyId, workerId],
+    );
+
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: 'Deleted worker not found.' });
+      return;
+    }
+
+    await logLaborActivity(companyId, 'Restored Worker', restored.rows[0].assigned_project_id, 'Restored worker ' + restored.rows[0].full_name + '.');
+
+    res.json({ message: 'Worker restored successfully.' });
+  }),
+);
 router.patch(
   "/labor-payments/:id",
   handleAsync(async (req, res) => {
@@ -984,7 +1003,7 @@ router.patch(
           `
           UPDATE engicost.projects
           SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, oldPayment.project_id, amountDifference],
         );
@@ -997,7 +1016,7 @@ router.patch(
             outstanding_amount = GREATEST(outstanding_amount + $4, 0),
             status = CASE WHEN GREATEST(outstanding_amount + $4, 0) > 0 THEN 'Pending' ELSE 'Active' END,
             updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, oldPayment.worker_id, amountDifference, balanceDifference],
         );
@@ -1067,7 +1086,7 @@ router.delete(
         `
         UPDATE engicost.labor_payments
         SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3
-        WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
         `,
         [companyId, paymentId, deletedBy],
       );
@@ -1077,7 +1096,7 @@ router.delete(
           `
           UPDATE engicost.projects
           SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, payment.project_id, amountPaid],
         );
@@ -1090,7 +1109,7 @@ router.delete(
             outstanding_amount = GREATEST(outstanding_amount + $3 - $4, 0),
             status = CASE WHEN GREATEST(outstanding_amount + $3 - $4, 0) > 0 THEN 'Pending' ELSE 'Active' END,
             updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, payment.worker_id, amountPaid, balance],
         );
@@ -1121,6 +1140,7 @@ router.delete(
 // Restore a soft-deleted labor payment
 router.patch(
   "/labor-payments/:id/restore",
+  requireSuperAdmin,
   handleAsync(async (req, res) => {
     const companyId = await getSingleTenantCompanyId();
     const paymentId = String(req.params.id);
@@ -1160,7 +1180,7 @@ router.patch(
         `
         UPDATE engicost.labor_payments
         SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL
-        WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
         `,
         [companyId, paymentId],
       );
@@ -1170,7 +1190,7 @@ router.patch(
           `
           UPDATE engicost.projects
           SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, payment.project_id, amountPaid],
         );
@@ -1183,7 +1203,7 @@ router.patch(
             outstanding_amount = GREATEST(outstanding_amount - $3, 0) + $4,
             status = CASE WHEN GREATEST(outstanding_amount - $3, 0) + $4 > 0 THEN 'Pending' ELSE 'Active' END,
             updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
           `,
           [companyId, payment.worker_id, amountPaid, balance],
         );

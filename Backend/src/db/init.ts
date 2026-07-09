@@ -489,7 +489,10 @@ export const initializeDatabase = async (): Promise<void> => {
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,
-    ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160)
+    ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160),
+    ADD COLUMN IF NOT EXISTS delete_reason TEXT,
+    ADD COLUMN IF NOT EXISTS restored_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS restored_by VARCHAR(160)
   `);
 
 
@@ -566,6 +569,9 @@ export const initializeDatabase = async (): Promise<void> => {
       ' ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,' +
       ' ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,' +
       ' ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160),' +
+      ' ADD COLUMN IF NOT EXISTS delete_reason TEXT,' +
+      ' ADD COLUMN IF NOT EXISTS restored_at TIMESTAMP,' +
+      ' ADD COLUMN IF NOT EXISTS restored_by VARCHAR(160),' +
       ' ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
     );
 
@@ -589,6 +595,9 @@ export const initializeDatabase = async (): Promise<void> => {
       ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS delete_reason TEXT,
+      ADD COLUMN IF NOT EXISTS restored_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS restored_by VARCHAR(160),
       ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'AUTO_APPROVED',
       ADD COLUMN IF NOT EXISTS approval_requested_by VARCHAR(160),
       ADD COLUMN IF NOT EXISTS approved_by VARCHAR(160),

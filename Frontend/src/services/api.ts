@@ -919,6 +919,8 @@ export interface DeletedItemApiRecord {
   subtitle: string;
   deletedAt: string | null;
   deletedBy: string;
+  deleteReason: string;
+  restorePreview: string;
 }
 
 export interface DeletedItemsResponse {
@@ -1497,6 +1499,12 @@ export const api = {
       method: "PATCH",
     }),
   getDeletedItems: () => apiRequest<DeletedItemsResponse>("/deleted-items"),
+  purgeDeletedItem: (entity: DeletedItemEntity, id: string) =>
+    apiRequest<{ message: string }>(`/deleted-items/${encodeURIComponent(entity)}/${encodeURIComponent(id)}/purge`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: "PURGE" }),
+      successMessage: "Deleted record permanently purged.",
+    }),
   restoreDeletedItem: (entity: DeletedItemEntity, id: string) => {
     const encodedId = encodeURIComponent(id);
     const restorePaths: Record<DeletedItemEntity, string> = {

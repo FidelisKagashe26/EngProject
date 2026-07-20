@@ -35,10 +35,11 @@ const defaultExpenseCategories = [
 type ExpensesPageProps = {
   embedded?: boolean;
   search?: string;
-  tabBar?: ReactNode;
+  /** Renders the shared operations tab bar with this page's controls on the search row. */
+  renderTabBar?: (actions?: ReactNode) => ReactNode;
 };
 
-export const ExpensesPage = ({ embedded = false, search = "", tabBar }: ExpensesPageProps) => {
+export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: ExpensesPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -309,6 +310,47 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
         />
       ) : null}
 
+      {renderTabBar?.(
+        <>
+          <div className="inline-flex h-11 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
+            <button
+              className={[
+                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+                activeExpenseSection === "categories"
+                  ? "bg-[#0b2a53] text-white"
+                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+              ].join(" ")}
+              onClick={() => setActiveExpenseSection("categories")}
+              type="button"
+            >
+              Category List
+            </button>
+            <button
+              className={[
+                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+                activeExpenseSection === "expenses"
+                  ? "bg-[#0b2a53] text-white"
+                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+              ].join(" ")}
+              onClick={() => setActiveExpenseSection("expenses")}
+              type="button"
+            >
+              Expenses List
+            </button>
+          </div>
+
+          {activeExpenseSection === "expenses" && (
+            <button
+              className="btn-primary h-11 justify-center whitespace-nowrap"
+              onClick={openAddModal}
+              type="button"
+            >
+              + Add Expense
+            </button>
+          )}
+        </>,
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard className="[&_h3]:text-xs" title="Expense Records">
@@ -326,43 +368,6 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
         <SurfaceCard className="[&_h3]:text-xs" title="Projects Covered">
           <p className="text-xl font-bold text-slate-900">{expenseSummary.projects.size}</p>
         </SurfaceCard>
-      </div>
-
-      {tabBar}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
-          <button
-            className={[
-              "flex-1 rounded-md px-4 py-2 text-sm font-semibold transition sm:flex-none",
-              activeExpenseSection === "categories"
-                ? "bg-[#0b2a53] text-white"
-                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-            ].join(" ")}
-            onClick={() => setActiveExpenseSection("categories")}
-            type="button"
-          >
-            Category List
-          </button>
-          <button
-            className={[
-              "flex-1 rounded-md px-4 py-2 text-sm font-semibold transition sm:flex-none",
-              activeExpenseSection === "expenses"
-                ? "bg-[#0b2a53] text-white"
-                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-            ].join(" ")}
-            onClick={() => setActiveExpenseSection("expenses")}
-            type="button"
-          >
-            Expenses List
-          </button>
-        </div>
-
-        {activeExpenseSection === "expenses" && (
-          <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-            + Add Expense
-          </button>
-        )}
       </div>
 
       {activeExpenseSection === "categories" ? (

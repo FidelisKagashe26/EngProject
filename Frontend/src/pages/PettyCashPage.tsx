@@ -25,10 +25,11 @@ const OPENING_BALANCE = 1_800_000;
 type PettyCashPageProps = {
   embedded?: boolean;
   search?: string;
-  tabBar?: ReactNode;
+  /** Renders the shared operations tab bar with this page's actions on the search row. */
+  renderTabBar?: (actions?: ReactNode) => ReactNode;
 };
 
-export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCashPageProps) => {
+export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: PettyCashPageProps) => {
   const { markSaved } = useUnsavedChanges();
 
   const [loading, setLoading] = useState(true);
@@ -220,6 +221,16 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
         />
       ) : null}
 
+      {renderTabBar?.(
+        <button
+          className="btn-primary h-11 justify-center whitespace-nowrap"
+          onClick={openAddModal}
+          type="button"
+        >
+          + Add Transaction
+        </button>,
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Opening Balance">
@@ -241,16 +252,6 @@ export const PettyCashPage = ({ embedded = false, search = "", tabBar }: PettyCa
             {summary.pendingCount} {summary.pendingCount === 1 ? "Entry" : "Entries"}
           </p>
         </SurfaceCard>
-      </div>
-
-      {/* Tab bar — between stats and table */}
-      {tabBar}
-
-      {/* Add button - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-          + Add Transaction
-        </button>
       </div>
 
       {/* Petty Cash Table */}

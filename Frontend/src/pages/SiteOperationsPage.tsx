@@ -207,8 +207,8 @@ export const SiteOperationsPage = () => {
     setSearch("");
   };
 
-  // Pages that own filters render the bar themselves so their controls can sit
-  // on the search row; the rest still get it rendered for them.
+  // Each page renders the bar itself so its own filters and buttons land on the
+  // search row rather than in a separate strip below.
   const renderTabBar = (actions?: ReactNode) => (
     <OperationsTabBar
       actions={actions}
@@ -226,13 +226,11 @@ export const SiteOperationsPage = () => {
         title="Site Operations"
       />
 
-      {activeTab !== "labor" && renderTabBar()}
-
       {activeTab === "labor"      && <LaborPage     embedded renderTabBar={renderTabBar} search={search} />}
-      {activeTab === "materials"  && <MaterialsPage embedded search={search} />}
-      {activeTab === "expenses"   && <ExpensesPage  embedded search={search} />}
-      {activeTab === "equipment"  && <EquipmentPage embedded search={search} />}
-      {activeTab === "petty-cash" && <PettyCashPage embedded search={search} />}
+      {activeTab === "materials"  && <MaterialsPage embedded renderTabBar={renderTabBar} search={search} />}
+      {activeTab === "expenses"   && <ExpensesPage  embedded renderTabBar={renderTabBar} search={search} />}
+      {activeTab === "equipment"  && <EquipmentPage embedded renderTabBar={renderTabBar} search={search} />}
+      {activeTab === "petty-cash" && <PettyCashPage embedded renderTabBar={renderTabBar} search={search} />}
     </div>
   );
 };

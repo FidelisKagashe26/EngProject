@@ -26,10 +26,11 @@ import { formatDate, formatTzs } from "../utils/format";
 type EquipmentPageProps = {
   embedded?: boolean;
   search?: string;
-  tabBar?: ReactNode;
+  /** Renders the shared operations tab bar with this page's actions on the search row. */
+  renderTabBar?: (actions?: ReactNode) => ReactNode;
 };
 
-export const EquipmentPage = ({ embedded = false, search = "", tabBar }: EquipmentPageProps) => {
+export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: EquipmentPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -284,6 +285,16 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         />
       ) : null}
 
+      {renderTabBar?.(
+        <button
+          className="btn-primary h-11 justify-center whitespace-nowrap"
+          onClick={openAddModal}
+          type="button"
+        >
+          + Add Equipment
+        </button>,
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Total Records">
@@ -301,16 +312,6 @@ export const EquipmentPage = ({ embedded = false, search = "", tabBar }: Equipme
         <SurfaceCard title="In Use">
           <p className="text-2xl font-bold text-emerald-700">{summary.inUseCount}</p>
         </SurfaceCard>
-      </div>
-
-      {/* Tab bar — between stats and table */}
-      {tabBar}
-
-      {/* Filter and Add button - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-          + Add Equipment
-        </button>
       </div>
 
       {/* Equipment Table */}

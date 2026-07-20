@@ -57,10 +57,11 @@ const normalizeMaterialName = (value: string): string =>
 type MaterialsPageProps = {
   embedded?: boolean;
   search?: string;
-  tabBar?: ReactNode;
+  /** Renders the shared operations tab bar with this page's filters on the search row. */
+  renderTabBar?: (actions?: ReactNode) => ReactNode;
 };
 
-export const MaterialsPage = ({ embedded = false, search = "", tabBar }: MaterialsPageProps) => {
+export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: MaterialsPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -477,6 +478,35 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
         />
       ) : null}
 
+      {renderTabBar?.(
+        <>
+          <div className="w-full sm:w-52">
+            <GuiSelect
+              className="h-11"
+              onChange={(e) => setListProjectFilter(e.target.value)}
+              value={listProjectFilter}
+            >
+              <option value="All">All Projects</option>
+              {projects.map((p) => <option key={`mat-list-${p.id}`} value={p.id}>{p.name}</option>)}
+            </GuiSelect>
+          </div>
+          <button
+            className="btn-primary h-11 justify-center whitespace-nowrap"
+            onClick={() => { resetRequirementForm(); setShowRequirementModal(true); }}
+            type="button"
+          >
+            + Add Requirement
+          </button>
+          <button
+            className="btn-primary h-11 justify-center whitespace-nowrap"
+            onClick={() => { resetPurchaseForm(); setShowPurchaseModal(true); }}
+            type="button"
+          >
+            + Add Receipt
+          </button>
+        </>,
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Requirements">
@@ -499,27 +529,6 @@ export const MaterialsPage = ({ embedded = false, search = "", tabBar }: Materia
             Completed: {materialsSummary.completedRequirements}/{materialsSummary.totalRequirements}
           </p>
         </SurfaceCard>
-      </div>
-
-      {tabBar}
-
-      {/* Filter and Add buttons - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <div className="w-full sm:w-56">
-          <label className="form-field">
-            <span className="text-sm">Filter by Project</span>
-            <GuiSelect className="input-field" onChange={(e) => setListProjectFilter(e.target.value)} value={listProjectFilter}>
-              <option value="All">All Projects</option>
-              {projects.map((p) => <option key={`mat-list-${p.id}`} value={p.id}>{p.name}</option>)}
-            </GuiSelect>
-          </label>
-        </div>
-        <button className="btn-primary whitespace-nowrap" onClick={() => { resetRequirementForm(); setShowRequirementModal(true); }} type="button">
-          + Add Requirement
-        </button>
-        <button className="btn-primary whitespace-nowrap" onClick={() => { resetPurchaseForm(); setShowPurchaseModal(true); }} type="button">
-          + Add Receipt
-        </button>
       </div>
 
       {/* Materials Table */}

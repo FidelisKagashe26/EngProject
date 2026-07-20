@@ -330,6 +330,9 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
       contract_value: string;
       amount_received: string;
       total_spent: string;
+      labor_spent: string;
+      material_spent: string;
+      operational_spent: string;
       pending_client_payments: string;
       status: string;
       progress: number;
@@ -341,7 +344,10 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
         contract_value::text,
         amount_received::text,
         total_spent::text,
-        pending_client_payments::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        GREATEST(contract_value - amount_received, 0)::text AS pending_client_payments,
         status,
         progress
       FROM engicost.projects
@@ -570,20 +576,14 @@ const buildReportsPayload = async (companyId: number): Promise<ReportsPayload> =
     ),
   ]);
 
-  const laborMap = new Map(
-    laborSummaryResult.rows.map((row) => [row.project_id, Number(row.total_paid)]),
-  );
-  const materialMap = new Map(
-    materialSummaryResult.rows.map((row) => [row.project_id, Number(row.total_cost)]),
-  );
-  const expenseMap = new Map(
-    expenseSummaryResult.rows.map((row) => [row.project_id, Number(row.total_amount)]),
-  );
-
   const projectCostSummary: ReportProjectCostRow[] = projectSummaryResult.rows.map((row) => {
-    const laborCost = laborMap.get(row.id) ?? 0;
-    const materialCost = materialMap.get(row.id) ?? 0;
-    const otherExpenses = expenseMap.get(row.id) ?? 0;
+    // Read the breakdown from the project's own category columns rather than
+    // re-aggregating per module. Those columns are maintained by the ledger and
+    // sum exactly to total_spent, so the report always reconciles — the old
+    // per-module aggregation silently left equipment and petty cash out.
+    const laborCost = Number(row.labor_spent);
+    const materialCost = Number(row.material_spent);
+    const otherExpenses = Number(row.operational_spent);
     const contractValue = Number(row.contract_value);
     const amountReceived = Number(row.amount_received);
     const totalSpent = Number(row.total_spent);
@@ -1356,7 +1356,9 @@ const renderSummaryBlock = (doc: PDFKit.PDFDocument, payload: ReportsPayload): v
       { metric: "Total Income Received", value: formatCurrency(payload.totals.amountReceived) },
       { metric: "Total Labor Cost", value: formatCurrency(payload.totals.laborCost) },
       { metric: "Total Material Cost", value: formatCurrency(payload.totals.materialCost) },
-      { metric: "Total Other Expenses", value: formatCurrency(payload.totals.otherExpenses) },
+      // Operational = expenses + equipment + petty cash, i.e. everything that
+      // is not labour or materials. Together the three tie to Total Spent.
+      { metric: "Total Operational Cost", value: formatCurrency(payload.totals.otherExpenses) },
       { metric: "Total Expenses", value: formatCurrency(payload.totals.totalSpent) },
       { metric: "Estimated Profit / Loss", value: formatCurrency(payload.totals.estimatedProfitLoss) },
       { metric: "Outstanding Balance", value: formatCurrency(payload.totals.remainingBalance) },

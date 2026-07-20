@@ -11,7 +11,7 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { applyProjectSpend, moveProjectSpend } from "../services/projectLedger";
 
 const router = Router();
 
@@ -810,19 +810,6 @@ router.post(
     const approvalStatus = getApprovalStatusForAmount("material_purchases", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Store Keeper";
 
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      parsed.projectId,
-      totalCost,
-      "material purchase",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
-
     const client = await db.connect();
     let insertedRow:
       | {
@@ -920,14 +907,19 @@ router.post(
       insertedRow = inserted.rows[0];
 
       if (!needsApproval) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, parsed.projectId, totalCost],
-        );
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "material",
+          delta: totalCost,
+          context: "material purchase",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
       }
 
       await refreshRequirementSupplyStatus(client, companyId, parsed.requirementId);
@@ -1103,31 +1095,29 @@ router.patch(
       parsed.quantityPurchased !== undefined ||
       parsed.unitCost !== undefined;
     const isAppliedPurchase = isAppliedApprovalStatus(oldPurchase.approval_status);
-    const spendAmountToCheck = newSupplySource === "Client Supplied"
-      ? 0
-      : isAppliedPurchase
-        ? newProjectId !== oldPurchase.project_id
-          ? newTotalCost
-          : Math.max(costDifference, 0)
-        : costFieldsChanged
-          ? newTotalCost
-          : 0;
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      newProjectId,
-      spendAmountToCheck,
-      "material purchase update",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+
+      // Client-supplied material costs the company nothing, so an edit that
+      // switches to it unbooks the spend entirely.
+      if (isAppliedPurchase) {
+        const ledgerFailure = await moveProjectSpend(client, {
+          companyId,
+          fromProjectId: oldPurchase.project_id,
+          toProjectId: newProjectId,
+          category: "material",
+          previousAmount: oldTotalCost,
+          nextAmount: newSupplySource === "Client Supplied" ? 0 : newTotalCost,
+          context: "material purchase update",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+      }
 
       const setClauses: string[] = [];
       const params: unknown[] = [companyId, purchaseId];
@@ -1198,36 +1188,6 @@ router.patch(
         );
       }
 
-      if (isAppliedPurchase) {
-        if (newProjectId !== oldPurchase.project_id) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldPurchase.project_id, oldTotalCost],
-          );
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = total_spent + $3, updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, newProjectId, newTotalCost],
-          );
-        } else if (costDifference !== 0) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldPurchase.project_id, costDifference],
-          );
-        }
-      }
-
       await refreshRequirementSupplyStatus(client, companyId, oldRequirementId);
       if (newRequirementId !== oldRequirementId) {
         await refreshRequirementSupplyStatus(client, companyId, newRequirementId);
@@ -1293,21 +1253,6 @@ router.delete(
     const purchase = result.rows[0];
     const totalCost = Number(purchase.total_cost);
 
-    if (isAppliedApprovalStatus(purchase.approval_status)) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        purchase.project_id,
-        totalCost,
-        "material purchase restore",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -1323,14 +1268,13 @@ router.delete(
       );
 
       if (isAppliedApprovalStatus(purchase.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, purchase.project_id, totalCost],
-        );
+        await applyProjectSpend(client, {
+          companyId,
+          projectId: purchase.project_id,
+          category: "material",
+          delta: -totalCost,
+          context: "material purchase deletion",
+        });
       }
 
       await refreshRequirementSupplyStatus(client, companyId, purchase.requirement_id);
@@ -1412,14 +1356,19 @@ router.patch(
       );
 
       if (isAppliedApprovalStatus(purchase.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, purchase.project_id, totalCost],
-        );
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: purchase.project_id,
+          category: "material",
+          delta: totalCost,
+          context: "material purchase restore",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
       }
 
       await refreshRequirementSupplyStatus(client, companyId, purchase.requirement_id);

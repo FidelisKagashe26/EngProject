@@ -5,7 +5,23 @@ import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { withTransaction } from "../db/transaction";
+import { applyProjectSpend, type LedgerFailure } from "../services/projectLedger";
+
+type PettyCashRow = {
+  id: string;
+  project_id: string | null;
+  transaction_date: string;
+  transaction_type: string;
+  description: string;
+  amount: string;
+  recorded_by: string;
+  receipt_ref: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 const router = Router();
 
@@ -126,36 +142,28 @@ router.post(
       projectName = projectResult.rows[0].name;
     }
 
-    if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        parsed.projectId,
-        parsed.amount,
-        "petty cash cash out",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
+    const outcome = await withTransaction<{
+      failure: LedgerFailure | null;
+      row: PettyCashRow | null;
+    }>(async (client) => {
+      // A project-linked Cash Out spends project money, so it books against the
+      // project's operational budget exactly like an expense would. Cash In
+      // tops the float back up and is not a project cost.
+      if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
+        const failure = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "operational",
+          delta: parsed.amount,
+          context: "petty cash cash out",
+        });
+        if (failure) {
+          return { failure, row: null };
+        }
       }
-    }
 
-    const inserted = await db.query<{
-      id: string;
-      project_id: string | null;
-      transaction_date: string;
-      transaction_type: string;
-      description: string;
-      amount: string;
-      recorded_by: string;
-      receipt_ref: string | null;
-      status: string;
-      notes: string | null;
-      created_at: string;
-      updated_at: string;
-    }>(
-      `
+      const inserted = await client.query<PettyCashRow>(
+        `
       INSERT INTO engicost.petty_cash_transactions (
         id, company_id, project_id, transaction_date, transaction_type,
         description, amount, recorded_by, receipt_ref, status, notes
@@ -177,37 +185,44 @@ router.post(
         created_at::text,
         updated_at::text
       `,
-      [
-        makeId("PC"),
-        companyId,
-        parsed.projectId,
-        parsed.transactionDate,
-        parsed.transactionType,
-        parsed.description,
-        parsed.amount,
-        parsed.recordedBy,
-        parsed.receiptRef,
-        parsed.status,
-        parsed.notes,
-      ],
-    );
+        [
+          makeId("PC"),
+          companyId,
+          parsed.projectId,
+          parsed.transactionDate,
+          parsed.transactionType,
+          parsed.description,
+          parsed.amount,
+          parsed.recordedBy,
+          parsed.receiptRef,
+          parsed.status,
+          parsed.notes,
+        ],
+      );
 
-    const row = inserted.rows[0];
-
-    // Log activity
-    await db.query(
-      `
+      await client.query(
+        `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
       VALUES ($1, $2, $3, 'Recorded Petty Cash', 'Petty Cash', NULLIF($4, ''), $5, '127.0.0.1 / Local Dev')
       `,
-      [
-        makeId("ACT"),
-        companyId,
-        parsed.recordedBy,
-        parsed.projectId,
-        `${parsed.transactionType} of TZS ${parsed.amount.toLocaleString("en-TZ")} — ${parsed.description}`,
-      ],
-    );
+        [
+          makeId("ACT"),
+          companyId,
+          parsed.recordedBy,
+          parsed.projectId,
+          `${parsed.transactionType} of TZS ${parsed.amount.toLocaleString("en-TZ")} — ${parsed.description}`,
+        ],
+      );
+
+      return { failure: null, row: inserted.rows[0] };
+    });
+
+    if (outcome.failure || !outcome.row) {
+      res.status(400).json(outcome.failure);
+      return;
+    }
+
+    const row = outcome.row;
 
     res.status(201).json({
       id: row.id,
@@ -250,35 +265,60 @@ router.patch(
       projectName = projectResult.rows[0].name;
     }
 
-    if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        parsed.projectId,
-        parsed.amount,
-        "petty cash cash out update",
+    const outcome = await withTransaction<{
+      failure: LedgerFailure | null;
+      row: PettyCashRow | null;
+      notFound?: boolean;
+    }>(async (client) => {
+      const existing = await client.query<{
+        project_id: string | null;
+        transaction_type: string;
+        amount: string;
+      }>(
+        `
+        SELECT project_id, transaction_type, amount::text
+        FROM engicost.petty_cash_transactions
+        WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+        `,
+        [companyId, id],
       );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
 
-    const updated = await db.query<{
-      id: string;
-      project_id: string | null;
-      transaction_date: string;
-      transaction_type: string;
-      description: string;
-      amount: string;
-      recorded_by: string;
-      receipt_ref: string | null;
-      status: string;
-      notes: string | null;
-      created_at: string;
-      updated_at: string;
-    }>(
+      if (existing.rowCount === 0) {
+        return { failure: null, row: null, notFound: true };
+      }
+
+      const before = existing.rows[0];
+
+      // Unbook whatever the entry used to contribute, then book what it now
+      // contributes. Doing both explicitly covers a changed amount, a switch
+      // between Cash In and Cash Out, and a move to a different project.
+      if (before.transaction_type === "Cash Out" && before.project_id) {
+        const reversal = await applyProjectSpend(client, {
+          companyId,
+          projectId: before.project_id,
+          category: "operational",
+          delta: -Number(before.amount),
+          context: "petty cash update",
+        });
+        if (reversal) {
+          return { failure: reversal, row: null };
+        }
+      }
+
+      if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
+        const booking = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "operational",
+          delta: parsed.amount,
+          context: "petty cash cash out update",
+        });
+        if (booking) {
+          return { failure: booking, row: null };
+        }
+      }
+
+      const updated = await client.query<PettyCashRow>(
       `
       UPDATE engicost.petty_cash_transactions
       SET
@@ -296,34 +336,43 @@ router.patch(
       RETURNING id, project_id, transaction_date::text, transaction_type, description,
         amount::text, recorded_by, receipt_ref, status, notes, created_at::text, updated_at::text
       `,
-      [
-        companyId,
-        id,
-        parsed.projectId,
-        parsed.transactionDate,
-        parsed.transactionType,
-        parsed.description,
-        parsed.amount,
-        parsed.recordedBy,
-        parsed.receiptRef,
-        parsed.status,
-        parsed.notes,
-      ],
-    );
+        [
+          companyId,
+          id,
+          parsed.projectId,
+          parsed.transactionDate,
+          parsed.transactionType,
+          parsed.description,
+          parsed.amount,
+          parsed.recordedBy,
+          parsed.receiptRef,
+          parsed.status,
+          parsed.notes,
+        ],
+      );
 
-    if (updated.rowCount === 0) {
+      await client.query(
+        `
+      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+      VALUES ($1, $2, $3, 'Updated Petty Cash', 'Petty Cash', NULLIF($4, ''), $5, '127.0.0.1 / Local Dev')
+      `,
+        [makeId("ACT"), companyId, parsed.recordedBy, parsed.projectId, "Updated petty cash entry " + id],
+      );
+
+      return { failure: null, row: updated.rows[0] };
+    });
+
+    if (outcome.notFound) {
       res.status(404).json({ message: "Petty cash entry not found." });
       return;
     }
 
-    const row = updated.rows[0];
-    await db.query(
-      `
-      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, $3, 'Updated Petty Cash', 'Petty Cash', NULLIF($4, ''), $5, '127.0.0.1 / Local Dev')
-      `,
-      [makeId("ACT"), companyId, parsed.recordedBy, parsed.projectId, "Updated petty cash entry " + id],
-    );
+    if (outcome.failure || !outcome.row) {
+      res.status(400).json(outcome.failure);
+      return;
+    }
+
+    const row = outcome.row;
 
     res.json({
       id: row.id,
@@ -351,34 +400,62 @@ router.delete(
     const { id } = req.params;
     const deletedBy = req.body?.deletedBy || "System Admin";
 
-    const existing = await db.query<{ project_id: string | null; amount: string }>(
-      "SELECT project_id, amount::text FROM engicost.petty_cash_transactions WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE LIMIT 1",
-      [companyId, id],
-    );
+    const deleted = await withTransaction(async (client) => {
+      const existing = await client.query<{
+        project_id: string | null;
+        transaction_type: string;
+        amount: string;
+      }>(
+        `
+        SELECT project_id, transaction_type, amount::text
+        FROM engicost.petty_cash_transactions
+        WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+        `,
+        [companyId, id],
+      );
 
-    if (existing.rowCount === 0) {
-      res.status(404).json({ message: "Petty cash entry not found." });
-      return;
-    }
+      if (existing.rowCount === 0) {
+        return false;
+      }
 
-    await db.query(
-      `
+      const before = existing.rows[0];
+
+      if (before.transaction_type === "Cash Out" && before.project_id) {
+        await applyProjectSpend(client, {
+          companyId,
+          projectId: before.project_id,
+          category: "operational",
+          delta: -Number(before.amount),
+          context: "petty cash deletion",
+        });
+      }
+
+      await client.query(
+        `
       UPDATE engicost.petty_cash_transactions
       SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW()
       WHERE company_id = $1 AND id = $2
       `,
-      [companyId, id, deletedBy],
-    );
+        [companyId, id, deletedBy],
+      );
 
-    await db.query(
-      `
+      await client.query(
+        `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
       VALUES ($1, $2, $3, 'Deleted Petty Cash', 'Petty Cash', $4, $5, '127.0.0.1 / Local Dev')
       `,
-      [makeId("ACT"), companyId, deletedBy, existing.rows[0].project_id, "Soft deleted petty cash entry " + id],
-    );
+        [makeId("ACT"), companyId, deletedBy, before.project_id, "Soft deleted petty cash entry " + id],
+      );
 
-    res.json({ message: "Petty cash entry deleted (soft delete)." });
+      return true;
+    });
+
+    if (!deleted) {
+      res.status(404).json({ message: "Petty cash entry not found." });
+      return;
+    }
+
+    res.json({ message: "Petty cash entry deleted (soft delete) and project spend reversed." });
   }),
 );
 
@@ -390,28 +467,65 @@ router.patch(
     const { id } = req.params;
     const restoredBy = req.body?.restoredBy || "System Admin";
 
-    const restored = await db.query<{ project_id: string | null }>(
-      `
+    const outcome = await withTransaction<{
+      failure: LedgerFailure | null;
+      notFound: boolean;
+    }>(async (client) => {
+      const restored = await client.query<{
+        project_id: string | null;
+        transaction_type: string;
+        amount: string;
+      }>(
+        `
       UPDATE engicost.petty_cash_transactions
       SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW()
       WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE
-      RETURNING project_id
+      RETURNING project_id, transaction_type, amount::text
       `,
-      [companyId, id],
-    );
+        [companyId, id],
+      );
 
-    if (restored.rowCount === 0) {
+      if (restored.rowCount === 0) {
+        return { failure: null, notFound: true };
+      }
+
+      const entry = restored.rows[0];
+
+      // Restoring puts the spend back on the project, so it has to clear the
+      // same capacity checks a fresh entry would.
+      if (entry.transaction_type === "Cash Out" && entry.project_id) {
+        const failure = await applyProjectSpend(client, {
+          companyId,
+          projectId: entry.project_id,
+          category: "operational",
+          delta: Number(entry.amount),
+          context: "petty cash restore",
+        });
+        if (failure) {
+          return { failure, notFound: false };
+        }
+      }
+
+      await client.query(
+        `
+      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+      VALUES ($1, $2, $3, 'Restored Petty Cash', 'Petty Cash', $4, $5, '127.0.0.1 / Local Dev')
+      `,
+        [makeId("ACT"), companyId, restoredBy, entry.project_id, "Restored petty cash entry " + id],
+      );
+
+      return { failure: null, notFound: false };
+    });
+
+    if (outcome.notFound) {
       res.status(404).json({ message: "Deleted petty cash entry not found." });
       return;
     }
 
-    await db.query(
-      `
-      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, $3, 'Restored Petty Cash', 'Petty Cash', $4, $5, '127.0.0.1 / Local Dev')
-      `,
-      [makeId("ACT"), companyId, restoredBy, restored.rows[0].project_id, "Restored petty cash entry " + id],
-    );
+    if (outcome.failure) {
+      res.status(400).json(outcome.failure);
+      return;
+    }
 
     res.json({ message: "Petty cash entry restored." });
   }),

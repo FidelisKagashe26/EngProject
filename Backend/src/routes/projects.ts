@@ -5,6 +5,8 @@ import { makeId } from "../db/ids";
 import { db } from "../db/pool";
 import { requireRoles, requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
+import { withTransaction, type Queryable } from "../db/transaction";
+import { CLOSED_PROJECT_STATUSES, recalculateProjectSpend } from "../services/projectLedger";
 
 const router = Router();
 const projectManagerRoles = ["Admin", "Engineer / Project Manager"] as const;
@@ -31,7 +33,37 @@ const projectSchema = z.object({
   notes: z.string().optional().default(""),
 });
 
-const projectUpdateSchema = projectSchema.partial();
+/**
+ * Spelled out rather than derived from `projectSchema.partial()`, for two
+ * reasons.
+ *
+ * First, `.partial()` does not strip `.default()` — an omitted `status` still
+ * parses to "Pending" and an omitted `progress` to 0, so the `?? row.x`
+ * fallbacks below never fired and a partial edit silently reset those fields.
+ *
+ * Second, money derived from transactions is deliberately absent: amount
+ * received comes from client payments, total spent from the project ledger, and
+ * pending client payments is a formula over the two. Accepting them here would
+ * let a project edit overwrite the books.
+ */
+const projectUpdateSchema = z.object({
+  name: z.string().min(2).optional(),
+  siteLocation: z.string().min(2).optional(),
+  clientName: z.string().min(2).optional(),
+  contractNumber: z.string().min(3).optional(),
+  startDate: z.string().date().optional(),
+  expectedCompletionDate: z.string().date().optional(),
+  contractValue: z.number().nonnegative().optional(),
+  status: z.string().min(2).optional(),
+  progress: z.number().int().min(0).max(100).optional(),
+  laborBudget: z.number().nonnegative().optional(),
+  materialBudget: z.number().nonnegative().optional(),
+  operationalBudget: z.number().nonnegative().optional(),
+  expectedProfitMarginPct: z.number().min(0).max(100).optional(),
+  paymentTerms: z.string().optional(),
+  description: z.string().optional(),
+  notes: z.string().optional(),
+});
 
 const mapProject = (row: {
   id: string;
@@ -71,7 +103,13 @@ const mapProject = (row: {
   profitLossEstimate: Number(row.amount_received) - Number(row.total_spent),
   status: row.status,
   progress: row.progress,
-  pendingClientPayments: Number(row.pending_client_payments),
+  // Derived, never stored: what the client still owes on the contract. Keeping
+  // it as a formula means it can never drift from amount_received the way a
+  // separately-incremented column did.
+  pendingClientPayments: Math.max(
+    Number(row.contract_value) - Number(row.amount_received),
+    0,
+  ),
   laborBudget: Number(row.labor_budget),
   materialBudget: Number(row.material_budget),
   operationalBudget: Number(row.operational_budget),
@@ -415,18 +453,15 @@ router.put(
         start_date = $7,
         expected_completion_date = $8,
         contract_value = $9,
-        amount_received = $10,
-        total_spent = $11,
-        status = $12,
-        progress = $13,
-        pending_client_payments = $14,
-        labor_budget = $15,
-        material_budget = $16,
-        operational_budget = $17,
-        expected_profit_margin_pct = $18,
-        payment_terms = $19,
-        description = $20,
-        notes = $21,
+        status = $10,
+        progress = $11,
+        labor_budget = $12,
+        material_budget = $13,
+        operational_budget = $14,
+        expected_profit_margin_pct = $15,
+        payment_terms = $16,
+        description = $17,
+        notes = $18,
         updated_at = NOW()
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING
@@ -463,11 +498,8 @@ router.put(
         parsed.startDate ?? row.start_date,
         parsed.expectedCompletionDate ?? row.expected_completion_date,
         parsed.contractValue ?? Number(row.contract_value),
-        parsed.amountReceived ?? Number(row.amount_received),
-        parsed.totalSpent ?? Number(row.total_spent),
         parsed.status ?? row.status,
         parsed.progress ?? row.progress,
-        parsed.pendingClientPayments ?? Number(row.pending_client_payments),
         parsed.laborBudget ?? Number(row.labor_budget),
         parsed.materialBudget ?? Number(row.material_budget),
         parsed.operationalBudget ?? Number(row.operational_budget),
@@ -516,6 +548,257 @@ router.delete(
   }),
 );
 
+
+type ClosureOutstanding = {
+  clientBalance: number;
+  workerOutstanding: number;
+  unreconciledPettyCash: number;
+  pendingApprovals: number;
+  undeliveredRequirements: number;
+};
+
+/**
+ * Reconciles a project's booked spend against its transactions and reports
+ * everything still open. Used both to preview a closure and to perform one, so
+ * the numbers a user is shown are the numbers the close acts on.
+ */
+const buildClosureSummary = async (
+  client: Queryable,
+  companyId: number,
+  projectId: string,
+) => {
+  const spend = await recalculateProjectSpend(client, companyId, projectId);
+
+  const project = await client.query<{
+    name: string;
+    status: string;
+    contract_value: string;
+    amount_received: string;
+  }>(
+    `
+    SELECT name, status, contract_value::text, amount_received::text
+    FROM engicost.projects
+    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+    `,
+    [companyId, projectId],
+  );
+
+  if (project.rowCount === 0) {
+    return null;
+  }
+
+  const openItems = await client.query<{
+    worker_outstanding: string;
+    unreconciled_petty_cash: string;
+    pending_approvals: string;
+    undelivered_requirements: string;
+  }>(
+    `
+    SELECT
+      (
+        SELECT COALESCE(SUM(outstanding_amount), 0)
+        FROM engicost.workers
+        WHERE company_id = $1 AND assigned_project_id = $2 AND is_deleted = FALSE
+      )::text AS worker_outstanding,
+      (
+        SELECT COALESCE(SUM(amount), 0)
+        FROM engicost.petty_cash_transactions
+        WHERE company_id = $1 AND project_id = $2
+          AND is_deleted = FALSE AND status = 'Pending'
+      )::text AS unreconciled_petty_cash,
+      (
+        (SELECT COUNT(*) FROM engicost.expenses
+          WHERE company_id = $1 AND project_id = $2 AND is_deleted = FALSE AND approval_status = 'PENDING')
+        + (SELECT COUNT(*) FROM engicost.labor_payments
+          WHERE company_id = $1 AND project_id = $2 AND is_deleted = FALSE AND approval_status = 'PENDING')
+        + (SELECT COUNT(*) FROM engicost.material_purchases
+          WHERE company_id = $1 AND project_id = $2 AND is_deleted = FALSE AND approval_status = 'PENDING')
+        + (SELECT COUNT(*) FROM engicost.equipment_usage
+          WHERE company_id = $1 AND project_id = $2 AND is_deleted = FALSE AND approval_status = 'PENDING')
+      )::text AS pending_approvals,
+      (
+        SELECT COUNT(*)
+        FROM engicost.material_requirements
+        WHERE company_id = $1 AND project_id = $2 AND supply_status <> 'Completed'
+      )::text AS undelivered_requirements
+    `,
+    [companyId, projectId],
+  );
+
+  const row = project.rows[0];
+  const open = openItems.rows[0];
+  const contractValue = Number(row.contract_value);
+  const amountReceived = Number(row.amount_received);
+
+  const outstanding: ClosureOutstanding = {
+    clientBalance: Math.max(contractValue - amountReceived, 0),
+    workerOutstanding: Number(open?.worker_outstanding ?? 0),
+    unreconciledPettyCash: Number(open?.unreconciled_petty_cash ?? 0),
+    pendingApprovals: Number(open?.pending_approvals ?? 0),
+    undeliveredRequirements: Number(open?.undelivered_requirements ?? 0),
+  };
+
+  return {
+    projectName: row.name,
+    status: row.status,
+    contractValue,
+    amountReceived,
+    totalSpent: spend.totalSpent,
+    laborSpent: spend.labor,
+    materialSpent: spend.material,
+    operationalSpent: spend.operational,
+    profitLoss: amountReceived - spend.totalSpent,
+    outstanding,
+    readyToClose:
+      outstanding.clientBalance === 0 &&
+      outstanding.workerOutstanding === 0 &&
+      outstanding.unreconciledPettyCash === 0 &&
+      outstanding.pendingApprovals === 0 &&
+      outstanding.undeliveredRequirements === 0,
+  };
+};
+
+// Preview what a closure would reconcile to, without changing project status.
+router.get(
+  "/:id/closure-summary",
+  requireRoles(...projectManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.params.id);
+
+    const summary = await withTransaction((client) =>
+      buildClosureSummary(client, companyId, projectId),
+    );
+
+    if (!summary) {
+      res.status(404).json({ message: "Project not found." });
+      return;
+    }
+
+    res.json(summary);
+  }),
+);
+
+/**
+ * Closes a project: reconciles its totals, then locks it against new spend.
+ * Outstanding items do not block the close — a project can legitimately be
+ * closed with a written-off balance — but they are reported back so the
+ * decision is made with them on screen. Pass `force: true` to close anyway.
+ */
+router.post(
+  "/:id/close",
+  requireRoles(...projectManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.params.id);
+    const closedBy = req.authUser?.fullName ?? "System Admin";
+    const force = req.body?.force === true;
+
+    const result = await withTransaction(async (client) => {
+      const summary = await buildClosureSummary(client, companyId, projectId);
+
+      if (!summary) {
+        return { notFound: true as const };
+      }
+
+      if (CLOSED_PROJECT_STATUSES.some((status) => status === summary.status)) {
+        return { alreadyClosed: true as const, summary };
+      }
+
+      if (!summary.readyToClose && !force) {
+        return { blocked: true as const, summary };
+      }
+
+      await client.query(
+        `
+        UPDATE engicost.projects
+        SET status = 'Closed', progress = 100, closed_at = NOW(), closed_by = $3, updated_at = NOW()
+        WHERE company_id = $1 AND id = $2
+        `,
+        [companyId, projectId, closedBy],
+      );
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Closed Project', 'Projects', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          closedBy,
+          projectId,
+          `Closed ${summary.projectName}. Final spend TZS ${summary.totalSpent.toLocaleString("en-TZ")}, ` +
+            `profit/loss TZS ${summary.profitLoss.toLocaleString("en-TZ")}.`,
+        ],
+      );
+
+      return { closed: true as const, summary };
+    });
+
+    if ("notFound" in result) {
+      res.status(404).json({ message: "Project not found." });
+      return;
+    }
+
+    if ("alreadyClosed" in result) {
+      res.status(400).json({
+        message: `${result.summary.projectName} is already ${result.summary.status}.`,
+        summary: result.summary,
+      });
+      return;
+    }
+
+    if ("blocked" in result) {
+      res.status(409).json({
+        message:
+          "This project still has open items. Review them, or resend with force to close anyway.",
+        summary: result.summary,
+      });
+      return;
+    }
+
+    res.json({
+      message: `${result.summary.projectName} closed successfully.`,
+      summary: result.summary,
+    });
+  }),
+);
+
+// Reopening restores the ability to record spend against a closed project.
+router.post(
+  "/:id/reopen",
+  requireRoles(...projectManagerRoles),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.params.id);
+    const reopenedBy = req.authUser?.fullName ?? "System Admin";
+
+    const reopened = await db.query<{ id: string; name: string }>(
+      `
+      UPDATE engicost.projects
+      SET status = 'Active', closed_at = NULL, closed_by = NULL, updated_at = NOW()
+      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE AND status IN ('Completed', 'Closed')
+      RETURNING id, name
+      `,
+      [companyId, projectId],
+    );
+
+    if (reopened.rowCount === 0) {
+      res.status(404).json({ message: "Closed project not found." });
+      return;
+    }
+
+    await logProjectActivity(
+      companyId,
+      "Reopened Project",
+      reopened.rows[0].id,
+      `Reopened project ${reopened.rows[0].name} (by ${reopenedBy})`,
+    );
+
+    res.json({ message: `${reopened.rows[0].name} reopened successfully.` });
+  }),
+);
 
 router.patch(
   '/:id/restore',

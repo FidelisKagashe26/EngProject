@@ -1,7 +1,30 @@
 import bcrypt from "bcryptjs";
 import { env } from "../config/env";
+import { recalculateProjectSpend } from "../services/projectLedger";
 import { db } from "./pool";
 import { makeId } from "./ids";
+
+/**
+ * Runs a one-off data migration exactly once per database, keyed by name.
+ * Schema changes above are idempotent DDL, but data rebuilds are not — they
+ * would clobber later corrections if they ran on every boot.
+ */
+const runOnce = async (key: string, migrate: () => Promise<void>): Promise<void> => {
+  const applied = await db.query(
+    "SELECT 1 FROM engicost.schema_migrations WHERE key = $1",
+    [key],
+  );
+
+  if (applied.rowCount && applied.rowCount > 0) {
+    return;
+  }
+
+  await migrate();
+  await db.query(
+    "INSERT INTO engicost.schema_migrations (key) VALUES ($1) ON CONFLICT DO NOTHING",
+    [key],
+  );
+};
 
 const seedProjects = [
   {
@@ -160,6 +183,16 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.projects
     ADD COLUMN IF NOT EXISTS payment_terms TEXT NOT NULL DEFAULT ''
+  `);
+  // Running spend per budget category, kept alongside total_spent so the three
+  // category budgets can be enforced without re-aggregating on every write.
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS labor_spent NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS material_spent NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS operational_spent NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS closed_by VARCHAR(160)
   `);
 
   await db.query(`
@@ -655,6 +688,26 @@ export const initializeDatabase = async (): Promise<void> => {
       ON engicost.${tableName}(company_id, approval_status)
     `);
   }
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.schema_migrations (
+      key VARCHAR(160) PRIMARY KEY,
+      applied_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await runOnce("project_spend_categories_backfill_v1", async () => {
+    // Existing projects have a total_spent built from increments that never
+    // included petty cash and never split by category. Rebuild both from the
+    // transaction tables so every project starts reconciled.
+    const projects = await db.query<{ id: string; company_id: number }>(
+      "SELECT id, company_id FROM engicost.projects",
+    );
+
+    for (const project of projects.rows) {
+      await recalculateProjectSpend(db, project.company_id, project.id);
+    }
+  });
 
   const companyResult = await db.query<{ id: number }>(
     "SELECT id FROM engicost.companies ORDER BY id ASC LIMIT 1",

@@ -10,9 +10,20 @@ import {
   isApprovalModule,
   type ApprovalModule,
 } from "../services/approval";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { applyProjectSpend, type SpendCategory } from "../services/projectLedger";
 
 const router = Router();
+
+/** Which project budget each approvable module draws from. */
+const APPROVAL_SPEND_CATEGORY: Record<ApprovalModule, SpendCategory> = {
+  labor_payments: "labor",
+  material_purchases: "material",
+  equipment_usage: "operational",
+  expenses: "operational",
+  // Client payments bring money in rather than spending it; the category is
+  // unused but the map has to stay total over the module union.
+  client_payments: "operational",
+};
 
 const approveSchema = z.object({
   approvedBy: z.string().min(2),
@@ -161,24 +172,28 @@ router.patch(
     const balance = Number(record.balance ?? 0);
     const projectId = record.project_id;
 
-    if (module !== "client_payments") {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        projectId,
-        amount,
-        "approved transaction",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+
+      // Approving is the moment a pending record starts counting against the
+      // project, so it has to clear the same capacity checks a direct entry
+      // would have cleared at creation time.
+      if (module !== "client_payments") {
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId,
+          category: APPROVAL_SPEND_CATEGORY[module],
+          delta: amount,
+          context: "approved transaction",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+      }
 
       // Update approval status
       await client.query(
@@ -194,23 +209,14 @@ router.patch(
         [companyId, recordId, parsed.approvedBy],
       );
 
-      // Update project totals based on module
-      if (module === "expenses" || module === "material_purchases" || module === "equipment_usage") {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, projectId, amount],
-        );
-      } else if (module === "client_payments") {
+      // Project spend was already booked above; only the non-spend side
+      // effects are left per module.
+      if (module === "client_payments") {
         await client.query(
           `
           UPDATE engicost.projects
           SET 
             amount_received = amount_received + $3,
-            pending_client_payments = GREATEST(pending_client_payments - $3, 0),
             updated_at = NOW()
           WHERE company_id = $1 AND id = $2
           `,
@@ -228,15 +234,6 @@ router.patch(
           WHERE company_id = $1 AND id = $2
           `,
           [companyId, record.worker_id, amount, balance],
-        );
-
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, projectId, amount],
         );
       }
 

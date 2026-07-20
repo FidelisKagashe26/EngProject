@@ -11,7 +11,7 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { applyProjectSpend } from "../services/projectLedger";
 
 const router = Router();
 
@@ -703,19 +703,6 @@ router.post(
     const approvalStatus = getApprovalStatusForAmount("labor_payments", parsed.amountPaid);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
 
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      parsed.projectId,
-      parsed.amountPaid,
-      "labor payment",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
-
     const client = await db.connect();
     let insertedRow:
       | {
@@ -816,6 +803,22 @@ router.post(
       insertedRow = inserted.rows[0];
 
       if (!needsApproval) {
+        // Book the spend first so an over-capacity payment is rejected before
+        // the worker's own totals move.
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "labor",
+          delta: parsed.amountPaid,
+          context: "labor payment",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+
         await client.query(
           `
           UPDATE engicost.workers
@@ -854,14 +857,6 @@ router.post(
           );
         }
 
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
-          `,
-          [companyId, parsed.projectId, parsed.amountPaid],
-        );
       }
 
       await client.query(
@@ -1019,27 +1014,28 @@ router.patch(
     const newBalance = Math.max(totalPayable - newAmountPaid, 0);
     const balanceDifference = newBalance - oldBalance;
 
-    if (parsed.amountPaid !== undefined) {
-      const spendAmountToCheck = isAppliedApprovalStatus(oldPayment.approval_status)
-        ? Math.max(amountDifference, 0)
-        : newAmountPaid;
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        oldPayment.project_id,
-        spendAmountToCheck,
-        "labor payment update",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+
+      if (
+        (amountDifference !== 0 || balanceDifference !== 0) &&
+        isAppliedApprovalStatus(oldPayment.approval_status)
+      ) {
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: oldPayment.project_id,
+          category: "labor",
+          delta: amountDifference,
+          context: "labor payment update",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+      }
 
       const setClauses: string[] = [];
       const params: unknown[] = [companyId, paymentId];
@@ -1075,15 +1071,6 @@ router.patch(
         (amountDifference !== 0 || balanceDifference !== 0) &&
         isAppliedApprovalStatus(oldPayment.approval_status)
       ) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
-          `,
-          [companyId, oldPayment.project_id, amountDifference],
-        );
-
         await client.query(
           `
           UPDATE engicost.workers
@@ -1168,14 +1155,13 @@ router.delete(
       );
 
       if (isAppliedApprovalStatus(payment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
-          `,
-          [companyId, payment.project_id, amountPaid],
-        );
+        await applyProjectSpend(client, {
+          companyId,
+          projectId: payment.project_id,
+          category: "labor",
+          delta: -amountPaid,
+          context: "labor payment deletion",
+        });
 
         await client.query(
           `
@@ -1247,21 +1233,6 @@ router.patch(
     const amountPaid = Number(payment.amount_paid);
     const balance = Number(payment.balance);
 
-    if (isAppliedApprovalStatus(payment.approval_status)) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        payment.project_id,
-        amountPaid,
-        "labor payment restore",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -1277,14 +1248,19 @@ router.patch(
       );
 
       if (isAppliedApprovalStatus(payment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
-          `,
-          [companyId, payment.project_id, amountPaid],
-        );
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: payment.project_id,
+          category: "labor",
+          delta: amountPaid,
+          context: "labor payment restore",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
 
         await client.query(
           `

@@ -1,18 +1,41 @@
 import { db } from "../db/pool";
 import { getSingleTenantCompanyId } from "../db/init";
 
-// Approval thresholds in TZS.
-// The approval gate is currently DISABLED: every record auto-approves and is
-// applied to project totals / reports immediately, regardless of amount. This
-// was turned off because large (but legitimate) records were sitting in
-// "Pending approval" and disappearing from reports and project totals.
-// To re-enable the gate for a module, set its threshold back to a finite value.
-export const APPROVAL_THRESHOLDS = {
-  expenses: Number.POSITIVE_INFINITY,
-  material_purchases: Number.POSITIVE_INFINITY,
-  equipment_usage: Number.POSITIVE_INFINITY,
-  labor_payments: Number.POSITIVE_INFINITY,
-  client_payments: Number.POSITIVE_INFINITY,
+/**
+ * Approval thresholds in TZS: a record above its module's threshold is held as
+ * PENDING and does not touch project totals until someone approves it.
+ *
+ * The gate ships OFF (every threshold infinite, so everything auto-approves).
+ * It was originally disabled in code because large but legitimate records sat
+ * in "Pending approval" and vanished from reports; the fix is to make the
+ * limits operational settings rather than a code edit, so a company can turn
+ * the gate on per module without a redeploy — and turn it back off just as
+ * fast if it gets in the way.
+ *
+ * Configure with env vars, e.g. APPROVAL_THRESHOLD_EXPENSES=5000000.
+ */
+const readThreshold = (module: ApprovalModule): number => {
+  const raw = process.env[`APPROVAL_THRESHOLD_${module.toUpperCase()}`];
+  if (raw === undefined || raw.trim().length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const parsed = Number(raw);
+  // A malformed limit must not silently wave everything through, nor block
+  // everything — fall back to the shipped default of "no gate".
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return parsed;
+};
+
+export const APPROVAL_THRESHOLDS: Record<ApprovalModule, number> = {
+  expenses: readThreshold("expenses"),
+  material_purchases: readThreshold("material_purchases"),
+  equipment_usage: readThreshold("equipment_usage"),
+  labor_payments: readThreshold("labor_payments"),
+  client_payments: readThreshold("client_payments"),
 };
 
 export type ApprovalModule =

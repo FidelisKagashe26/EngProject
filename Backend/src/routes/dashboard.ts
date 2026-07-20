@@ -47,7 +47,7 @@ router.get(
             COALESCE(SUM(p.effective_amount_received), 0)::text AS total_amount_received,
             COALESCE(SUM(p.total_spent), 0)::text AS total_expenses,
             (COALESCE(SUM(p.effective_amount_received), 0) - COALESCE(SUM(p.total_spent), 0))::text AS estimated_profit,
-            COALESCE(SUM(p.pending_client_payments), 0)::text AS pending_client_payments,
+            COALESCE(SUM(GREATEST(p.contract_value - p.effective_amount_received, 0)), 0)::text AS pending_client_payments,
             COUNT(p.id) FILTER (WHERE p.status = 'Over Budget' OR p.total_spent > p.contract_value)::text AS over_budget_projects
           FROM project_financials p
           `,

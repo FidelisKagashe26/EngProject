@@ -119,7 +119,7 @@ router.get(
         p.contract_value::text,
         p.amount_received::text,
         p.total_spent::text,
-        p.pending_client_payments::text,
+        GREATEST(p.contract_value - p.amount_received, 0)::text AS pending_client_payments,
         p.status,
         p.progress,
         COALESCE(worker_stats.worker_count, 0)::int AS worker_count,

@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "description": "Express + TypeScript backend",
   "main": "dist/server.js",
+  "// type": "Matches what tsc already emits. Set explicitly so Node does not fall back to syntax detection and load src as ESM, which would reject the extensionless imports used throughout.",
+  "type": "commonjs",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "node --require ts-node/register --test \"src/**/*.test.ts\""
   },
   "keywords": [
     "node",

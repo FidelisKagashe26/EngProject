@@ -243,7 +243,6 @@ router.post(
         UPDATE engicost.projects
         SET
           amount_received = amount_received + $3,
-          pending_client_payments = GREATEST(pending_client_payments - $3, 0),
           updated_at = NOW()
         WHERE company_id = $1 AND id = $2
         `,
@@ -424,7 +423,6 @@ router.patch(
             UPDATE engicost.projects
             SET
               amount_received = GREATEST(amount_received - $3, 0),
-              pending_client_payments = pending_client_payments + $3,
               updated_at = NOW()
             WHERE company_id = $1 AND id = $2
             `,
@@ -435,7 +433,6 @@ router.patch(
             UPDATE engicost.projects
             SET
               amount_received = amount_received + $3,
-              pending_client_payments = GREATEST(pending_client_payments - $3, 0),
               updated_at = NOW()
             WHERE company_id = $1 AND id = $2
             `,
@@ -447,7 +444,6 @@ router.patch(
             UPDATE engicost.projects
             SET 
               amount_received = amount_received + $3,
-              pending_client_payments = GREATEST(pending_client_payments - $3, 0),
               updated_at = NOW()
             WHERE company_id = $1 AND id = $2
             `,
@@ -537,7 +533,6 @@ router.delete(
           UPDATE engicost.projects
           SET
             amount_received = GREATEST(amount_received - $3, 0),
-            pending_client_payments = pending_client_payments + $3,
             updated_at = NOW()
           WHERE company_id = $1 AND id = $2
           `,
@@ -626,7 +621,6 @@ router.patch(
           UPDATE engicost.projects
           SET
             amount_received = amount_received + $3,
-            pending_client_payments = GREATEST(pending_client_payments - $3, 0),
             updated_at = NOW()
           WHERE company_id = $1 AND id = $2
           `,

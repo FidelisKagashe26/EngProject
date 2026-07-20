@@ -11,9 +11,36 @@ import {
   isAppliedApprovalStatus,
   requiresApproval,
 } from "../services/approval";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { withTransaction } from "../db/transaction";
+import { applyProjectSpend, moveProjectSpend, type LedgerFailure } from "../services/projectLedger";
 
 const router = Router();
+
+type EquipmentUsageRow = {
+  id: string;
+  project_id: string;
+  equipment_name: string;
+  equipment_type: string;
+  asset_tag: string | null;
+  quantity: number;
+  assigned_to: string | null;
+  condition_status: string;
+  check_in_date: string | null;
+  ownership_type: string;
+  owner_name: string;
+  start_date: string;
+  end_date: string;
+  usage_days: number;
+  daily_rate: string;
+  rental_cost: string;
+  maintenance_cost: string;
+  total_cost: string;
+  status: string;
+  maintenance_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  approval_status: string;
+};
 
 const equipmentSchema = z.object({
   projectId: z.string().min(3),
@@ -202,44 +229,25 @@ router.post(
     const approvalStatus = getApprovalStatusForAmount("equipment_usage", totalCost);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "Site Supervisor";
 
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      parsed.projectId,
-      totalCost,
-      "equipment usage",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
+    const outcome = await withTransaction<{
+      failure: LedgerFailure | null;
+      row: EquipmentUsageRow | null;
+    }>(async (client) => {
+      if (totalCost > 0 && !needsApproval) {
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "operational",
+          delta: totalCost,
+          context: "equipment usage",
+        });
 
-    const inserted = await db.query<{
-      id: string;
-      project_id: string;
-      equipment_name: string;
-      equipment_type: string;
-      asset_tag: string | null;
-      quantity: number;
-      assigned_to: string | null;
-      condition_status: string;
-      check_in_date: string | null;
-      ownership_type: string;
-      owner_name: string;
-      start_date: string;
-      end_date: string;
-      usage_days: number;
-      daily_rate: string;
-      rental_cost: string;
-      maintenance_cost: string;
-      total_cost: string;
-      status: string;
-      maintenance_notes: string | null;
-      created_at: string;
-      updated_at: string;
-      approval_status: string;
-    }>(
+        if (ledgerFailure) {
+          return { failure: ledgerFailure, row: null };
+        }
+      }
+
+      const inserted = await client.query<EquipmentUsageRow>(
       `
       INSERT INTO engicost.equipment_usage (
         id, company_id, project_id, equipment_name, equipment_type, asset_tag, quantity,
@@ -277,61 +285,58 @@ router.post(
         updated_at::text,
         approval_status
       `,
-      [
-        makeId("EQ"),
-        companyId,
-        parsed.projectId,
-        parsed.equipmentName,
-        parsed.equipmentType,
-        parsed.assetTag,
-        parsed.quantity,
-        parsed.assignedTo,
-        parsed.conditionStatus,
-        parsed.ownershipType,
-        parsed.ownerName,
-        parsed.startDate,
-        parsed.endDate,
-        usageDays,
-        parsed.dailyRate,
-        rentalCost,
-        parsed.maintenanceCost,
-        totalCost,
-        parsed.status,
-        parsed.maintenanceNotes,
-        parsed.checkInDate ?? null,
-        approvalStatus,
-        requestedBy,
-      ],
-    );
-
-    if (totalCost > 0 && !needsApproval) {
-      await db.query(
-        `
-        UPDATE engicost.projects
-        SET total_spent = total_spent + $3, updated_at = NOW()
-        WHERE company_id = $1 AND id = $2
-        `,
-        [companyId, parsed.projectId, totalCost],
+        [
+          makeId("EQ"),
+          companyId,
+          parsed.projectId,
+          parsed.equipmentName,
+          parsed.equipmentType,
+          parsed.assetTag,
+          parsed.quantity,
+          parsed.assignedTo,
+          parsed.conditionStatus,
+          parsed.ownershipType,
+          parsed.ownerName,
+          parsed.startDate,
+          parsed.endDate,
+          usageDays,
+          parsed.dailyRate,
+          rentalCost,
+          parsed.maintenanceCost,
+          totalCost,
+          parsed.status,
+          parsed.maintenanceNotes,
+          parsed.checkInDate ?? null,
+          approvalStatus,
+          requestedBy,
+        ],
       );
-    }
 
-    await db.query(
-      `
+      await client.query(
+        `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
       VALUES ($1, $2, $3, 'Added Equipment Usage', 'Equipment', $4, $5, '127.0.0.1 / Local Dev')
       `,
-      [
-        makeId("ACT"),
-        companyId,
-        requestedBy,
-        parsed.projectId,
-        needsApproval
-          ? `Equipment usage pending approval: ${parsed.equipmentName} for TZS ${totalCost.toLocaleString("en-TZ")}.`
-          : `Recorded ${parsed.equipmentName} (${parsed.ownershipType}) usage for ${usageDays} day(s).`,
-      ],
-    );
+        [
+          makeId("ACT"),
+          companyId,
+          requestedBy,
+          parsed.projectId,
+          needsApproval
+            ? `Equipment usage pending approval: ${parsed.equipmentName} for TZS ${totalCost.toLocaleString("en-TZ")}.`
+            : `Recorded ${parsed.equipmentName} (${parsed.ownershipType}) usage for ${usageDays} day(s).`,
+        ],
+      );
 
-    const row = inserted.rows[0];
+      return { failure: null, row: inserted.rows[0] };
+    });
+
+    if (outcome.failure || !outcome.row) {
+      res.status(400).json(outcome.failure);
+      return;
+    }
+
+    const row = outcome.row;
     res.status(201).json({
       id: row.id,
       projectId: row.project_id,
@@ -454,29 +459,28 @@ router.patch(
       parsed.maintenanceCost !== undefined ||
       parsed.ownershipType !== undefined;
     const isAppliedEquipment = isAppliedApprovalStatus(oldEquipment.approval_status);
-    const spendAmountToCheck = isAppliedEquipment
-      ? newProjectId !== oldEquipment.project_id
-        ? newTotalCost
-        : Math.max(costDifference, 0)
-      : costFieldsChanged
-        ? newTotalCost
-        : 0;
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      newProjectId,
-      spendAmountToCheck,
-      "equipment usage update",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
 
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+
+      if (isAppliedEquipment) {
+        const ledgerFailure = await moveProjectSpend(client, {
+          companyId,
+          fromProjectId: oldEquipment.project_id,
+          toProjectId: newProjectId,
+          category: "operational",
+          previousAmount: oldTotalCost,
+          nextAmount: newTotalCost,
+          context: "equipment usage update",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+      }
 
       const setClauses: string[] = [];
       const params: unknown[] = [companyId, equipmentId];
@@ -563,36 +567,6 @@ router.patch(
         );
       }
 
-      if (isAppliedEquipment) {
-        if (newProjectId !== oldEquipment.project_id) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldEquipment.project_id, oldTotalCost],
-          );
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = total_spent + $3, updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, newProjectId, newTotalCost],
-          );
-        } else if (costDifference !== 0) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldEquipment.project_id, costDifference],
-          );
-        }
-      }
-
       await client.query(
         `
         INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
@@ -652,21 +626,6 @@ router.delete(
     const equipment = result.rows[0];
     const totalCost = Number(equipment.total_cost);
 
-    if (isAppliedApprovalStatus(equipment.approval_status)) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        equipment.project_id,
-        totalCost,
-        "equipment usage restore",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -682,14 +641,13 @@ router.delete(
       );
 
       if (isAppliedApprovalStatus(equipment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, equipment.project_id, totalCost],
-        );
+        await applyProjectSpend(client, {
+          companyId,
+          projectId: equipment.project_id,
+          category: "operational",
+          delta: -totalCost,
+          context: "equipment usage deletion",
+        });
       }
 
       // Log the action
@@ -768,14 +726,19 @@ router.patch(
       );
 
       if (isAppliedApprovalStatus(equipment.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, equipment.project_id, totalCost],
-        );
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: equipment.project_id,
+          category: "operational",
+          delta: totalCost,
+          context: "equipment usage restore",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
       }
 
       // Log the action

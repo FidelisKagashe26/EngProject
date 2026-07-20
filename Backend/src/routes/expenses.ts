@@ -6,9 +6,26 @@ import { db } from "../db/pool";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import { isAppliedApprovalStatus, requiresApproval, APPROVAL_THRESHOLDS } from "../services/approval";
-import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spendingGuard";
+import { withTransaction } from "../db/transaction";
+import { applyProjectSpend, moveProjectSpend, type LedgerFailure } from "../services/projectLedger";
 
 const router = Router();
+
+type ExpenseRow = {
+  id: string;
+  project_id: string;
+  expense_date: string;
+  category: string;
+  description: string;
+  amount: string;
+  paid_by: string;
+  payment_method: string;
+  receipt_ref: string | null;
+  status: string;
+  notes: string | null;
+  approval_status: string;
+  created_at: string;
+};
 
 const expenseCategorySchema = z.object({
   name: z.string().min(2).max(100),
@@ -203,22 +220,28 @@ router.post(
     const approvalStatus = needsApproval ? "PENDING" : "AUTO_APPROVED";
     const requestedBy = req.body.requestedBy || "System";
 
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      parsed.projectId,
-      parsed.amount,
-      "expense",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
-
     const insertedExpenseId = makeId("EXP");
 
-    const inserted = await db.query(
+    const outcome = await withTransaction<{
+      failure: LedgerFailure | null;
+      row: ExpenseRow | null;
+    }>(async (client) => {
+      // Only approved spend moves project totals; a pending record is booked
+      // later by the approvals route.
+      if (!needsApproval) {
+        const failure = await applyProjectSpend(client, {
+          companyId,
+          projectId: parsed.projectId,
+          category: "operational",
+          delta: parsed.amount,
+          context: "expense",
+        });
+        if (failure) {
+          return { failure, row: null };
+        }
+      }
+
+      const inserted = await client.query<ExpenseRow>(
       `
       INSERT INTO engicost.expenses (
         id, company_id, project_id, expense_date, category, description,
@@ -244,53 +267,49 @@ router.post(
         approval_status,
         created_at::text
       `,
-      [
-        insertedExpenseId,
-        companyId,
-        parsed.projectId,
-        parsed.date,
-        parsed.category,
-        parsed.description,
-        parsed.amount,
-        parsed.paidBy,
-        parsed.paymentMethod,
-        parsed.receiptRef,
-        parsed.status,
-        parsed.notes,
-        approvalStatus,
-        requestedBy,
-      ],
-    );
-
-    // Only update project totals if auto-approved (below threshold)
-    if (!needsApproval) {
-      await db.query(
-        `
-        UPDATE engicost.projects
-        SET total_spent = total_spent + $3, updated_at = NOW()
-        WHERE company_id = $1 AND id = $2
-        `,
-        [companyId, parsed.projectId, parsed.amount],
+        [
+          insertedExpenseId,
+          companyId,
+          parsed.projectId,
+          parsed.date,
+          parsed.category,
+          parsed.description,
+          parsed.amount,
+          parsed.paidBy,
+          parsed.paymentMethod,
+          parsed.receiptRef,
+          parsed.status,
+          parsed.notes,
+          approvalStatus,
+          requestedBy,
+        ],
       );
-    }
 
-    await db.query(
-      `
+      await client.query(
+        `
       INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
       VALUES ($1, $2, $3, 'Added Expense', 'Expenses', $4, $5, '127.0.0.1 / Local Dev')
       `,
-      [
-        makeId("ACT"),
-        companyId,
-        requestedBy,
-        parsed.projectId,
-        needsApproval
-          ? `Expense pending approval: TZS ${parsed.amount.toLocaleString("en-TZ")} (${parsed.category})`
-          : `${parsed.category} expense recorded: TZS ${parsed.amount.toLocaleString("en-TZ")}`,
-      ],
-    );
+        [
+          makeId("ACT"),
+          companyId,
+          requestedBy,
+          parsed.projectId,
+          needsApproval
+            ? `Expense pending approval: TZS ${parsed.amount.toLocaleString("en-TZ")} (${parsed.category})`
+            : `${parsed.category} expense recorded: TZS ${parsed.amount.toLocaleString("en-TZ")}`,
+        ],
+      );
 
-    const row = inserted.rows[0];
+      return { failure: null, row: inserted.rows[0] };
+    });
+
+    if (outcome.failure || !outcome.row) {
+      res.status(400).json(outcome.failure);
+      return;
+    }
+
+    const row = outcome.row;
     res.status(201).json({
       id: row.id,
       projectId: row.project_id,
@@ -365,29 +384,30 @@ router.patch(
     }
 
     const isAppliedExpense = isAppliedApprovalStatus(oldExpense.approval_status);
-    const spendAmountToCheck = isAppliedExpense
-      ? newProjectId !== oldExpense.project_id
-        ? newAmount
-        : Math.max(amountDifference, 0)
-      : parsed.amount !== undefined || parsed.projectId
-        ? newAmount
-        : 0;
-    const spendCheck = await checkProjectSpendCapacity(
-      db,
-      companyId,
-      newProjectId,
-      spendAmountToCheck,
-      "expense update",
-    );
-    const spendFailure = spendGuardResponse(spendCheck);
-    if (spendFailure) {
-      res.status(400).json(spendFailure);
-      return;
-    }
 
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+
+      // Rebook the spend before writing the row: if the new amount or project
+      // cannot take it, we bail out before anything is persisted.
+      if (isAppliedExpense) {
+        const ledgerFailure = await moveProjectSpend(client, {
+          companyId,
+          fromProjectId: oldExpense.project_id,
+          toProjectId: newProjectId,
+          category: "operational",
+          previousAmount: oldAmount,
+          nextAmount: newAmount,
+          context: "expense update",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
+      }
 
       const updates: Array<[string, Array<unknown>]> = [];
 
@@ -464,36 +484,6 @@ router.patch(
 
       for (const [query, params] of updates) {
         await client.query(query, params);
-      }
-
-      if (isAppliedExpense) {
-        if (newProjectId !== oldExpense.project_id) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldExpense.project_id, oldAmount],
-          );
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = total_spent + $3, updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, newProjectId, newAmount],
-          );
-        } else if (amountDifference !== 0) {
-          await client.query(
-            `
-            UPDATE engicost.projects
-            SET total_spent = GREATEST(total_spent + $3, 0), updated_at = NOW()
-            WHERE company_id = $1 AND id = $2
-            `,
-            [companyId, oldExpense.project_id, amountDifference],
-          );
-        }
       }
 
       await client.query(
@@ -585,21 +575,6 @@ router.delete(
     const expense = result.rows[0];
     const expenseAmount = Number(expense.amount);
 
-    if (isAppliedApprovalStatus(expense.approval_status)) {
-      const spendCheck = await checkProjectSpendCapacity(
-        db,
-        companyId,
-        expense.project_id,
-        expenseAmount,
-        "expense restore",
-      );
-      const spendFailure = spendGuardResponse(spendCheck);
-      if (spendFailure) {
-        res.status(400).json(spendFailure);
-        return;
-      }
-    }
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -614,15 +589,15 @@ router.delete(
         [companyId, expenseId, deletedBy],
       );
 
+      // Deleting frees capacity, so this reversal is never capacity-checked.
       if (isAppliedApprovalStatus(expense.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = GREATEST(total_spent - $3, 0), updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, expense.project_id, expenseAmount],
-        );
+        await applyProjectSpend(client, {
+          companyId,
+          projectId: expense.project_id,
+          category: "operational",
+          delta: -expenseAmount,
+          context: "expense deletion",
+        });
       }
 
       // Log the action
@@ -700,15 +675,22 @@ router.patch(
         [companyId, expenseId],
       );
 
+      // Restoring re-applies the spend, so it must clear the same capacity
+      // checks a fresh expense would.
       if (isAppliedApprovalStatus(expense.approval_status)) {
-        await client.query(
-          `
-          UPDATE engicost.projects
-          SET total_spent = total_spent + $3, updated_at = NOW()
-          WHERE company_id = $1 AND id = $2
-          `,
-          [companyId, expense.project_id, expenseAmount],
-        );
+        const ledgerFailure = await applyProjectSpend(client, {
+          companyId,
+          projectId: expense.project_id,
+          category: "operational",
+          delta: expenseAmount,
+          context: "expense restore",
+        });
+
+        if (ledgerFailure) {
+          await client.query("ROLLBACK");
+          res.status(400).json(ledgerFailure);
+          return;
+        }
       }
 
       // Log the action

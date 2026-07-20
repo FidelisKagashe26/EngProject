@@ -185,6 +185,21 @@ export const initializeDatabase = async (): Promise<void> => {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.expense_categories (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(company_id, name)
+    );
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS expense_categories_company_lower_name_uq
+    ON engicost.expense_categories(company_id, lower(name))
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.client_payments (
       id VARCHAR(40) PRIMARY KEY,
       company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,

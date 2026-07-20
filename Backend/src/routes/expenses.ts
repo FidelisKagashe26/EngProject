@@ -10,6 +10,10 @@ import { checkProjectSpendCapacity, spendGuardResponse } from "../services/spend
 
 const router = Router();
 
+const expenseCategorySchema = z.object({
+  name: z.string().min(2).max(100),
+});
+
 const expenseSchema = z.object({
   projectId: z.string().min(3),
   date: z.string().date(),
@@ -67,7 +71,7 @@ router.get(
       [companyId],
     );
 
-    const [byCategory, byProject, monthlyTrend] = await Promise.all([
+    const [byCategory, byProject, monthlyTrend, categories] = await Promise.all([
       db.query<{ category: string; total: string }>(
         `
         SELECT category, COALESCE(SUM(amount), 0)::text AS total
@@ -101,9 +105,19 @@ router.get(
         `,
         [companyId],
       ),
+      db.query<{ name: string }>(
+        `
+        SELECT name
+        FROM engicost.expense_categories
+        WHERE company_id = $1
+        ORDER BY name
+        `,
+        [companyId],
+      ),
     ]);
 
     res.json({
+      categories: categories.rows.map((row) => row.name),
       rows: result.rows.map((row) => ({
         id: row.id,
         projectId: row.project_id,
@@ -135,6 +149,43 @@ router.get(
         })),
       },
     });
+  }),
+);
+
+router.post(
+  "/categories",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const parsed = expenseCategorySchema.parse(req.body);
+    const name = parsed.name.trim().replace(/\s+/g, " ");
+
+    const existing = await db.query<{ id: string; name: string; created_at: string }>(
+      `
+      SELECT id, name, created_at::text
+      FROM engicost.expense_categories
+      WHERE company_id = $1 AND lower(name) = lower($2)
+      LIMIT 1
+      `,
+      [companyId, name],
+    );
+
+    if (existing.rowCount && existing.rowCount > 0) {
+      const row = existing.rows[0];
+      res.json({ id: row.id, name: row.name, createdAt: row.created_at });
+      return;
+    }
+
+    const inserted = await db.query<{ id: string; name: string; created_at: string }>(
+      `
+      INSERT INTO engicost.expense_categories (id, company_id, name)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, created_at::text
+      `,
+      [makeId("EXCAT"), companyId, name],
+    );
+
+    const row = inserted.rows[0];
+    res.status(201).json({ id: row.id, name: row.name, createdAt: row.created_at });
   }),
 );
 

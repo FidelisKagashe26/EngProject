@@ -57,6 +57,9 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState("");
+  const [activeExpenseSection, setActiveExpenseSection] = useState<"expenses" | "categories">("expenses");
+  const [newExpenseCategory, setNewExpenseCategory] = useState("");
+  const [savedExpenseCategories, setSavedExpenseCategories] = useState<string[]>([]);
   const [viewExpense, setViewExpense] = useState<ExpenseApiRecord | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<ExpenseApiRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -85,6 +88,7 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
         setProjects(projectRows);
         setExpenseRows(expensesResponse.rows);
         setCharts(expensesResponse.charts);
+        setSavedExpenseCategories(expensesResponse.categories ?? []);
         setError("");
       } catch (loadError) {
         if (!mounted) return;
@@ -111,13 +115,14 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
     const response = await api.getExpenses();
     setExpenseRows(response.rows);
     setCharts(response.charts);
+    setSavedExpenseCategories(response.categories ?? []);
   };
 
   const expenseCategories = useMemo(() => {
     const fromRows = expenseRows.map((r) => r.category);
     const fromCharts = charts.byCategory.map((i) => i.label);
-    return Array.from(new Set([...defaultExpenseCategories, ...fromRows, ...fromCharts]));
-  }, [charts.byCategory, expenseRows]);
+    return Array.from(new Set([...defaultExpenseCategories, ...savedExpenseCategories, ...fromRows, ...fromCharts]));
+  }, [charts.byCategory, expenseRows, savedExpenseCategories]);
 
   useEffect(() => {
     if (category.length === 0 || expenseCategories.some((i) => i === category)) return;
@@ -249,6 +254,35 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
     }
   };
 
+  const handleAddCategory = async () => {
+    const value = newExpenseCategory.trim();
+    if (value.length < 2) {
+      setError("Please enter a valid expense category name.");
+      return;
+    }
+
+    if (expenseCategories.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      setError("This expense category already exists.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.createExpenseCategory({ name: value });
+      const response = await api.getExpenses();
+      setExpenseRows(response.rows);
+      setCharts(response.charts);
+      setSavedExpenseCategories(response.categories ?? []);
+      setCategory(value);
+      setNewExpenseCategory("");
+      setError("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save category.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteExpense = async () => {
     if (!expenseToDelete) return;
     setDeleting(true);
@@ -277,46 +311,87 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <SurfaceCard title="Expense Records">
-          <p className="text-2xl font-bold text-slate-900">{expenseSummary.totalRecords}</p>
+        <SurfaceCard className="[&_h3]:text-xs" title="Expense Records">
+          <p className="text-xl font-bold text-slate-900">{expenseSummary.totalRecords}</p>
         </SurfaceCard>
-        <SurfaceCard title="Total Spent">
-          <p className="text-2xl font-bold text-[#0b2a53]">{formatTzs(expenseSummary.totalSpent)}</p>
+        <SurfaceCard className="[&_h3]:text-xs" title="Total Spent">
+          <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(expenseSummary.totalSpent)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Approved Amount">
-          <p className="text-2xl font-bold text-emerald-700">{formatTzs(expenseSummary.approvedAmount)}</p>
+        <SurfaceCard className="[&_h3]:text-xs" title="Approved Amount">
+          <p className="text-xl font-bold text-emerald-700">{formatTzs(expenseSummary.approvedAmount)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Pending Amount">
-          <p className="text-2xl font-bold text-amber-700">{formatTzs(expenseSummary.pendingAmount)}</p>
+        <SurfaceCard className="[&_h3]:text-xs" title="Pending Amount">
+          <p className="text-xl font-bold text-amber-700">{formatTzs(expenseSummary.pendingAmount)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Projects Covered">
-          <p className="text-2xl font-bold text-slate-900">{expenseSummary.projects.size}</p>
+        <SurfaceCard className="[&_h3]:text-xs" title="Projects Covered">
+          <p className="text-xl font-bold text-slate-900">{expenseSummary.projects.size}</p>
         </SurfaceCard>
       </div>
 
       {tabBar}
 
-      {/* Expense Categories */}
-      <SurfaceCard title="Expense Categories">
-        <div className="flex flex-wrap gap-2">
-          {expenseCategories.map((item) => (
-            <span
-              className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700"
-              key={item}
-            >
-              {item}
-            </span>
-          ))}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
+          <button
+            className={[
+              "flex-1 rounded-md px-4 py-2 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "categories"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("categories")}
+            type="button"
+          >
+            Category List
+          </button>
+          <button
+            className={[
+              "flex-1 rounded-md px-4 py-2 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "expenses"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("expenses")}
+            type="button"
+          >
+            Expenses List
+          </button>
         </div>
-      </SurfaceCard>
 
-      {/* Add Expense button - outside card, right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
-          + Add Expense
-        </button>
+        {activeExpenseSection === "expenses" && (
+          <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
+            + Add Expense
+          </button>
+        )}
       </div>
 
+      {activeExpenseSection === "categories" ? (
+        <section className="space-y-4">
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          <div className="flex flex-wrap gap-2">
+            {expenseCategories.map((item) => (
+              <span
+                className="rounded-full border border-[#0b2a53]/15 bg-white px-3 py-1 text-xs font-semibold text-[#0b2a53]"
+                key={item}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+          <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
+            <input
+              className="input-field"
+              onChange={(event) => setNewExpenseCategory(event.target.value)}
+              placeholder="New expense category"
+              value={newExpenseCategory}
+            />
+            <button className="btn-primary whitespace-nowrap" disabled={saving} onClick={() => void handleAddCategory()} type="button">
+              + Add Category
+            </button>
+          </div>
+        </section>
+      ) : (
+        <>
       {/* Expense List Table */}
       <SurfaceCard title="Expense List">
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
@@ -433,6 +508,8 @@ export const ExpensesPage = ({ embedded = false, search = "", tabBar }: Expenses
           </div>
         </div>
       </SurfaceCard>
+        </>
+      )}
 
       {/* Add Expense Modal */}
       {showAddModal && (

@@ -91,7 +91,7 @@ export const SurfaceCard = ({
 }) => (
   <section className={`surface-card ${className ?? ""}`}>
     {(title || subtitle || right) && (
-      <header className="mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+      <header className="mb-4 flex items-start justify-between gap-3 border-b border-[#0b2a53]/10 pb-2.5">
         <div>
           {title && <h3 className="text-sm font-semibold text-slate-900">{title}</h3>}
           {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}

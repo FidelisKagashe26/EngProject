@@ -1,24 +1,13 @@
 import { ChevronLeft, ChevronRight, DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSearchParams } from "react-router-dom";
 import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
-import { SectionTitle, SkeletonTable } from "../components/ui";
-
-const LaborPage = lazy(async () => ({
-  default: (await import("./LaborPage")).LaborPage,
-}));
-const MaterialsPage = lazy(async () => ({
-  default: (await import("./MaterialsPage")).MaterialsPage,
-}));
-const ExpensesPage = lazy(async () => ({
-  default: (await import("./ExpensesPage")).ExpensesPage,
-}));
-const EquipmentPage = lazy(async () => ({
-  default: (await import("./EquipmentPage")).EquipmentPage,
-}));
-const PettyCashPage = lazy(async () => ({
-  default: (await import("./PettyCashPage")).PettyCashPage,
-}));
+import { SectionTitle } from "../components/ui";
+import { EquipmentPage } from "./EquipmentPage";
+import { ExpensesPage } from "./ExpensesPage";
+import { LaborPage } from "./LaborPage";
+import { MaterialsPage } from "./MaterialsPage";
+import { PettyCashPage } from "./PettyCashPage";
 
 type OperationsTab = "labor" | "materials" | "expenses" | "equipment" | "petty-cash";
 
@@ -236,13 +225,11 @@ export const SiteOperationsPage = () => {
         tabs={allowedTabs}
       />
 
-      <Suspense fallback={<SkeletonTable rows={5} />}>
-        {activeTab === "labor"      && <LaborPage     embedded search={search} />}
-        {activeTab === "materials"  && <MaterialsPage embedded search={search} />}
-        {activeTab === "expenses"   && <ExpensesPage  embedded search={search} />}
-        {activeTab === "equipment"  && <EquipmentPage embedded search={search} />}
-        {activeTab === "petty-cash" && <PettyCashPage embedded search={search} />}
-      </Suspense>
+      {activeTab === "labor"      && <LaborPage     embedded search={search} />}
+      {activeTab === "materials"  && <MaterialsPage embedded search={search} />}
+      {activeTab === "expenses"   && <ExpensesPage  embedded search={search} />}
+      {activeTab === "equipment"  && <EquipmentPage embedded search={search} />}
+      {activeTab === "petty-cash" && <PettyCashPage embedded search={search} />}
     </div>
   );
 };

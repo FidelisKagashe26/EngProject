@@ -322,6 +322,7 @@ export interface ExpenseApiRecord {
 }
 
 export interface ExpensesResponse {
+  categories: string[];
   rows: ExpenseApiRecord[];
   charts: {
     byCategory: Array<{ label: string; total: number }>;
@@ -344,6 +345,16 @@ export interface CreateExpensePayload {
 }
 
 export type UpdateExpensePayload = Partial<CreateExpensePayload>;
+
+export interface ExpenseCategoryApiRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface CreateExpenseCategoryPayload {
+  name: string;
+}
 
 export interface CreateExpenseResponse {
   id: string;
@@ -1264,6 +1275,11 @@ export const api = {
     return apiRequest<TendersResponse>(`/tenders${suffix}`);
   },
   getExpenses: () => apiRequest<ExpensesResponse>("/expenses"),
+  createExpenseCategory: (payload: CreateExpenseCategoryPayload) =>
+    apiRequest<ExpenseCategoryApiRecord>("/expenses/categories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   createExpense: (payload: CreateExpensePayload) =>
     apiRequest<CreateExpenseResponse>("/expenses", {
       method: "POST",

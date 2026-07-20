@@ -25,7 +25,20 @@ import { formatDate, formatTzs } from "../utils/format";
 type LaborPageProps = {
   embedded?: boolean;
   search?: string;
-  tabBar?: ReactNode;
+  /** Renders the shared operations tab bar with this page's filters on the search row. */
+  renderTabBar?: (actions?: ReactNode) => ReactNode;
+};
+
+const RECURRING_PAYMENT_TYPES = ["Daily", "Weekly", "Monthly"] as const;
+
+type WorkerPaymentProgress = {
+  /** True when the worker is paid on a repeating cycle we can count. */
+  cycleBased: boolean;
+  timesPaid: number;
+  cyclesPaid: number;
+  cyclesDue: number;
+  cyclesPending: number;
+  label: "Paid" | "Pending" | "Not Paid";
 };
 
 const todayStr = (): string => new Date().toISOString().slice(0, 10);
@@ -71,7 +84,35 @@ const addMonthsClamped = (date: Date, months: number): Date => {
 const dayDiffInclusive = (start: Date, end: Date): number =>
   Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPageProps) => {
+const payCycleLabel = (paymentType: WorkerApiRecord["paymentType"]): string => {
+  if (paymentType === "Hourly") return "Hour";
+  if (paymentType === "Daily") return "Day";
+  if (paymentType === "Weekly") return "Week";
+  if (paymentType === "Monthly") return "Month";
+  return "Contract";
+};
+
+/** Cycles that have started between two dates, counted the way the worker is paid. */
+const cyclesBetween = (
+  paymentType: WorkerApiRecord["paymentType"],
+  start: Date,
+  end: Date,
+): number => {
+  if (end < start) return 0;
+
+  if (paymentType === "Daily") return dayDiffInclusive(start, end);
+  if (paymentType === "Weekly") return Math.ceil(dayDiffInclusive(start, end) / 7);
+
+  if (paymentType === "Monthly") {
+    let count = 0;
+    while (addMonthsClamped(start, count) <= end) count += 1;
+    return count;
+  }
+
+  return 0;
+};
+
+export const LaborPage = ({ embedded = false, search = "", renderTabBar }: LaborPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -215,25 +256,74 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
 
   const workersPagination = useTablePagination(filteredWorkers);
 
-  const filteredLaborPayments = useMemo(() => {
-    let result = laborPayments;
-    if (listProjectFilter !== "All") {
-      result = result.filter((payment) => payment.projectId === listProjectFilter);
+  const paymentsByWorker = useMemo(() => {
+    const grouped = new Map<string, LaborPaymentApiRecord[]>();
+    for (const payment of laborPayments) {
+      const existing = grouped.get(payment.workerId);
+      if (existing) {
+        existing.push(payment);
+      } else {
+        grouped.set(payment.workerId, [payment]);
+      }
     }
-    if (search.trim().length > 0) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (payment) =>
-          payment.workerName.toLowerCase().includes(q) ||
-          payment.projectName.toLowerCase().includes(q) ||
-          payment.payCycleType.toLowerCase().includes(q) ||
-          payment.paymentMethod.toLowerCase().includes(q),
-      );
+    for (const list of grouped.values()) {
+      list.sort((a, b) => b.workStart.localeCompare(a.workStart));
     }
-    return result;
-  }, [laborPayments, listProjectFilter, search]);
+    return grouped;
+  }, [laborPayments]);
 
-  const paymentsPagination = useTablePagination(filteredLaborPayments);
+  const progressByWorker = useMemo(() => {
+    const today = parseIsoDate(todayStr());
+    const progress = new Map<string, WorkerPaymentProgress>();
+
+    for (const worker of workers) {
+      const payments = paymentsByWorker.get(worker.id) ?? [];
+      const timesPaid = payments.length;
+      const cycleBased = RECURRING_PAYMENT_TYPES.some((type) => type === worker.paymentType);
+
+      let cyclesPaid = 0;
+      let cyclesDue = 0;
+
+      if (cycleBased) {
+        cyclesPaid = payments.reduce(
+          (sum, payment) => sum + Math.max(payment.payCycleCount || 1, 1),
+          0,
+        );
+
+        const start = parseIsoDate(worker.payCycleStartDate);
+        const employmentEnd = worker.employmentEndDate
+          ? parseIsoDate(worker.employmentEndDate)
+          : null;
+        // A finished contract stops accruing cycles on its last day.
+        const end = employmentEnd && today && employmentEnd < today ? employmentEnd : today;
+
+        if (start && end) {
+          cyclesDue = cyclesBetween(worker.paymentType, start, end);
+        }
+      }
+
+      const cyclesPending = Math.max(cyclesDue - cyclesPaid, 0);
+      const owesMoney = cyclesPending > 0 || worker.outstandingAmount > 0;
+
+      progress.set(worker.id, {
+        cycleBased,
+        timesPaid,
+        cyclesPaid,
+        cyclesDue,
+        cyclesPending,
+        label: timesPaid === 0 ? "Not Paid" : owesMoney ? "Pending" : "Paid",
+      });
+    }
+
+    return progress;
+  }, [paymentsByWorker, workers]);
+
+  const viewWorkerPayments = useMemo(
+    () => (viewWorker ? paymentsByWorker.get(viewWorker.id) ?? [] : []),
+    [paymentsByWorker, viewWorker],
+  );
+
+  const viewWorkerProgress = viewWorker ? progressByWorker.get(viewWorker.id) : undefined;
 
   const isRecurringWorker = useMemo(() => {
     if (!selectedWorkerForPayment) return false;
@@ -359,6 +449,11 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
     ]);
     setWorkers(workerResponse.rows);
     setLaborPayments(paymentRows);
+    // The worker detail modal stays open across payment edits, so re-point it
+    // at the refreshed row instead of leaving stale totals on screen.
+    setViewWorker((current) =>
+      current ? workerResponse.rows.find((row) => row.id === current.id) ?? null : null,
+    );
   };
 
   const resetWorkerForm = () => {
@@ -633,13 +728,11 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         />
       ) : null}
 
-      {/* Filter and Add Worker Button - Right aligned */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
-        <div className="w-full sm:w-48">
-          <label className="form-field">
-            <span className="text-sm">Filter by Site</span>
+      {renderTabBar?.(
+        <>
+          <div className="w-full sm:w-52">
             <GuiSelect
-              className="input-field"
+              className="h-11"
               onChange={(event) => setListProjectFilter(event.target.value)}
               value={listProjectFilter}
             >
@@ -650,15 +743,16 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
                 </option>
               ))}
             </GuiSelect>
-          </label>
-        </div>
-        <button
-          className="btn-primary whitespace-nowrap"
-          onClick={openAddWorkerModal}
-        >
-          + Add Worker
-        </button>
-      </div>
+          </div>
+          <button
+            className="btn-primary h-11 justify-center whitespace-nowrap"
+            onClick={openAddWorkerModal}
+            type="button"
+          >
+            + Add Worker
+          </button>
+        </>,
+      )}
 
       {/* Stats cards - Dynamic based on filter */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -684,10 +778,7 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         </SurfaceCard>
       </div>
 
-      {/* Tab bar — between stats and table */}
-      {tabBar}
-
-      {/* Workers List Table */}
+      {/* Single workers table — payment history lives in each worker's View modal */}
       <SurfaceCard title="Workers List">
         {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
 
@@ -701,81 +792,105 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         ) : (
           <>
             <div className="ops-table-wrap">
-              <table className="data-table ops-table min-w-[1040px]">
+              <table className="data-table ops-table min-w-[1180px]">
                 <thead>
                   <tr>
                     <th className="ops-sticky-sn">S/N</th>
                     <th>Worker</th>
                     <th>Role</th>
                     <th>Site</th>
+                    <th>Paid Every</th>
                     <th>Rate</th>
                     <th>Next Due</th>
                     <th>Total Paid</th>
                     <th>Outstanding</th>
-                    <th>Status</th>
+                    <th>Payment Status</th>
                     <th className="ops-sticky-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {workersPagination.paginatedRows.map((worker, index) => (
-                    <tr key={worker.id}>
-                      <td className="ops-sticky-sn">{workersPagination.startIndex + index + 1}</td>
-                      <td><span className="ops-cell-strong">{worker.fullName}</span></td>
-                      <td><span className="ops-cell-text">{worker.skillRole}</span></td>
-                      <td><span className="ops-cell-text">{worker.assignedProjectName || "Unassigned"}</span></td>
-                      <td>{formatTzs(worker.rateAmount)}</td>
-                      <td>{worker.nextPaymentDueDate ? formatDate(worker.nextPaymentDueDate) : "-"}</td>
-                      <td>{formatTzs(worker.totalPaid)}</td>
-                      <td
-                        className={
-                          worker.outstandingAmount > 0
-                            ? "text-amber-700"
-                            : "text-emerald-700"
-                        }
-                      >
-                        {formatTzs(worker.outstandingAmount)}
-                      </td>
-                      <td>
-                        <span
+                  {workersPagination.paginatedRows.map((worker, index) => {
+                    const progress = progressByWorker.get(worker.id);
+
+                    return (
+                      <tr key={worker.id}>
+                        <td className="ops-sticky-sn">{workersPagination.startIndex + index + 1}</td>
+                        <td><span className="ops-cell-strong">{worker.fullName}</span></td>
+                        <td><span className="ops-cell-text">{worker.skillRole}</span></td>
+                        <td><span className="ops-cell-text">{worker.assignedProjectName || "Unassigned"}</span></td>
+                        <td>
+                          <span className="ops-cell-text">{payCycleLabel(worker.paymentType)}</span>
+                        </td>
+                        <td>{formatTzs(worker.rateAmount)}</td>
+                        <td>{worker.nextPaymentDueDate ? formatDate(worker.nextPaymentDueDate) : "-"}</td>
+                        <td>{formatTzs(worker.totalPaid)}</td>
+                        <td
                           className={
-                            worker.status === "Active"
-                              ? "text-sm font-medium text-emerald-700"
-                              : worker.status === "Pending"
-                                ? "text-sm font-medium text-amber-700"
-                                : "text-sm font-medium text-slate-500"
+                            worker.outstandingAmount > 0
+                              ? "text-amber-700"
+                              : "text-emerald-700"
                           }
                         >
-                          {worker.status}
-                        </span>
-                      </td>
-                      <td className="ops-sticky-actions">
-                        <div className="ops-actions-row">
-                          <button
-                            className="btn-secondary py-1 px-3 text-xs"
-                            onClick={() => setViewWorker(worker)}
-                            type="button"
-                          >
-                            View
-                          </button>
-                          <button
-                            className="btn-primary py-1 px-3 text-xs"
-                            disabled={worker.status === "Inactive" || hasWorkerEnded(worker)}
-                            onClick={() => openPaymentModal(worker)}
-                            type="button"
-                          >
-                            Pay
-                          </button>
-                          <button
-                            className="btn-danger py-1 px-3 text-xs"
-                            onClick={() => setWorkerToDelete(worker)}
-                            type="button"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          {formatTzs(worker.outstandingAmount)}
+                        </td>
+                        <td>
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              className={[
+                                "inline-flex items-center rounded-full border px-2.5 py-0.5",
+                                "text-xs font-semibold",
+                                progress?.label === "Paid"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : progress?.label === "Pending"
+                                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                                    : "border-slate-200 bg-slate-50 text-slate-600",
+                              ].join(" ")}
+                            >
+                              {progress?.label ?? "Not Paid"}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              Paid {progress?.timesPaid ?? 0}{" "}
+                              {(progress?.timesPaid ?? 0) === 1 ? "time" : "times"}
+                            </span>
+                            {progress?.cycleBased ? (
+                              <span className="text-xs text-slate-500">
+                                {progress.cyclesPaid}/{progress.cyclesDue} cycles
+                                {progress.cyclesPending > 0
+                                  ? ` · ${progress.cyclesPending} unpaid`
+                                  : ""}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="ops-sticky-actions">
+                          <div className="ops-actions-row">
+                            <button
+                              className="btn-secondary py-1 px-3 text-xs"
+                              onClick={() => setViewWorker(worker)}
+                              type="button"
+                            >
+                              View
+                            </button>
+                            <button
+                              className="btn-primary py-1 px-3 text-xs"
+                              disabled={worker.status === "Inactive" || hasWorkerEnded(worker)}
+                              onClick={() => openPaymentModal(worker)}
+                              type="button"
+                            >
+                              Pay
+                            </button>
+                            <button
+                              className="btn-danger py-1 px-3 text-xs"
+                              onClick={() => setWorkerToDelete(worker)}
+                              type="button"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -789,77 +904,6 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
               startIndex={workersPagination.startIndex}
               totalCount={workersPagination.totalCount}
               totalPages={workersPagination.totalPages}
-            />
-          </>
-        )}
-      </SurfaceCard>
-
-      <SurfaceCard title="Recent Labor Payments">
-        {loading ? (
-          <SkeletonTable rows={4} />
-        ) : filteredLaborPayments.length === 0 ? (
-          <EmptyState
-            description="No labor payments recorded for the selected site."
-            title="No payments"
-          />
-        ) : (
-          <>
-            <div className="ops-table-wrap">
-              <table className="data-table ops-table min-w-[980px]">
-                <thead>
-                  <tr>
-                    <th className="ops-sticky-sn">S/N</th>
-                    <th>Worker</th>
-                    <th>Site</th>
-                    <th>Period</th>
-                    <th>Total Payable</th>
-                    <th>Paid</th>
-                    <th>Balance</th>
-                    <th className="ops-sticky-actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paymentsPagination.paginatedRows.map((payment, index) => (
-                    <tr key={payment.id}>
-                      <td className="ops-sticky-sn">{paymentsPagination.startIndex + index + 1}</td>
-                      <td><span className="ops-cell-strong">{payment.workerName}</span></td>
-                      <td><span className="ops-cell-text">{payment.projectName || "Unassigned"}</span></td>
-                      <td>
-                        {formatDate(payment.workStart)} - {formatDate(payment.workEnd)}
-                      </td>
-                      <td>{formatTzs(payment.totalPayable)}</td>
-                      <td className="text-emerald-700">{formatTzs(payment.amountPaid)}</td>
-                      <td className={payment.balance > 0 ? "text-amber-700" : "text-emerald-700"}>
-                        {formatTzs(payment.balance)}
-                      </td>
-                      <td className="ops-sticky-actions">
-                        <div className="ops-actions-row">
-                          <button className="btn-secondary py-1 px-3 text-xs" onClick={() => setViewPayment(payment)} type="button">
-                            View
-                          </button>
-                          <button className='btn-secondary py-1 px-3 text-xs' onClick={() => openEditPayment(payment)} type='button'>
-                            Edit
-                          </button>
-                          <button className='btn-danger py-1 px-3 text-xs' onClick={() => setPaymentToDelete(payment)} type='button'>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <TablePagination
-              endIndex={paymentsPagination.endIndex}
-              itemLabel="payments"
-              onPageChange={paymentsPagination.setPage}
-              onPageSizeChange={paymentsPagination.setPageSize}
-              page={paymentsPagination.page}
-              pageSize={paymentsPagination.pageSize}
-              startIndex={paymentsPagination.startIndex}
-              totalCount={paymentsPagination.totalCount}
-              totalPages={paymentsPagination.totalPages}
             />
           </>
         )}
@@ -1167,7 +1211,8 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         </div>
       )}
       {editingPayment && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4'>
+        // Above the worker detail modal (z-80), which stays open behind it.
+        <div className='fixed inset-0 z-90 flex items-center justify-center bg-black/50 p-4'>
           <SurfaceCard className='w-full max-w-xl max-h-[90vh] overflow-y-auto' title='Edit Labor Payment'>
             <form className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
               <p className='text-sm font-semibold text-slate-700 sm:col-span-2'>{editingPayment.workerName}</p>
@@ -1223,10 +1268,23 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
           { label: "Phone", value: viewWorker.phone },
           { label: "Skill / Role", value: viewWorker.skillRole },
           { label: "Assigned Project", value: viewWorker.assignedProjectName || "Unassigned" },
-          { label: "Payment Type", value: viewWorker.paymentType },
+          { label: "Paid Every", value: payCycleLabel(viewWorker.paymentType) },
           { label: "Rate", value: formatTzs(viewWorker.rateAmount) },
           { label: "Total Paid", value: formatTzs(viewWorker.totalPaid) },
           { label: "Outstanding", value: formatTzs(viewWorker.outstandingAmount) },
+          {
+            label: "Times Paid",
+            value: `${viewWorkerProgress?.timesPaid ?? 0}`,
+          },
+          {
+            label: "Cycles Paid",
+            value: viewWorkerProgress?.cycleBased
+              ? `${viewWorkerProgress.cyclesPaid} of ${viewWorkerProgress.cyclesDue}` +
+                (viewWorkerProgress.cyclesPending > 0
+                  ? ` (${viewWorkerProgress.cyclesPending} unpaid)`
+                  : " (up to date)")
+              : "-",
+          },
           { label: "Pay Cycle Start", value: viewWorker.payCycleStartDate ? formatDate(viewWorker.payCycleStartDate) : "-" },
           { label: "Employment End Date", value: viewWorker.employmentEndDate ? formatDate(viewWorker.employmentEndDate) : "-" },
           { label: "Next Payment Due", value: viewWorker.nextPaymentDueDate ? formatDate(viewWorker.nextPaymentDueDate) : "-" },
@@ -1236,7 +1294,82 @@ export const LaborPage = ({ embedded = false, search = "", tabBar }: LaborPagePr
         ] : []}
         subtitle={viewWorker ? viewWorker.skillRole : ""}
         title="Worker Details"
-      />
+        widthClass="max-w-4xl"
+      >
+        <div className="mt-6 border-t border-slate-100 pt-4">
+          <h4 className="mb-3 text-sm font-semibold text-slate-900">
+            Payment History ({viewWorkerPayments.length})
+          </h4>
+
+          {viewWorkerPayments.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No payments recorded for this worker yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="data-table min-w-[760px]">
+                <thead>
+                  <tr>
+                    <th>S/N</th>
+                    <th>Period</th>
+                    <th>Cycles</th>
+                    <th>Payable</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Method</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {viewWorkerPayments.map((payment, index) => (
+                    <tr key={payment.id}>
+                      <td>{index + 1}</td>
+                      <td className="whitespace-nowrap">
+                        {formatDate(payment.workStart)} - {formatDate(payment.workEnd)}
+                      </td>
+                      <td>
+                        {payment.payCycleType}
+                        {payment.payCycleCount > 0 ? ` x ${payment.payCycleCount}` : ""}
+                      </td>
+                      <td>{formatTzs(payment.totalPayable)}</td>
+                      <td className="text-emerald-700">{formatTzs(payment.amountPaid)}</td>
+                      <td className={payment.balance > 0 ? "text-amber-700" : "text-emerald-700"}>
+                        {formatTzs(payment.balance)}
+                      </td>
+                      <td>{payment.paymentMethod}</td>
+                      <td>
+                        <div className="flex gap-1">
+                          <button
+                            className="btn-secondary py-1 px-2 text-xs"
+                            onClick={() => setViewPayment(payment)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                          <button
+                            className="btn-secondary py-1 px-2 text-xs"
+                            onClick={() => openEditPayment(payment)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn-danger py-1 px-2 text-xs"
+                            onClick={() => setPaymentToDelete(payment)}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </DetailModal>
 
       <DetailModal
         onClose={() => setViewPayment(null)}

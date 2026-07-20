@@ -741,6 +741,8 @@ export const DetailModal = ({
   onClose,
   rows,
   footer,
+  children,
+  widthClass = "max-w-lg",
 }: {
   open: boolean;
   title: string;
@@ -748,6 +750,8 @@ export const DetailModal = ({
   onClose: () => void;
   rows: DetailRow[];
   footer?: ReactNode;
+  children?: ReactNode;
+  widthClass?: string;
 }) => {
   if (!open) {
     return null;
@@ -755,7 +759,7 @@ export const DetailModal = ({
 
   return (
     <div className="fixed inset-0 z-80 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+      <div className={`w-full ${widthClass} max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl`}>
         <div className="mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900">{title}</h3>
@@ -782,6 +786,7 @@ export const DetailModal = ({
             </div>
           ))}
         </dl>
+        {children}
         <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
           {footer}
           <button className="btn-secondary" onClick={onClose} type="button">

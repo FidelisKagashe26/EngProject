@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
 import { SectionTitle } from "../components/ui";
@@ -37,6 +37,8 @@ export type TabBarProps = {
   search: string;
   onSearchChange: (value: string) => void;
   tabs?: readonly OperationTabConfig[];
+  /** Page-specific filters/buttons rendered alongside the search input. */
+  actions?: ReactNode;
 };
 
 export const OperationsTabBar = ({
@@ -45,6 +47,7 @@ export const OperationsTabBar = ({
   search,
   onSearchChange,
   tabs = operationTabs,
+  actions,
 }: TabBarProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -132,24 +135,10 @@ export const OperationsTabBar = ({
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-
-        <div
-          className={[
-            "inline-flex items-center justify-between gap-2",
-            "rounded-lg border border-[#0b2a53]/20",
-            "bg-[#0b2a53]/5 px-3 py-2 text-sm font-semibold",
-            "text-[#0b2a53] lg:min-w-44",
-          ].join(" ")}
-        >
-          <span className="text-xs uppercase tracking-wide text-slate-500">
-            Current
-          </span>
-          <span>{activeLabel}</span>
-        </div>
       </div>
 
-      <div className="mt-3">
-        <label className="relative block w-full sm:max-w-xl">
+      <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <label className="relative block w-full lg:max-w-md">
           <Search
             className={[
               "pointer-events-none absolute left-3 top-1/2 h-4 w-4",
@@ -170,6 +159,12 @@ export const OperationsTabBar = ({
             value={search}
           />
         </label>
+
+        {actions && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end lg:justify-end">
+            {actions}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -212,20 +207,28 @@ export const SiteOperationsPage = () => {
     setSearch("");
   };
 
+  // Pages that own filters render the bar themselves so their controls can sit
+  // on the search row; the rest still get it rendered for them.
+  const renderTabBar = (actions?: ReactNode) => (
+    <OperationsTabBar
+      actions={actions}
+      activeTab={activeTab}
+      onSearchChange={setSearch}
+      onSwitch={switchTab}
+      search={search}
+      tabs={allowedTabs}
+    />
+  );
+
   return (
     <div className="space-y-6">
       <SectionTitle
         title="Site Operations"
       />
-      <OperationsTabBar
-        activeTab={activeTab}
-        onSearchChange={setSearch}
-        onSwitch={switchTab}
-        search={search}
-        tabs={allowedTabs}
-      />
 
-      {activeTab === "labor"      && <LaborPage     embedded search={search} />}
+      {activeTab !== "labor" && renderTabBar()}
+
+      {activeTab === "labor"      && <LaborPage     embedded renderTabBar={renderTabBar} search={search} />}
       {activeTab === "materials"  && <MaterialsPage embedded search={search} />}
       {activeTab === "expenses"   && <ExpensesPage  embedded search={search} />}
       {activeTab === "equipment"  && <EquipmentPage embedded search={search} />}

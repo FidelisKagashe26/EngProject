@@ -2,7 +2,8 @@ import { Info, Loader2, Paperclip } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth";
-import { FinancialInput, SectionTitle, SuccessToast, SurfaceCard, GuiSelect } from "../components/ui";
+import { FinancialInput, SectionTitle, SuccessToast, SurfaceCard, GuiSelect, options } from "../components/ui";
+import { PROJECT_STATUSES, isClosedProjectStatus } from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { api, type CreateProjectPayload, type ProjectApiRecord } from "../services/api";
 import { formatTzs } from "../utils/format";
@@ -152,6 +153,7 @@ export const ProjectFormPage = () => {
   const [endDate, setEndDate] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("");
+  const isProjectClosed = isClosedProjectStatus(status);
   const [contractValue, setContractValue] = useState("");
   // "initialAdvance" = amount received at project creation (first payment from client)
   // In edit mode this is replaced by the live running total from the DB
@@ -382,7 +384,9 @@ export const ProjectFormPage = () => {
           startDate,
           expectedCompletionDate: endDate,
           contractValue: Number(contractValue) || 0,
-          status: statusToSave,
+          // A closed project keeps its status: reopening it is a deliberate
+          // action, not a side effect of editing the contract number.
+          ...(isProjectClosed ? {} : { status: statusToSave }),
           laborBudget: Number(laborBudget) || 0,
           materialBudget: Number(materialBudget) || 0,
           operationalBudget: Number(operationalBudget) || 0,
@@ -390,8 +394,6 @@ export const ProjectFormPage = () => {
           paymentTerms,
           description,
           notes,
-          // pendingClientPayments recalculated from live data
-          pendingClientPayments: Math.max((Number(contractValue) || 0) - liveAmountReceived, 0),
         });
       } else {
         savedProject = await api.createProject(
@@ -555,21 +557,28 @@ export const ProjectFormPage = () => {
 
             <label className="form-field">
               <span>Current Status <span className="text-red-600">*</span></span>
-              <GuiSelect
-                className={`input-field ${err(status)}`}
-                onChange={(e) => setStatus(e.target.value)}
-                value={status}
-              >
-                <option disabled value="">Select status</option>
-                <option>Draft</option>
-                <option>Active</option>
-                <option>Pending</option>
-                <option>Completed</option>
-                <option>On Hold</option>
-                <option>Over Budget</option>
-                <option>Payment Pending</option>
-                <option>Closed</option>
-              </GuiSelect>
+              {isProjectClosed ? (
+                <>
+                  <input className="input-field bg-slate-50" readOnly value={status} />
+                  <span className="text-xs font-normal normal-case tracking-normal text-slate-500">
+                    Reopen the project from its detail page to record new spend
+                    against it.
+                  </span>
+                </>
+              ) : (
+                <GuiSelect
+                  className={`input-field ${err(status)}`}
+                  onChange={(e) => setStatus(e.target.value)}
+                  value={status}
+                >
+                  <option disabled value="">Select status</option>
+                  {/* "Completed"/"Closed" are set by the Close Project action,
+                      which reconciles the books first. "Over Budget" and
+                      "Payment Pending" were removed because the system already
+                      works both out from the project's own figures. */}
+                  {options(PROJECT_STATUSES)}
+                </GuiSelect>
+              )}
             </label>
           </div>
         </SurfaceCard>

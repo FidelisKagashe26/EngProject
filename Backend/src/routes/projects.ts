@@ -7,6 +7,7 @@ import { requireRoles, requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toInteger, toMoney } from "./utils";
 import { withTransaction, type Queryable } from "../db/transaction";
 import { CLOSED_PROJECT_STATUSES, recalculateProjectSpend } from "../services/projectLedger";
+import { SELECTABLE_PROJECT_STATUSES } from "../constants/vocabulary";
 
 const router = Router();
 const projectManagerRoles = ["Admin", "Engineer / Project Manager"] as const;
@@ -21,7 +22,7 @@ const projectSchema = z.object({
   contractValue: z.number().nonnegative(),
   amountReceived: z.number().nonnegative().optional().default(0),
   totalSpent: z.number().nonnegative().optional().default(0),
-  status: z.string().min(2).optional().default("Pending"),
+  status: z.enum(SELECTABLE_PROJECT_STATUSES).optional().default("Draft"),
   progress: z.number().int().min(0).max(100).optional().default(0),
   pendingClientPayments: z.number().nonnegative().optional().default(0),
   laborBudget: z.number().nonnegative().optional().default(0),
@@ -54,7 +55,10 @@ const projectUpdateSchema = z.object({
   startDate: z.string().date().optional(),
   expectedCompletionDate: z.string().date().optional(),
   contractValue: z.number().nonnegative().optional(),
-  status: z.string().min(2).optional(),
+  // Only the manually-settable states. Closing a project reconciles its books
+  // and stamps who did it, so "Completed"/"Closed" go through /close instead of
+  // being reachable by editing this field.
+  status: z.enum(SELECTABLE_PROJECT_STATUSES).optional(),
   progress: z.number().int().min(0).max(100).optional(),
   laborBudget: z.number().nonnegative().optional(),
   materialBudget: z.number().nonnegative().optional(),
@@ -82,6 +86,11 @@ const mapProject = (row: {
   labor_budget: string;
   material_budget: string;
   operational_budget: string;
+  labor_spent: string;
+  material_spent: string;
+  operational_spent: string;
+  closed_at: string | null;
+  closed_by: string | null;
   expected_profit_margin_pct: string;
   payment_terms: string | null;
   description: string | null;
@@ -110,10 +119,29 @@ const mapProject = (row: {
     Number(row.contract_value) - Number(row.amount_received),
     0,
   ),
+  // How much of the company's own money is tied up here: spend that the client
+  // has not funded yet. Zero once the client is ahead of the work.
+  ownCapitalDeployed: Math.max(
+    Number(row.total_spent) - Number(row.amount_received),
+    0,
+  ),
+  // Share of the contract already consumed. Read against the manually-entered
+  // progress it answers "are we spending faster than we are building?" — which
+  // is why progress stays a human judgement rather than being derived from it.
+  costConsumedPct:
+    Number(row.contract_value) > 0
+      ? Math.round((Number(row.total_spent) / Number(row.contract_value)) * 100)
+      : 0,
+  isOverBudget: Number(row.total_spent) > Number(row.contract_value),
   laborBudget: Number(row.labor_budget),
   materialBudget: Number(row.material_budget),
   operationalBudget: Number(row.operational_budget),
+  laborSpent: Number(row.labor_spent),
+  materialSpent: Number(row.material_spent),
+  operationalSpent: Number(row.operational_spent),
   expectedProfitMarginPct: Number(row.expected_profit_margin_pct),
+  closedAt: row.closed_at,
+  closedBy: row.closed_by ?? "",
   paymentTerms: row.payment_terms ?? "",
   description: row.description ?? "",
   notes: row.notes ?? "",
@@ -176,6 +204,11 @@ router.get(
         labor_budget::text,
         material_budget::text,
         operational_budget::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        closed_at::text,
+        closed_by,
         expected_profit_margin_pct::text,
         payment_terms,
         description,
@@ -216,6 +249,11 @@ router.get(
         labor_budget::text,
         material_budget::text,
         operational_budget::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        closed_at::text,
+        closed_by,
         expected_profit_margin_pct::text,
         payment_terms,
         description,
@@ -287,6 +325,11 @@ router.post(
         labor_budget::text,
         material_budget::text,
         operational_budget::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        closed_at::text,
+        closed_by,
         expected_profit_margin_pct::text,
         payment_terms,
         description,
@@ -430,6 +473,11 @@ router.put(
         labor_budget::text,
         material_budget::text,
         operational_budget::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        closed_at::text,
+        closed_by,
         expected_profit_margin_pct::text,
         payment_terms,
         description,
@@ -481,6 +529,11 @@ router.put(
         labor_budget::text,
         material_budget::text,
         operational_budget::text,
+        labor_spent::text,
+        material_spent::text,
+        operational_spent::text,
+        closed_at::text,
+        closed_by,
         expected_profit_margin_pct::text,
         payment_terms,
         description,

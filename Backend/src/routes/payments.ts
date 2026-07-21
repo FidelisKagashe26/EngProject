@@ -15,6 +15,17 @@ import {
 
 const router = Router();
 
+/**
+ * A payment's status is simply how much of the expected amount has arrived, so
+ * it is computed rather than picked. Letting a user set it independently meant
+ * a record could say "Received" while its own figures showed a shortfall.
+ */
+const paymentStatus = (expected: number, received: number): string => {
+  if (received <= 0) return "Pending";
+  if (received >= expected) return "Received";
+  return "Partial";
+};
+
 const paymentSchema = z.object({
   projectId: z.string().min(3),
   clientName: z.string().min(2),
@@ -27,7 +38,8 @@ const paymentSchema = z.object({
   paymentDate: z.string().date(),
   paymentMethod: z.string().min(2),
   referenceNumber: z.string().optional().default(""),
-  status: z.string().optional().default("Pending"),
+  // Not accepted from the client — see paymentStatus below.
+  status: z.string().optional(),
   notes: z.string().optional().default(""),
   attachmentUrl: z.string().optional().default(""),
   attachmentName: z.string().optional().default(""),
@@ -148,7 +160,7 @@ router.get(
         paymentDate: row.payment_date,
         paymentMethod: row.payment_method,
         referenceNumber: row.reference_number ?? "",
-        status: row.status,
+        status: paymentStatus(Number(row.amount_expected), Number(row.amount_received)),
         notes: row.notes ?? "",
         attachmentUrl: row.attachment_url ?? "",
         attachmentName: row.attachment_name ?? "",
@@ -227,7 +239,7 @@ router.post(
         parsed.paymentDate,
         parsed.paymentMethod,
         parsed.referenceNumber,
-        parsed.status,
+        paymentStatus(amountExpected, parsed.amountReceived),
         parsed.notes,
         parsed.attachmentUrl,
         parsed.attachmentName,
@@ -278,7 +290,7 @@ router.post(
       paymentDate: row.payment_date,
       paymentMethod: row.payment_method,
       referenceNumber: row.reference_number ?? "",
-      status: row.status,
+      status: paymentStatus(Number(row.amount_expected), Number(row.amount_received)),
       notes: row.notes ?? "",
       attachmentUrl: row.attachment_url ?? "",
       attachmentName: row.attachment_name ?? "",
@@ -387,10 +399,6 @@ router.patch(
       if (parsed.referenceNumber !== undefined) {
         setClauses.push(`reference_number = $${paramIndex++}`);
         params.push(parsed.referenceNumber);
-      }
-      if (parsed.status) {
-        setClauses.push(`status = $${paramIndex++}`);
-        params.push(parsed.status);
       }
       if (parsed.notes !== undefined) {
         setClauses.push(`notes = $${paramIndex++}`);

@@ -12,7 +12,11 @@ import {
   StatusBadge,
   SurfaceCard,
   TablePagination,
+  options,
 } from "../components/ui";
+import {
+  PAYMENT_METHODS,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -74,7 +78,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
   const [paidBy, setPaidBy] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [receiptRef, setReceiptRef] = useState("");
-  const [status, setStatus] = useState("Approved");
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
@@ -184,7 +187,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
     setDate("");
     setPaidBy("");
     setReceiptRef("");
-    setStatus("Approved");
     setNotes("");
   };
 
@@ -208,7 +210,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
     setPaidBy(expense.paidBy);
     setPaymentMethod(expense.paymentMethod);
     setReceiptRef(expense.receiptRef);
-    setStatus(expense.status);
     setNotes(expense.notes);
     setShowAddModal(true);
   };
@@ -237,7 +238,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
         paidBy: paidBy.trim(),
         paymentMethod,
         receiptRef: receiptRef.trim(),
-        status,
         notes: notes.trim(),
       };
       if (editingExpenseId) {
@@ -549,24 +549,16 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
               <label className="form-field">
                 <span>Payment Method</span>
                 <GuiSelect className="input-field" onChange={(e) => setPaymentMethod(e.target.value)} value={paymentMethod}>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Mobile Money">Mobile Money</option>
-                  <option value="Cheque">Cheque</option>
+                  {options(PAYMENT_METHODS)}
                 </GuiSelect>
               </label>
               <label className="form-field">
                 <span>Receipt Reference</span>
                 <input className="input-field" onChange={(e) => setReceiptRef(e.target.value)} placeholder="EXP-REC-001" value={receiptRef} />
               </label>
-              <label className="form-field">
-                <span>Status</span>
-                <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value)} value={status}>
-                  <option value="Approved">Approved</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Rejected">Rejected</option>
-                </GuiSelect>
-              </label>
+              {/* Status is not asked for: an expense's status is its approval
+                  state, and a second hand-picked field using the same words let
+                  a record read "Approved" while approval still held it. */}
               <label className="form-field sm:col-span-2">
                 <span>Notes</span>
                 <textarea className="input-field min-h-20" onChange={(e) => setNotes(e.target.value)} value={notes} />

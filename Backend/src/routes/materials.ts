@@ -12,10 +12,15 @@ import {
   requiresApproval,
 } from "../services/approval";
 import { applyProjectSpend, moveProjectSpend } from "../services/projectLedger";
+import {
+  MATERIAL_DELIVERY_STATUSES,
+  MATERIAL_SUPPLY_SOURCES,
+  PRIORITIES,
+} from "../constants/vocabulary";
 
 const router = Router();
 
-const materialSupplySourceSchema = z.enum(["Company Purchased", "Client Supplied"]);
+const materialSupplySourceSchema = z.enum(MATERIAL_SUPPLY_SOURCES);
 
 const requirementSchema = z.object({
   projectId: z.string().min(3),
@@ -25,8 +30,10 @@ const requirementSchema = z.object({
   estimatedUnitCost: z.number().nonnegative(),
   supplySource: materialSupplySourceSchema.optional().default("Company Purchased"),
   requestedQuantity: z.number().nonnegative().optional().default(0),
-  supplyStatus: z.string().optional().default("Planned"),
-  priority: z.string().optional().default("Medium"),
+  // supplyStatus is deliberately absent: it is recomputed from the requirement's
+  // purchases by refreshRequirementSupplyStatus, so anything a user picked was
+  // overwritten immediately.
+  priority: z.enum(PRIORITIES).optional().default("Medium"),
   neededByDate: z.string().date().optional(),
   notes: z.string().optional().default(""),
 });
@@ -48,7 +55,7 @@ const purchaseSchema = z.object({
   supplySource: materialSupplySourceSchema.optional().default("Company Purchased"),
   purchaseDate: z.string().date(),
   deliveryNoteNumber: z.string().optional().default(""),
-  deliveryStatus: z.string().optional().default("Pending Delivery"),
+  deliveryStatus: z.enum(MATERIAL_DELIVERY_STATUSES).optional().default("Pending Delivery"),
   deliveredQuantity: z.number().nonnegative().optional().default(0),
   receiptRef: z.string().optional().default(""),
   notes: z.string().optional().default(""),
@@ -436,7 +443,8 @@ router.post(
         parsed.supplySource,
         parsed.requestedQuantity,
         parsed.requestedQuantity > 0 ? getTodaySqlDate() : null,
-        parsed.requestedQuantity > 0 ? "Requested" : parsed.supplyStatus,
+        // Seed value only; refreshRequirementSupplyStatus owns it from here on.
+        parsed.requestedQuantity > 0 ? "Requested" : "Planned",
         parsed.priority,
         parsed.neededByDate ?? null,
         parsed.notes,
@@ -527,10 +535,6 @@ router.patch(
       setClauses.push(`last_request_date = CASE WHEN $${paramIndex}::numeric > 0 THEN COALESCE(last_request_date, CURRENT_DATE) ELSE last_request_date END`);
       params.push(parsed.requestedQuantity);
       paramIndex += 1;
-    }
-    if (parsed.supplyStatus) {
-      setClauses.push(`supply_status = $${paramIndex++}`);
-      params.push(parsed.supplyStatus);
     }
     if (parsed.priority) {
       setClauses.push(`priority = $${paramIndex++}`);
@@ -795,7 +799,12 @@ router.post(
       }
     }
 
-    const isClientSupplied = parsed.supplySource === "Client Supplied";
+    // Who pays is a property of the requirement, not of each receipt against
+    // it. Inheriting rather than re-asking removes the case where a
+    // client-supplied requirement collects company-purchased receipts and the
+    // project is charged for material the client actually handed over.
+    const supplySource = requirement ? requirement.supply_source : parsed.supplySource;
+    const isClientSupplied = supplySource === "Client Supplied";
     const totalCost = isClientSupplied ? 0 : parsed.quantityPurchased * parsed.unitCost;
     const deliveredQuantity = normalizeDeliveredQuantity(
       parsed.deliveryStatus,
@@ -893,7 +902,7 @@ router.post(
           parsed.supplierName,
           isClientSupplied ? 0 : parsed.unitCost,
           totalCost,
-          parsed.supplySource,
+          supplySource,
           parsed.purchaseDate,
           parsed.deliveryNoteNumber,
           parsed.deliveryStatus,

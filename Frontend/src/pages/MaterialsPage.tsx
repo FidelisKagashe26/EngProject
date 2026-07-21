@@ -10,7 +10,13 @@ import {
   SurfaceCard,
   TablePagination,
   GuiSelect,
+  options,
 } from "../components/ui";
+import {
+  MATERIAL_DELIVERY_STATUSES,
+  MATERIAL_SUPPLY_SOURCES,
+  PRIORITIES,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -88,7 +94,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
   const [requirementSupplySource, setRequirementSupplySource] =
     useState<MaterialSupplySource>("Company Purchased");
   const [requestedQuantity, setRequestedQuantity] = useState("");
-  const [supplyStatus, setSupplyStatus] = useState("Planned");
   const [priority, setPriority] = useState("High");
   const [neededByDate, setNeededByDate] = useState("");
   const [requirementNotes, setRequirementNotes] = useState("");
@@ -271,7 +276,8 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
   const materialsPagination = useTablePagination(filteredRows);
 
   const purchaseTotal = useMemo(() => (Number(qtyPurchased) || 0) * (Number(unitCost) || 0), [qtyPurchased, unitCost]);
-  const effectivePurchaseTotal = purchaseSupplySource === "Client Supplied" ? 0 : purchaseTotal;
+  const isPurchaseClientSupplied = purchaseSupplySource === "Client Supplied";
+  const effectivePurchaseTotal = isPurchaseClientSupplied ? 0 : purchaseTotal;
 
   const purchaseProgress = useMemo(() => {
     if (!selectedRequirement) return 0;
@@ -289,7 +295,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
     setEstimatedUnitCost("");
     setRequirementSupplySource("Company Purchased");
     setRequestedQuantity("");
-    setSupplyStatus("Planned");
     setPriority("High");
     setNeededByDate("");
     setRequirementNotes("");
@@ -323,7 +328,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
     setEstimatedUnitCost(String(row.unitCost));
     setRequirementSupplySource(row.supplySource);
     setRequestedQuantity(row.requestedQuantity > 0 ? String(row.requestedQuantity) : "");
-    setSupplyStatus(row.supplyStatus);
     setPriority(row.priority);
     setNeededByDate(row.neededByDate ?? "");
     setRequirementNotes(row.notes);
@@ -373,7 +377,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
         estimatedUnitCost: requirementSupplySource === "Client Supplied" ? 0 : Number(estimatedUnitCost) || 0,
         supplySource: requirementSupplySource,
         requestedQuantity: Number(requestedQuantity) || 0,
-        supplyStatus,
         priority,
         neededByDate: neededByDate || undefined,
         notes: requirementNotes.trim(),
@@ -679,29 +682,20 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
                   }}
                   value={requirementSupplySource}
                 >
-                  <option value="Company Purchased">Company Purchased</option>
-                  <option value="Client Supplied">Client Supplied</option>
+                  {options(MATERIAL_SUPPLY_SOURCES)}
                 </GuiSelect>
               </label>
               <label className="form-field">
                 <span>Requested Quantity</span>
                 <input className="input-field" onChange={(e) => setRequestedQuantity(e.target.value)} type="number" value={requestedQuantity} />
               </label>
-              <label className="form-field">
-                <span>Supply Status</span>
-                <GuiSelect className="input-field" onChange={(e) => setSupplyStatus(e.target.value)} value={supplyStatus}>
-                  <option value="Planned">Planned</option>
-                  <option value="Requested">Requested</option>
-                  <option value="Partially Delivered">Partially Delivered</option>
-                  <option value="Fulfilled">Fulfilled</option>
-                </GuiSelect>
-              </label>
+              {/* Supply status is not asked for: the system recomputes it from
+                  this requirement's receipts, so anything picked here was
+                  overwritten the moment a delivery was recorded. */}
               <label className="form-field">
                 <span>Priority</span>
                 <GuiSelect className="input-field" onChange={(e) => setPriority(e.target.value)} value={priority}>
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
+                  {options(PRIORITIES)}
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -747,24 +741,36 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
               </label>
               <label className="form-field">
                 <span>Supply Source</span>
-                <GuiSelect
-                  className="input-field"
-                  onChange={(e) => {
-                    const source = e.target.value as MaterialSupplySource;
-                    setPurchaseSupplySource(source);
-                    if (source === "Client Supplied") {
-                      setSupplierName((current) => current || "Client Supplied");
-                      setUnitCost("0");
-                    }
-                  }}
-                  value={purchaseSupplySource}
-                >
-                  <option value="Company Purchased">Company Purchased</option>
-                  <option value="Client Supplied">Client Supplied</option>
-                </GuiSelect>
+                {selectedRequirement ? (
+                  // Who pays belongs to the requirement, so a receipt against one
+                  // inherits it. Re-asking here allowed a client-supplied
+                  // requirement to collect company-purchased receipts and charge
+                  // the project for material the client handed over.
+                  <input
+                    className="input-field bg-slate-50"
+                    readOnly
+                    title="Set on the linked requirement"
+                    value={purchaseSupplySource}
+                  />
+                ) : (
+                  <GuiSelect
+                    className="input-field"
+                    onChange={(e) => {
+                      const source = e.target.value as MaterialSupplySource;
+                      setPurchaseSupplySource(source);
+                      if (source === "Client Supplied") {
+                        setSupplierName((current) => current || "Client Supplied");
+                        setUnitCost("0");
+                      }
+                    }}
+                    value={purchaseSupplySource}
+                  >
+                    {options(MATERIAL_SUPPLY_SOURCES)}
+                  </GuiSelect>
+                )}
               </label>
               <label className="form-field">
-                <span>Quantity Purchased</span>
+                <span>Quantity {isPurchaseClientSupplied ? "Supplied" : "Purchased"}</span>
                 <input className="input-field" onChange={(e) => setQtyPurchased(e.target.value)} type="number" value={qtyPurchased} />
               </label>
               <label className="form-field">
@@ -779,14 +785,29 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
                 />
               </label>
               <label className="form-field">
-                <span>Supplier</span>
-                <input className="input-field" onChange={(e) => setSupplierName(e.target.value)} placeholder="Supplier name" value={supplierName} />
+                <span>{isPurchaseClientSupplied ? "Supplied By" : "Supplier"}</span>
+                <input className="input-field" onChange={(e) => setSupplierName(e.target.value)} placeholder={isPurchaseClientSupplied ? "Client" : "Supplier name"} value={supplierName} />
               </label>
-              <FinancialInput label="Unit Cost" onChange={setUnitCost} placeholder="17500" value={unitCost} />
-              <label className="form-field">
-                <span>Total Cost (Auto)</span>
-                <input className="input-field bg-slate-50" readOnly value={formatTzs(effectivePurchaseTotal)} />
-              </label>
+              {/* Client-supplied material costs the company nothing, so the cost
+                  fields are replaced by a note rather than shown as zeroes the
+                  user might try to fill in. */}
+              {isPurchaseClientSupplied ? (
+                <div className="form-field sm:col-span-2">
+                  <span>Cost to Company</span>
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    None — the client supplies this material, so it is tracked as
+                    quantity only and never charged to the project budget.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <FinancialInput label="Unit Cost" onChange={setUnitCost} placeholder="17500" value={unitCost} />
+                  <label className="form-field">
+                    <span>Total Cost (Auto)</span>
+                    <input className="input-field bg-slate-50" readOnly value={formatTzs(effectivePurchaseTotal)} />
+                  </label>
+                </>
+              )}
               <label className="form-field">
                 <span>Date of Purchase</span>
                 <input className="input-field" onChange={(e) => setPurchaseDate(e.target.value)} type="date" value={purchaseDate} />
@@ -798,9 +819,7 @@ export const MaterialsPage = ({ embedded = false, search = "", renderTabBar }: M
               <label className="form-field">
                 <span>Delivery Status</span>
                 <GuiSelect className="input-field" onChange={(e) => setDeliveryStatus(e.target.value)} value={deliveryStatus}>
-                  <option value="Pending Delivery">Pending Delivery</option>
-                  <option value="Partially Delivered">Partially Delivered</option>
-                  <option value="Delivered">Delivered</option>
+                  {options(MATERIAL_DELIVERY_STATUSES)}
                 </GuiSelect>
               </label>
               <label className="form-field">

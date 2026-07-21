@@ -11,7 +11,13 @@ import {
   StatusBadge,
   SurfaceCard,
   TablePagination,
+  options,
 } from "../components/ui";
+import {
+  EQUIPMENT_CONDITIONS,
+  EQUIPMENT_OWNERSHIP,
+  EQUIPMENT_STATUSES,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -444,10 +450,7 @@ export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: E
               <label className="form-field">
                 <span>Condition</span>
                 <GuiSelect className="input-field" onChange={(e) => setConditionStatus(e.target.value)} value={conditionStatus}>
-                  <option value="Good">Good</option>
-                  <option value="Fair">Fair</option>
-                  <option value="Needs Repair">Needs Repair</option>
-                  <option value="Damaged">Damaged</option>
+                  {options(EQUIPMENT_CONDITIONS)}
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -457,8 +460,7 @@ export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: E
               <label className="form-field">
                 <span>Owned / Rented</span>
                 <GuiSelect className="input-field" onChange={(e) => setOwnershipType(e.target.value as "Owned" | "Rented")} value={ownershipType}>
-                  <option value="Owned">Owned</option>
-                  <option value="Rented">Rented</option>
+                  {options(EQUIPMENT_OWNERSHIP)}
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -492,10 +494,7 @@ export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: E
               <label className="form-field">
                 <span>Status</span>
                 <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value as EquipmentStatus)} value={status}>
-                  <option value="In Use">In Use</option>
-                  <option value="Idle">Idle</option>
-                  <option value="Under Maintenance">Under Maintenance</option>
-                  <option value="Out of Use">Out of Use</option>
+                  {options(EQUIPMENT_STATUSES)}
                 </GuiSelect>
               </label>
               <label className="form-field">

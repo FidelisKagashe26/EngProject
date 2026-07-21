@@ -21,7 +21,13 @@ import {
   SkeletonTable,
   SurfaceCard,
 } from "../components/ui";
-import { api, type DocumentApiRecord, type ProjectApiRecord } from "../services/api";
+import { isClosedProjectStatus } from "../constants/options";
+import {
+  api,
+  type DocumentApiRecord,
+  type ProjectApiRecord,
+  type ProjectClosureSummary,
+} from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
 
 // ─── Quick Link tile ──────────────────────────────────────────────────────────
@@ -337,6 +343,11 @@ export function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const [closureSummary, setClosureSummary] = useState<ProjectClosureSummary | null>(null);
+  const [loadingClosure, setLoadingClosure] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [reopening, setReopening] = useState(false);
+
   useEffect(() => {
     if (!projectId) return;
     let mounted = true;
@@ -355,6 +366,54 @@ export function ProjectDetailPage() {
     void load();
     return () => { mounted = false; };
   }, [projectId]);
+
+  const reloadProject = async () => {
+    if (!projectId) return;
+    setProject(await api.getProjectById(projectId));
+  };
+
+  // Show what closing would reconcile to before doing it, so the decision is
+  // made with the outstanding items on screen rather than after the fact.
+  const openClosureModal = async () => {
+    if (!projectId) return;
+    setLoadingClosure(true);
+    try {
+      setClosureSummary(await api.getProjectClosureSummary(projectId));
+    } catch (err) {
+      pushTopToast({ tone: "error", title: "Project", message: err instanceof Error ? err.message : "Failed to check project." });
+    } finally {
+      setLoadingClosure(false);
+    }
+  };
+
+  const handleClose = async (force: boolean) => {
+    if (!projectId) return;
+    setClosing(true);
+    try {
+      const result = await api.closeProject(projectId, force);
+      pushTopToast({ tone: "success", title: "Project", message: result.message });
+      setClosureSummary(null);
+      await reloadProject();
+    } catch (err) {
+      pushTopToast({ tone: "error", title: "Project", message: err instanceof Error ? err.message : "Failed to close project." });
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!projectId) return;
+    setReopening(true);
+    try {
+      const result = await api.reopenProject(projectId);
+      pushTopToast({ tone: "success", title: "Project", message: result.message });
+      await reloadProject();
+    } catch (err) {
+      pushTopToast({ tone: "error", title: "Project", message: err instanceof Error ? err.message : "Failed to reopen project." });
+    } finally {
+      setReopening(false);
+    }
+  };
 
   if (loading) return <div className="space-y-6"><SkeletonCards /></div>;
 
@@ -408,18 +467,48 @@ export function ProjectDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back + Edit */}
+      {/* Back + Edit + Close/Reopen */}
       <div className="flex items-center justify-between gap-3">
         <Link className="btn-secondary inline-flex items-center gap-2" to="/projects">
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
-        <Link
-          className="btn-primary"
-          to={`/projects/${encodeURIComponent(project.id)}/edit`}
-        >
-          Edit Project
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {isClosedProjectStatus(project.status) ? (
+            <button
+              className="btn-secondary"
+              disabled={reopening}
+              onClick={() => void handleReopen()}
+              type="button"
+            >
+              {reopening ? "Reopening..." : "Reopen Project"}
+            </button>
+          ) : (
+            <button
+              className="btn-secondary"
+              disabled={loadingClosure}
+              onClick={() => void openClosureModal()}
+              type="button"
+            >
+              {loadingClosure ? "Checking..." : "Close Project"}
+            </button>
+          )}
+          <Link
+            className="btn-primary"
+            to={`/projects/${encodeURIComponent(project.id)}/edit`}
+          >
+            Edit Project
+          </Link>
+        </div>
       </div>
+
+      {isClosedProjectStatus(project.status) && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          This project is <span className="font-semibold">{project.status}</span>
+          {project.closedBy ? ` — closed by ${project.closedBy}` : ""}
+          {project.closedAt ? ` on ${formatDate(project.closedAt.slice(0, 10))}` : ""}.
+          No new spend can be recorded against it until it is reopened.
+        </div>
+      )}
 
       <SectionTitle
         subtitle={`${project.siteLocation} - ${project.contractNumber}`}
@@ -474,9 +563,31 @@ export function ProjectDetailPage() {
           </div>
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Progress
+              Work Progress
             </p>
             <ProgressBar value={project.progress} />
+
+            {/* Budget consumed sits next to work done rather than replacing it:
+                progress is the engineer's judgement, and the gap between the two
+                is the early warning — 70% of the money against 30% of the work. */}
+            <p className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Budget Consumed
+            </p>
+            <ProgressBar value={Math.min(project.costConsumedPct, 100)} />
+            <p
+              className={`mt-2 text-xs ${
+                project.costConsumedPct > project.progress
+                  ? "text-amber-700"
+                  : "text-slate-500"
+              }`}
+            >
+              {project.costConsumedPct}% of budget spent for {project.progress}% of
+              work
+              {project.costConsumedPct > project.progress
+                ? " — spending is ahead of delivery."
+                : "."}
+            </p>
+
             {project.description && (
               <p className="mt-4 text-xs text-slate-500">{project.description}</p>
             )}
@@ -525,6 +636,119 @@ export function ProjectDetailPage() {
         <SurfaceCard title="Additional Notes">
           <p className="whitespace-pre-wrap text-sm text-slate-700">{project.notes}</p>
         </SurfaceCard>
+      )}
+
+      {closureSummary && (
+        <div className="fixed inset-0 z-80 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-base font-semibold text-slate-900">
+              Close {closureSummary.projectName}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Figures below are recalculated from this project's transactions.
+            </p>
+
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+              {[
+                { label: "Contract Value", value: formatTzs(closureSummary.contractValue) },
+                { label: "Amount Received", value: formatTzs(closureSummary.amountReceived) },
+                { label: "Total Spent", value: formatTzs(closureSummary.totalSpent) },
+                { label: "Labour", value: formatTzs(closureSummary.laborSpent) },
+                { label: "Materials", value: formatTzs(closureSummary.materialSpent) },
+                { label: "Operational", value: formatTzs(closureSummary.operationalSpent) },
+              ].map((row) => (
+                <div key={row.label}>
+                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    {row.label}
+                  </dt>
+                  <dd className="mt-0.5 text-sm text-slate-800">{row.value}</dd>
+                </div>
+              ))}
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Final Profit / Loss
+                </dt>
+                <dd
+                  className={`mt-0.5 text-sm font-semibold ${
+                    closureSummary.profitLoss >= 0 ? "text-emerald-700" : "text-red-700"
+                  }`}
+                >
+                  {formatTzs(closureSummary.profitLoss)}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Outstanding Items
+              </p>
+              {closureSummary.readyToClose ? (
+                <p className="text-sm text-emerald-700">
+                  Nothing outstanding — this project is ready to close.
+                </p>
+              ) : (
+                <ul className="space-y-1 text-sm text-amber-700">
+                  {closureSummary.outstanding.clientBalance > 0 && (
+                    <li>
+                      Client still owes {formatTzs(closureSummary.outstanding.clientBalance)}
+                    </li>
+                  )}
+                  {closureSummary.outstanding.workerOutstanding > 0 && (
+                    <li>
+                      Unpaid worker balances:{" "}
+                      {formatTzs(closureSummary.outstanding.workerOutstanding)}
+                    </li>
+                  )}
+                  {closureSummary.outstanding.unreconciledPettyCash > 0 && (
+                    <li>
+                      Petty cash not yet reconciled:{" "}
+                      {formatTzs(closureSummary.outstanding.unreconciledPettyCash)}
+                    </li>
+                  )}
+                  {closureSummary.outstanding.pendingApprovals > 0 && (
+                    <li>
+                      {closureSummary.outstanding.pendingApprovals} transaction(s) awaiting
+                      approval
+                    </li>
+                  )}
+                  {closureSummary.outstanding.undeliveredRequirements > 0 && (
+                    <li>
+                      {closureSummary.outstanding.undeliveredRequirements} material
+                      requirement(s) not fully delivered
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+
+            <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              Closing locks the project against new spend. Existing records can still
+              be corrected, and the project can be reopened.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button
+                className="btn-secondary"
+                onClick={() => setClosureSummary(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                disabled={closing}
+                onClick={() => void handleClose(!closureSummary.readyToClose)}
+                type="button"
+              >
+                {closing
+                  ? "Closing..."
+                  : closureSummary.readyToClose
+                    ? "Close Project"
+                    : "Close Anyway"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

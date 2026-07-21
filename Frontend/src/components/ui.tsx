@@ -388,6 +388,19 @@ type GuiSelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> & {
   placeholder?: string;
 };
 
+/**
+ * Renders a shared vocabulary from `constants/options` as `<option>` elements,
+ * so a list is written once and used everywhere:
+ *
+ *     <GuiSelect …>{options(PAYMENT_METHODS)}</GuiSelect>
+ */
+export const options = (values: readonly string[]): ReactNode =>
+  values.map((value) => (
+    <option key={value} value={value}>
+      {value}
+    </option>
+  ));
+
 const toOptionLabel = (value: ReactNode): string => {
   if (value === null || value === undefined) {
     return "";

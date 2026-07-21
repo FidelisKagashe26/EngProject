@@ -11,6 +11,16 @@ import { applyProjectSpend, moveProjectSpend, type LedgerFailure } from "../serv
 
 const router = Router();
 
+/**
+ * The single user-facing status for an expense, read off the approval state so
+ * the two can never disagree.
+ */
+const displayStatus = (approvalStatus: string | null): string => {
+  if (approvalStatus === "PENDING") return "Pending";
+  if (approvalStatus === "REJECTED") return "Rejected";
+  return "Approved";
+};
+
 type ExpenseRow = {
   id: string;
   project_id: string;
@@ -40,7 +50,11 @@ const expenseSchema = z.object({
   paidBy: z.string().min(2),
   paymentMethod: z.string().min(2),
   receiptRef: z.string().optional().default(""),
-  status: z.string().optional().default("Pending"),
+  // Not accepted from the client. An expense's status is its approval state,
+  // and having a second hand-picked field using the same words (Approved /
+  // Pending / Rejected) meant a record could read "Approved" while the approval
+  // system still held it as pending. It is now derived on read.
+  status: z.string().optional(),
   notes: z.string().optional().default(""),
 });
 
@@ -146,7 +160,7 @@ router.get(
         paidBy: row.paid_by,
         paymentMethod: row.payment_method,
         receiptRef: row.receipt_ref ?? "",
-        status: row.status,
+        status: displayStatus(row.approval_status),
         notes: row.notes ?? "",
         approvalStatus: row.approval_status,
         createdAt: row.created_at,
@@ -278,7 +292,7 @@ router.post(
           parsed.paidBy,
           parsed.paymentMethod,
           parsed.receiptRef,
-          parsed.status,
+          displayStatus(approvalStatus),
           parsed.notes,
           approvalStatus,
           requestedBy,
@@ -320,7 +334,7 @@ router.post(
       paidBy: row.paid_by,
       paymentMethod: row.payment_method,
       receiptRef: row.receipt_ref ?? "",
-      status: row.status,
+      status: displayStatus(row.approval_status),
       notes: row.notes ?? "",
       approvalStatus: row.approval_status,
       requiresApproval: needsApproval,
@@ -430,7 +444,6 @@ router.patch(
         parsed.paidBy ||
         parsed.paymentMethod ||
         parsed.receiptRef !== undefined ||
-        parsed.status ||
         parsed.notes !== undefined
       ) {
         const setClauses: string[] = [];
@@ -464,10 +477,6 @@ router.patch(
         if (parsed.receiptRef !== undefined) {
           setClauses.push(`receipt_ref = $${paramIndex++}`);
           params.push(parsed.receiptRef);
-        }
-        if (parsed.status) {
-          setClauses.push(`status = $${paramIndex++}`);
-          params.push(parsed.status);
         }
         if (parsed.notes !== undefined) {
           setClauses.push(`notes = $${paramIndex++}`);
@@ -512,11 +521,11 @@ router.patch(
         paid_by: string;
         payment_method: string;
         receipt_ref: string | null;
-        status: string;
+        approval_status: string;
         notes: string | null;
       }>(
         `
-        SELECT id, project_id, expense_date::text, category, description, amount::text, paid_by, payment_method, receipt_ref, status, notes
+        SELECT id, project_id, expense_date::text, category, description, amount::text, paid_by, payment_method, receipt_ref, approval_status, notes
         FROM engicost.expenses
         WHERE company_id = $1 AND id = $2
         `,
@@ -534,7 +543,7 @@ router.patch(
         paidBy: row.paid_by,
         paymentMethod: row.payment_method,
         receiptRef: row.receipt_ref ?? "",
-        status: row.status,
+        status: displayStatus(row.approval_status),
         notes: row.notes ?? "",
       });
     } catch (error) {

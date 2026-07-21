@@ -819,6 +819,7 @@ export const SettingsPage = () => {
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyLocation, setCompanyLocation] = useState("");
   const [companyCurrency, setCompanyCurrency] = useState("TZS");
+  const [enforceCashLimit, setEnforceCashLimit] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
 
   const [oldPassword, setOldPassword] = useState("");
@@ -928,6 +929,7 @@ export const SettingsPage = () => {
     setCompanyPhone(company.phone);
     setCompanyLocation(company.location);
     setCompanyCurrency(company.currency);
+    setEnforceCashLimit(company.enforceCashLimit);
   }, [company]);
 
   const handleSimpleSave = (event: FormEvent<HTMLFormElement>) => {
@@ -982,6 +984,7 @@ export const SettingsPage = () => {
       phone: companyPhone.trim(),
       location: companyLocation.trim(),
       currency: companyCurrency.trim().toUpperCase(),
+      enforceCashLimit,
     };
 
     if (payload.name.length < 2) {
@@ -1013,6 +1016,7 @@ export const SettingsPage = () => {
       setCompanyPhone(updated.phone);
       setCompanyLocation(updated.location);
       setCompanyCurrency(updated.currency);
+      setEnforceCashLimit(updated.enforceCashLimit);
       markSaved();
       showToast("success", "Company", "Profile updated.");
     } catch (error) {
@@ -1323,6 +1327,26 @@ export const SettingsPage = () => {
                         <option>{`${companyCurrency || "TZS"} 1 000 000`}</option>
                       </GuiSelect>
                     </label>
+                    <div className="sm:col-span-2 rounded-lg border border-slate-200 px-3 py-3">
+                      <label className="flex items-start justify-between gap-3">
+                        <span className="text-sm font-normal normal-case tracking-normal text-slate-700">
+                          Block spending beyond client payments
+                          <span className="mt-1 block text-xs text-slate-500">
+                            Leave off if the company funds work before the client
+                            pays — the money spent ahead still shows on each
+                            project as capital deployed. Turn on only if projects
+                            must never be charged past what has been received.
+                          </span>
+                        </span>
+                        <input
+                          checked={enforceCashLimit}
+                          className="mt-1 shrink-0"
+                          disabled={companySettingsLoading || companySaving}
+                          onChange={(event) => setEnforceCashLimit(event.target.checked)}
+                          type="checkbox"
+                        />
+                      </label>
+                    </div>
                     <div className="sm:col-span-2 flex justify-end">
                       <button
                         className="btn-primary"

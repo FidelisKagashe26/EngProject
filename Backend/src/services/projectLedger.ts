@@ -58,6 +58,7 @@ type ProjectLedgerRow = {
   total_spent: string;
   category_budget: string;
   category_spent: string;
+  enforce_cash_limit: boolean;
 };
 
 const formatTzs = (value: number): string =>
@@ -97,16 +98,18 @@ export const applyProjectSpend = async (
   const locked = await client.query<ProjectLedgerRow>(
     `
     SELECT
-      name,
-      status,
-      contract_value::text,
-      amount_received::text,
-      total_spent::text,
-      ${budgetColumn}::text AS category_budget,
-      ${spentColumn}::text AS category_spent
-    FROM engicost.projects
-    WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
-    FOR UPDATE
+      p.name,
+      p.status,
+      p.contract_value::text,
+      p.amount_received::text,
+      p.total_spent::text,
+      p.${budgetColumn}::text AS category_budget,
+      p.${spentColumn}::text AS category_spent,
+      c.enforce_cash_limit
+    FROM engicost.projects p
+    JOIN engicost.companies c ON c.id = p.company_id
+    WHERE p.company_id = $1 AND p.id = $2 AND p.is_deleted = FALSE
+    FOR UPDATE OF p
     `,
     [input.companyId, input.projectId],
   );
@@ -146,7 +149,10 @@ export const applyProjectSpend = async (
       );
     }
 
-    if (delta > availableCash) {
+    // Spending past the cash the client has paid in is normal working capital,
+    // so it only blocks when a company explicitly opts in. What it always does
+    // is show up as own capital deployed on the project.
+    if (row.enforce_cash_limit && delta > availableCash) {
       return failure(
         `Insufficient project funds for this ${input.context}. ${row.name} has ` +
           `${formatTzs(availableCash)} available, but this transaction needs ${formatTzs(delta)}.`,

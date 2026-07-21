@@ -58,9 +58,19 @@ export interface ProjectApiRecord {
   status: string;
   progress: number;
   pendingClientPayments: number;
+  /** Company money tied up here: spend the client has not funded yet. */
+  ownCapitalDeployed: number;
+  /** Share of the contract already spent — compare against progress. */
+  costConsumedPct: number;
+  isOverBudget: boolean;
   laborBudget: number;
   materialBudget: number;
   operationalBudget: number;
+  laborSpent: number;
+  materialSpent: number;
+  operationalSpent: number;
+  closedAt: string | null;
+  closedBy: string;
   expectedProfitMarginPct: number;
   paymentTerms: string;
   description: string;
@@ -138,6 +148,27 @@ export interface CreateProjectPayload {
 }
 
 export type UpdateProjectPayload = Partial<CreateProjectPayload>;
+
+/** What a project reconciles to, and what is still open, at closing time. */
+export interface ProjectClosureSummary {
+  projectName: string;
+  status: string;
+  contractValue: number;
+  amountReceived: number;
+  totalSpent: number;
+  laborSpent: number;
+  materialSpent: number;
+  operationalSpent: number;
+  profitLoss: number;
+  outstanding: {
+    clientBalance: number;
+    workerOutstanding: number;
+    unreconciledPettyCash: number;
+    pendingApprovals: number;
+    undeliveredRequirements: number;
+  };
+  readyToClose: boolean;
+}
 
 export interface NotificationApiRecord {
   id: string;
@@ -340,7 +371,7 @@ export interface CreateExpensePayload {
   paidBy: string;
   paymentMethod: string;
   receiptRef: string;
-  status: string;
+  // status is absent on purpose: the server derives it from the approval state.
   notes: string;
 }
 
@@ -384,6 +415,7 @@ export interface PaymentApiRecord {
   paymentDate: string;
   paymentMethod: string;
   referenceNumber: string;
+  /** Derived by the server from expected vs received; never sent. */
   status: string;
   notes: string;
   attachmentUrl: string;
@@ -428,7 +460,7 @@ export interface CreatePaymentPayload {
   paymentDate: string;
   paymentMethod: string;
   referenceNumber: string;
-  status: string;
+  // status is absent on purpose: the server derives it from expected vs received.
   notes: string;
   attachmentUrl?: string;
   attachmentName?: string;
@@ -564,7 +596,8 @@ export interface CreateMaterialRequirementPayload {
   estimatedUnitCost: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
-  supplyStatus: string;
+  // supplyStatus is absent on purpose: the server recomputes it from the
+  // requirement's receipts, so sending one had no effect.
   priority: string;
   neededByDate?: string;
   notes: string;
@@ -669,6 +702,12 @@ export interface CompanyProfile {
   phone: string;
   location: string;
   currency: string;
+  /**
+   * When true, a project cannot be charged beyond what the client has paid in.
+   * Off by default: contractors routinely front working capital between
+   * payments, and blocking that only stops the spend being recorded.
+   */
+  enforceCashLimit: boolean;
 }
 
 export interface SettingsResponse {
@@ -681,7 +720,7 @@ export interface SettingsResponse {
 
 export type UpdateCompanyProfilePayload = Pick<
   CompanyProfile,
-  "name" | "email" | "phone" | "location" | "currency"
+  "name" | "email" | "phone" | "location" | "currency" | "enforceCashLimit"
 >;
 
 export interface CreateDocumentPayload {
@@ -1358,6 +1397,22 @@ export const api = {
       body: JSON.stringify(payload),
       notifySuccess: false,
     }),
+  /** Reconciles the project's books and reports anything still open, without changing it. */
+  getProjectClosureSummary: (projectId: string) =>
+    apiRequest<ProjectClosureSummary>(
+      `/projects/${encodeURIComponent(projectId)}/closure-summary`,
+    ),
+  /** Closes the project. Pass force to close despite outstanding items. */
+  closeProject: (projectId: string, force = false) =>
+    apiRequest<{ message: string; summary: ProjectClosureSummary }>(
+      `/projects/${encodeURIComponent(projectId)}/close`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+  reopenProject: (projectId: string) =>
+    apiRequest<{ message: string }>(
+      `/projects/${encodeURIComponent(projectId)}/reopen`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
   getWorkers: () => apiRequest<WorkersResponse>("/workers"),
   createWorker: (payload: CreateWorkerPayload) =>
     apiRequest<WorkerApiRecord>("/workers", {

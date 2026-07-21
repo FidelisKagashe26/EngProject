@@ -12,7 +12,11 @@ import {
   StatusBadge,
   SurfaceCard,
   TablePagination,
+  options,
 } from "../components/ui";
+import {
+  CLIENT_PAYMENT_TYPES,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -72,7 +76,6 @@ export const PaymentsPage = () => {
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Not specified");
   const [referenceNumber, setReferenceNumber] = useState("");
-  const [status, setStatus] = useState("Received");
   const [notes, setNotes] = useState("");
   const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null);
 
@@ -172,7 +175,6 @@ export const PaymentsPage = () => {
     setPaymentDate("");
     setPaymentMethod("Not specified");
     setReferenceNumber("");
-    setStatus("Received");
     setNotes("");
     setPaymentAttachmentFile(null);
   };
@@ -202,7 +204,6 @@ export const PaymentsPage = () => {
     setPaymentDate(payment.paymentDate);
     setPaymentMethod(payment.paymentMethod || "Not specified");
     setReferenceNumber(payment.referenceNumber);
-    setStatus(payment.status);
     setNotes(payment.notes);
     setPaymentAttachmentFile(null);
     setShowAddModal(true);
@@ -261,7 +262,6 @@ export const PaymentsPage = () => {
         paymentDate,
         paymentMethod: paymentMethod.trim(),
         referenceNumber: referenceNumber.trim(),
-        status,
         notes: notes.trim(),
         ...attachmentFields,
       };
@@ -555,11 +555,7 @@ export const PaymentsPage = () => {
               <label className="form-field">
                 <span>Payment Type</span>
                 <GuiSelect className="input-field" onChange={(e) => setPaymentType(e.target.value as "Advance" | "Milestone" | "Stage" | "Final" | "Other")} value={paymentType}>
-                  <option value="Advance">Advance</option>
-                  <option value="Milestone">Milestone</option>
-                  <option value="Stage">Stage</option>
-                  <option value="Final">Final</option>
-                  <option value="Other">Other</option>
+                  {options(CLIENT_PAYMENT_TYPES)}
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -583,14 +579,10 @@ export const PaymentsPage = () => {
                 <span>Reference Number</span>
                 <input className="input-field" onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Reference / transaction number" value={referenceNumber} />
               </label>
-              <label className="form-field">
-                <span>Status</span>
-                <GuiSelect className="input-field" onChange={(e) => setStatus(e.target.value)} value={status}>
-                  <option value="Received">Received</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Partial">Partial</option>
-                </GuiSelect>
-              </label>
+              {/* Status is not asked for: it is simply how much of the expected
+                  amount has arrived, so the server computes it. Picking it
+                  separately let a record say "Received" while its own figures
+                  showed a shortfall. */}
               <label className="form-field">
                 <span>Receipt / Bank Slip (Optional)</span>
                 <input

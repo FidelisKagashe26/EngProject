@@ -11,7 +11,11 @@ import {
   SurfaceCard,
   TablePagination,
   GuiSelect,
+  options,
 } from "../components/ui";
+import {
+  PAYMENT_METHODS,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -1174,10 +1178,7 @@ export const LaborPage = ({ embedded = false, search = "", renderTabBar }: Labor
                   onChange={(event) => setPaymentMethod(event.target.value)}
                   value={paymentMethod}
                 >
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Mobile Money">Mobile Money</option>
-                  <option value="Cheque">Cheque</option>
+                  {options(PAYMENT_METHODS)}
                 </GuiSelect>
               </label>
               <label className="form-field sm:col-span-2">
@@ -1229,10 +1230,7 @@ export const LaborPage = ({ embedded = false, search = "", renderTabBar }: Labor
                   onChange={(event) => setEditingPaymentMethod(event.target.value)}
                   value={editingPaymentMethod}
                 >
-                  <option value='Cash'>Cash</option>
-                  <option value='Mobile Money'>Mobile Money</option>
-                  <option value='Bank Transfer'>Bank Transfer</option>
-                  <option value='Cheque'>Cheque</option>
+                  {options(PAYMENT_METHODS)}
                 </GuiSelect>
               </label>
               <label className='form-field sm:col-span-2'>

@@ -9,7 +9,12 @@ import {
   SkeletonTable,
   SurfaceCard,
   TablePagination,
+  options,
 } from "../components/ui";
+import {
+  PETTY_CASH_RECONCILIATION,
+  PETTY_CASH_TYPES,
+} from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { useTablePagination } from "../hooks/useTablePagination";
 import {
@@ -389,8 +394,7 @@ export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: P
                   onChange={(e) => setTransactionType(e.target.value as "Cash In" | "Cash Out")}
                   value={transactionType}
                 >
-                  <option value="Cash Out">Cash Out</option>
-                  <option value="Cash In">Cash In</option>
+                  {options(PETTY_CASH_TYPES)}
                 </GuiSelect>
               </label>
               <label className="form-field">
@@ -442,8 +446,7 @@ export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: P
                   onChange={(e) => setFormStatus(e.target.value as "Pending" | "Reconciled")}
                   value={formStatus}
                 >
-                  <option value="Pending">Pending</option>
-                  <option value="Reconciled">Reconciled</option>
+                  {options(PETTY_CASH_RECONCILIATION)}
                 </GuiSelect>
               </label>
               <label className="form-field sm:col-span-2">

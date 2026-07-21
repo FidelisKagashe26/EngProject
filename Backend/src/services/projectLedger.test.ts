@@ -15,6 +15,8 @@ type FakeProject = {
   laborSpent: number;
   materialSpent: number;
   operationalSpent: number;
+  /** Company-level opt-in; off by default, matching a fresh install. */
+  enforceCashLimit: boolean;
 };
 
 const project = (overrides: Partial<FakeProject> = {}): FakeProject => ({
@@ -29,6 +31,7 @@ const project = (overrides: Partial<FakeProject> = {}): FakeProject => ({
   laborSpent: 0,
   materialSpent: 0,
   operationalSpent: 0,
+  enforceCashLimit: false,
   ...overrides,
 });
 
@@ -78,6 +81,7 @@ const fakeDb = (projects: Record<string, FakeProject>) => {
               total_spent: String(target.totalSpent),
               category_budget: String(target[BUDGET_FIELD[category]]),
               category_spent: String(target[SPENT_FIELD[category]]),
+              enforce_cash_limit: target.enforceCashLimit,
             },
           ] as T[],
           rowCount: 1,
@@ -138,8 +142,27 @@ describe("applyProjectSpend", () => {
     assert.equal(db.lockCount(), 1);
   });
 
-  it("rejects spend beyond the cash received and leaves totals untouched", async () => {
+  it("allows spending past the cash received by default, as own capital", async () => {
+    // Fronting working capital between client payments is normal in
+    // construction; blocking it would only stop the spend being recorded.
     const db = fakeDb({ P1: project({ amountReceived: 100_000 }) });
+
+    const failure = await applyProjectSpend(db.client, {
+      companyId: 1,
+      projectId: "P1",
+      category: "operational",
+      delta: 150_000,
+      context: "expense",
+    });
+
+    assert.equal(failure, null);
+    assert.equal(db.projects.P1.totalSpent, 150_000);
+  });
+
+  it("rejects spend beyond the cash received once the company opts in", async () => {
+    const db = fakeDb({
+      P1: project({ amountReceived: 100_000, enforceCashLimit: true }),
+    });
 
     const failure = await applyProjectSpend(db.client, {
       companyId: 1,
@@ -362,7 +385,7 @@ describe("moveProjectSpend", () => {
   it("reports the failure when the destination cannot take the spend", async () => {
     const db = fakeDb({
       P1: project({ totalSpent: 60_000, operationalSpent: 60_000 }),
-      P2: project({ name: "Mbeya Road", amountReceived: 10_000 }),
+      P2: project({ name: "Mbeya Road", contractValue: 10_000 }),
     });
 
     const failure = await moveProjectSpend(db.client, {

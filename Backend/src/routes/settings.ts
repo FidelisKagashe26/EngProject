@@ -13,6 +13,9 @@ const companySchema = z.object({
   phone: z.string().min(7),
   location: z.string().min(2),
   currency: z.string().min(2).default("TZS"),
+  // When on, a project cannot be charged beyond what the client has actually
+  // paid in. Off by default — see the column comment in db/init.
+  enforceCashLimit: z.boolean().optional(),
 });
 
 const expenseCategories = [
@@ -42,9 +45,10 @@ router.get(
       phone: string | null;
       location: string | null;
       currency: string;
+      enforce_cash_limit: boolean;
     }>(
       `
-      SELECT id, name, email, phone, location, currency
+      SELECT id, name, email, phone, location, currency, enforce_cash_limit
       FROM engicost.companies
       WHERE id = $1
       LIMIT 1
@@ -63,6 +67,7 @@ router.get(
         phone: company.phone ?? "",
         location: company.location ?? "",
         currency: company.currency,
+        enforceCashLimit: company.enforce_cash_limit,
       },
       expenseCategories,
       materialUnits,
@@ -85,6 +90,7 @@ router.put(
       phone: string | null;
       location: string | null;
       currency: string;
+      enforce_cash_limit: boolean;
     }>(
       `
       UPDATE engicost.companies
@@ -93,9 +99,10 @@ router.put(
         email = $3,
         phone = $4,
         location = $5,
-        currency = $6
+        currency = $6,
+        enforce_cash_limit = COALESCE($7, enforce_cash_limit)
       WHERE id = $1
-      RETURNING id, name, email, phone, location, currency
+      RETURNING id, name, email, phone, location, currency, enforce_cash_limit
       `,
       [
         companyId,
@@ -104,6 +111,7 @@ router.put(
         parsed.phone,
         parsed.location,
         parsed.currency,
+        parsed.enforceCashLimit ?? null,
       ],
     );
 
@@ -114,6 +122,7 @@ router.put(
       phone: updated.rows[0].phone ?? "",
       location: updated.rows[0].location ?? "",
       currency: updated.rows[0].currency,
+      enforceCashLimit: updated.rows[0].enforce_cash_limit,
     });
   }),
 );

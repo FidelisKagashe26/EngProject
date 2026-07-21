@@ -113,6 +113,15 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
+  // Off by default: most contractors front their own working capital between
+  // client payments, and blocking that only stops the spend being recorded, not
+  // the spend itself. Firms that genuinely operate on client money alone can
+  // switch it on.
+  await db.query(`
+    ALTER TABLE engicost.companies
+    ADD COLUMN IF NOT EXISTS enforce_cash_limit BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.users (
       id SERIAL PRIMARY KEY,

@@ -78,6 +78,38 @@ jobs:
             echo "--- local HTTP check ---"
             curl -sS -o /dev/null -w "http://127.0.0.1/ -> %{http_code}\n" --max-time 10 http://127.0.0.1/ || echo "local HTTP request failed"
 
+            # ── Network identity ────────────────────────────────────────────
+            # nginx can be listening and healthy while the outside world still
+            # cannot reach it. Only two things explain that: the domain resolves
+            # to a different machine, or a firewall in front of this one. These
+            # checks tell the two apart.
+            echo "===== IS THIS THE MACHINE THE DOMAIN POINTS AT? ====="
+            MYIP="$(curl -s --max-time 10 https://api.ipify.org 2>/dev/null || curl -s --max-time 10 https://ifconfig.me 2>/dev/null)"
+            echo "this server's public IP : ${MYIP:-could not determine}"
+            DNSIP="$(getent ahostsv4 dreggam.com 2>/dev/null | awk '{print $1}' | head -1)"
+            echo "dreggam.com resolves to : ${DNSIP:-lookup failed}"
+            if [ -n "$MYIP" ] && [ -n "$DNSIP" ]; then
+              if [ "$MYIP" = "$DNSIP" ]; then
+                echo "MATCH — the domain points here, so the block is a firewall."
+              else
+                echo "MISMATCH — dreggam.com points at another machine. Deploys land here but visitors do not."
+              fi
+            fi
+
+            echo "===== FIREWALL ====="
+            $SUDO ufw status verbose 2>/dev/null || echo "ufw not present"
+            $SUDO nft list ruleset 2>/dev/null | head -40 || echo "nftables not present"
+            $SUDO iptables -S 2>/dev/null | head -40 || echo "iptables not readable"
+
+            echo "===== NGINX SERVER BLOCKS ====="
+            $SUDO nginx -T 2>/dev/null | grep -E "^\s*(server_name|listen|ssl_certificate )" | head -30 || echo "could not read nginx config"
+
+            echo "===== CAN THIS BOX REACH ITSELF OVER THE PUBLIC PATH? ====="
+            curl -sS -o /dev/null -w "https://dreggam.com/ -> %{http_code}\n" --max-time 15 https://dreggam.com/ || echo "public-path request FAILED from the server itself"
+            if [ -n "$MYIP" ]; then
+              curl -sS -k -o /dev/null -w "https://$MYIP/ (direct) -> %{http_code}\n" --max-time 15 "https://$MYIP/" || echo "direct-IP request FAILED"
+            fi
+
       # ── 2. Deploy ───────────────────────────────────────────────────────
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3

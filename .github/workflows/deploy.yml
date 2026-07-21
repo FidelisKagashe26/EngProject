@@ -13,6 +13,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 0. Can the outside world actually reach the site? ────────────────
+      # This runs on the GitHub runner, not over SSH, so it is a genuinely
+      # independent vantage point. The server reporting itself healthy proves
+      # nothing about reachability — it can curl itself over its own public IP
+      # and never put a packet on the wire. Only a third party can tell us
+      # whether the site is down for everyone or just for one network.
+      - name: Reach the site from outside
+        continue-on-error: true
+        run: |
+          IP="$(getent ahostsv4 dreggam.com | awk '{print $1}' | head -1)"
+          echo "dreggam.com resolves to: ${IP:-lookup failed}"
+
+          for port in 80 443; do
+            if timeout 12 bash -c "cat < /dev/null > /dev/tcp/dreggam.com/$port" 2>/dev/null; then
+              echo "tcp/$port : OPEN from GitHub's network"
+            else
+              echo "tcp/$port : BLOCKED or closed from GitHub's network"
+            fi
+          done
+
+          echo "--- HTTPS ---"
+          curl -sS -o /dev/null --max-time 20 \
+            -w "https://dreggam.com/ -> %{http_code} (connect %{time_connect}s)\n" \
+            https://dreggam.com/ || echo "https://dreggam.com/ FAILED from GitHub's network"
+          curl -sS -o /dev/null --max-time 20 \
+            -w "https://www.dreggam.com/ -> %{http_code}\n" \
+            https://www.dreggam.com/ || echo "https://www.dreggam.com/ FAILED from GitHub's network"
+
+          echo "--- verdict ---"
+          echo "If the ports show OPEN here but your browser times out, the site is up"
+          echo "and the block is on your side (ISP / router / DNS cache)."
+          echo "If they show BLOCKED here too, the block is upstream of the VPS."
+
       # ── 1. Recover the box before touching it ────────────────────────────
       # Runs first and is not allowed to fail the job: if the server is unwell,
       # the build below would only make it worse, and we still want the report.

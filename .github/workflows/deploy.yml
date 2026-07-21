@@ -4,18 +4,88 @@ on:
   push:
     branches:
       - main
+  # Lets the recovery + deploy be triggered by hand from the Actions tab,
+  # which is the only way in when nobody can reach the hosting panel.
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 1. Recover the box before touching it ────────────────────────────
+      # Runs first and is not allowed to fail the job: if the server is unwell,
+      # the build below would only make it worse, and we still want the report.
+      - name: Diagnose and recover server
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            # No `set -e` here on purpose: every command below is best-effort,
+            # and one failing check must not stop the recovery that follows it.
+            SUDO=""
+            if [ "$(id -u)" -ne 0 ]; then
+              if sudo -n true 2>/dev/null; then
+                SUDO="sudo -n"
+              else
+                echo "WARNING: not root and no passwordless sudo — service fixes may be skipped."
+              fi
+            fi
+
+            echo "===== BEFORE ====="
+            df -h / 2>/dev/null
+            echo "--- memory ---"
+            free -h 2>/dev/null
+            echo "--- swap ---"
+            swapon --show 2>/dev/null || echo "no swap configured"
+            echo "--- listening ports ---"
+            (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null) | grep -E ':(80|443|5050)\b' || echo "nothing listening on 80/443/5050"
+            echo "--- was anything OOM-killed? ---"
+            (dmesg 2>/dev/null | grep -i -m 5 "out of memory") || echo "no OOM messages visible"
+
+            echo "===== FREEING DISK ====="
+            # npm's cache is the usual culprit: every deploy runs npm ci twice.
+            npm cache clean --force 2>/dev/null || true
+            $SUDO journalctl --vacuum-size=100M 2>/dev/null || true
+            $SUDO apt-get clean 2>/dev/null || true
+            pm2 flush 2>/dev/null || true
+            df -h / 2>/dev/null
+
+            echo "===== NGINX ====="
+            # Validate the config first — restarting a box with a broken config
+            # just fails again, and the reason belongs in this log.
+            $SUDO nginx -t 2>&1 || echo "nginx config test FAILED (see above)"
+            $SUDO systemctl enable nginx 2>/dev/null || true
+            $SUDO systemctl restart nginx 2>&1 || $SUDO systemctl start nginx 2>&1 || echo "could not start nginx"
+            $SUDO systemctl is-active nginx 2>/dev/null || echo "nginx is NOT active"
+
+            echo "===== BACKEND (pm2) ====="
+            pm2 status 2>/dev/null || echo "pm2 not reachable for this user"
+            # Bring it back if the process list is empty after a reboot/OOM.
+            if ! pm2 describe engicost-backend >/dev/null 2>&1; then
+              echo "engicost-backend missing from pm2 — attempting resurrect"
+              pm2 resurrect 2>/dev/null || true
+            fi
+            pm2 start engicost-backend 2>/dev/null || pm2 restart engicost-backend 2>/dev/null || true
+            pm2 save 2>/dev/null || true
+
+            echo "===== AFTER ====="
+            (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null) | grep -E ':(80|443|5050)\b' || echo "STILL nothing listening on 80/443/5050"
+            echo "--- local HTTP check ---"
+            curl -sS -o /dev/null -w "http://127.0.0.1/ -> %{http_code}\n" --max-time 10 http://127.0.0.1/ || echo "local HTTP request failed"
+
+      # ── 2. Deploy ───────────────────────────────────────────────────────
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 25m
           script: |
             set -euo pipefail
 
@@ -29,7 +99,7 @@ jobs:
 
             echo "Backend build..."
             cd Backend
-            npm ci
+            npm ci --no-audit --no-fund
             npm run build
 
             # TEMPORARY production wipe command kept for future use.
@@ -44,10 +114,41 @@ jobs:
 
             echo "Restarting backend..."
             pm2 restart engicost-backend --update-env
+            pm2 save || true
 
             echo "Frontend build..."
             cd ../Frontend
-            npm ci
-            VITE_API_BASE_URL=https://www.dreggam.com/api npm run build
+            npm ci --no-audit --no-fund
+            # Vite needs headroom; without a cap it can be OOM-killed on a small
+            # VPS, and the kernel often takes nginx down with it.
+            NODE_OPTIONS=--max-old-space-size=1024 \
+              VITE_API_BASE_URL=https://www.dreggam.com/api npm run build
 
             echo "Deployment successful"
+
+      # ── 3. Leave the site serving, whatever happened above ──────────────
+      - name: Verify and restore services
+        if: always()
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            SUDO=""
+            if [ "$(id -u)" -ne 0 ] && sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi
+
+            # A failed build must never leave the site down: the previous
+            # frontend bundle is still on disk and nginx can keep serving it.
+            $SUDO systemctl is-active nginx >/dev/null 2>&1 || $SUDO systemctl start nginx 2>&1 || true
+            pm2 describe engicost-backend >/dev/null 2>&1 || pm2 resurrect 2>/dev/null || true
+
+            echo "===== FINAL STATE ====="
+            $SUDO systemctl is-active nginx 2>/dev/null || echo "nginx NOT active"
+            pm2 status 2>/dev/null || true
+            df -h / 2>/dev/null
+            (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null) | grep -E ':(80|443|5050)\b' || echo "nothing listening on 80/443/5050"
+            curl -sS -o /dev/null -w "http://127.0.0.1/ -> %{http_code}\n" --max-time 10 http://127.0.0.1/ || echo "local HTTP request failed"
+            curl -sS -o /dev/null -w "http://127.0.0.1:5050/api/public/website-settings -> %{http_code}\n" --max-time 10 http://127.0.0.1:5050/api/public/website-settings || echo "backend request failed"

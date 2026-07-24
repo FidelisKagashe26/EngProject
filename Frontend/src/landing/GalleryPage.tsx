@@ -1,15 +1,10 @@
 import { Download, LayoutGrid, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type GalleryItemRecord } from "../services/api";
+import { resolveUploadUrl } from "../utils/uploads";
 
-const API_ORIGIN =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace("/api", "") ??
-  "http://localhost:5050";
 const WATERMARK_TEXT = "DREGGAM";
 const DEFAULT_DOWNLOAD_LOGO_SRC = "/EngLogo.png";
-
-const resolveImageSource = (imageUrl: string): string =>
-  imageUrl.startsWith("/uploads") ? `${API_ORIGIN}${imageUrl}` : imageUrl;
 
 const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -67,7 +62,7 @@ export const GalleryPage = () => {
     setDownloadError("");
 
     try {
-      const imageSrc = resolveImageSource(item.imageUrl);
+      const imageSrc = resolveUploadUrl(item.imageUrl);
       const logoSrc = DEFAULT_DOWNLOAD_LOGO_SRC;
       const [baseImage, overlayLogo] = await Promise.all([loadImage(imageSrc), loadImage(logoSrc)]);
 
@@ -292,7 +287,7 @@ const GalleryCard = ({
   onDownload: (item: GalleryItemRecord) => Promise<void>;
   downloading: boolean;
 }) => {
-  const imgSrc = resolveImageSource(item.imageUrl);
+  const imgSrc = resolveUploadUrl(item.imageUrl);
 
   return (
     <div className="group relative overflow-hidden rounded-2xl">

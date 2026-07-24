@@ -4,6 +4,7 @@ import { useAuth } from "../auth";
 import { useCompanySettings } from "../company/CompanySettingsContext";
 import { AppToast, GuiSelect, SectionTitle, SurfaceCard } from "../components/ui";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
+import { resolveUploadUrl } from "../utils/uploads";
 import { api, ApiError, type CreateGalleryItemPayload, type GalleryItemRecord, type QuoteRequestApiRecord, type SmtpStatusResponse, type WebsiteSettings } from "../services/api";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,11 +77,7 @@ const GalleryImageUploader = ({
       {/* Preview */}
       {value && (
         <div className="relative h-32 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
-          <img alt="preview" className="h-full w-full object-cover" src={
-            value.startsWith("/uploads")
-              ? `${import.meta.env.VITE_API_BASE_URL?.replace("/api", "") ?? "http://localhost:5050"}${value}`
-              : value
-          } />
+          <img alt="preview" className="h-full w-full object-cover" src={resolveUploadUrl(value)} />
           <button
             className="absolute right-2 top-2 rounded-lg bg-red-500 p-1 text-white hover:bg-red-600"
             onClick={() => onChange("")}
@@ -752,7 +749,7 @@ const WebsiteManagementSection = ({
                       <img
                         alt={item.title}
                         className="h-full w-full object-cover"
-                        src={item.imageUrl}
+                        src={resolveUploadUrl(item.imageUrl)}
                       />
                     </div>
                     {/* Info */}

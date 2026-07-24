@@ -6,6 +6,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type GalleryItemRecord } from "../services/api";
+import { resolveUploadUrl } from "../utils/uploads";
 import { SERVICES, STATS } from "./data";
 import { Icon } from "./icons";
 
@@ -14,13 +15,6 @@ const SectionBadge = ({ children }: { children: string }) => (
     {children}
   </span>
 );
-
-const API_ORIGIN =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace("/api", "") ??
-  "http://localhost:5050";
-
-const resolveImgSrc = (url: string) =>
-  url.startsWith("/uploads") ? `${API_ORIGIN}${url}` : url;
 
 export const HomePage = () => {
   const [featuredItems, setFeaturedItems] = useState<GalleryItemRecord[]>([]);
@@ -178,7 +172,7 @@ export const HomePage = () => {
                     alt={item.title}
                     className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
                     loading="lazy"
-                    src={resolveImgSrc(item.imageUrl)}
+                    src={resolveUploadUrl(item.imageUrl)}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#001534]/90 via-[#001534]/20 to-transparent" />
                   <div className="absolute bottom-0 left-0 p-5">

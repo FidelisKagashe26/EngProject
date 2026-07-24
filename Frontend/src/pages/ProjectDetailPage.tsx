@@ -29,6 +29,7 @@ import {
   type ProjectClosureSummary,
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
+import { resolveUploadUrl } from "../utils/uploads";
 
 // ─── Quick Link tile ──────────────────────────────────────────────────────────
 
@@ -304,7 +305,7 @@ const InlineProjectDocuments = ({ project, uploadedByName }: InlineProjectDocume
                       {documentRow.fileReference ? (
                         <a
                           className="text-sm font-semibold text-[#0b2a53] hover:underline"
-                          href={documentRow.fileReference}
+                          href={resolveUploadUrl(documentRow.fileReference)}
                           rel="noreferrer"
                           target="_blank"
                         >

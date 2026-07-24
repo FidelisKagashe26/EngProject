@@ -26,6 +26,7 @@ import {
   type ProjectApiRecord,
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
+import { resolveUploadUrl } from "../utils/uploads";
 
 const paymentMethodOptions = [
   "Not specified",
@@ -443,7 +444,7 @@ export const PaymentsPage = () => {
                         {payment.attachmentUrl ? (
                           <a
                             className="text-sm font-semibold text-[#0b2a53] hover:underline"
-                            href={payment.attachmentUrl}
+                            href={resolveUploadUrl(payment.attachmentUrl)}
                             rel="noreferrer"
                             target="_blank"
                           >
@@ -525,7 +526,7 @@ export const PaymentsPage = () => {
           {
             label: "Receipt / Bank Slip",
             value: viewPayment.attachmentUrl ? (
-              <a className="font-semibold text-[#0b2a53] hover:underline" href={viewPayment.attachmentUrl} rel="noreferrer" target="_blank">
+              <a className="font-semibold text-[#0b2a53] hover:underline" href={resolveUploadUrl(viewPayment.attachmentUrl)} rel="noreferrer" target="_blank">
                 {viewPayment.attachmentName || "View attachment"}
               </a>
             ) : "No receipt uploaded",

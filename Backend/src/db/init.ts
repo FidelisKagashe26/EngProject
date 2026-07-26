@@ -394,7 +394,8 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.material_purchases
     ADD COLUMN IF NOT EXISTS supply_source VARCHAR(40) NOT NULL DEFAULT 'Company Purchased',
-    ADD COLUMN IF NOT EXISTS delivered_quantity NUMERIC(16, 2) NOT NULL DEFAULT 0
+    ADD COLUMN IF NOT EXISTS delivered_quantity NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
   `);
 
   await db.query(`

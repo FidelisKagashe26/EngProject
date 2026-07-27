@@ -43,6 +43,23 @@ export const MATERIAL_SUPPLY_SOURCES = [
   "Client Supplied",
 ] as const;
 
+export const MATERIAL_UNITS = [
+  "Bags",
+  "Pieces",
+  "Lengths",
+  "Meters",
+  "Kilograms",
+  "Liters",
+  "Tonnes",
+  "Cubic Meters",
+  "Square Meters",
+  "Rolls",
+  "Trips",
+  "Gallons",
+  "Boxes",
+  "Dozens",
+] as const;
+
 export const MATERIAL_DELIVERY_STATUSES = [
   "Pending Delivery",
   "Partially Delivered",

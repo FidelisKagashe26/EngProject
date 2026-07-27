@@ -287,7 +287,6 @@ export interface MaterialRequirementApiRecord {
   clientSuppliedQuantity: number;
   remainingQuantity: number;
   unit: string;
-  estimatedUnitCost: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
   lastRequestDate: string | null;
@@ -593,7 +592,6 @@ export interface CreateMaterialRequirementPayload {
   materialName: string;
   requiredQuantity: number;
   unit: string;
-  estimatedUnitCost: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
   // supplyStatus is absent on purpose: the server recomputes it from the
@@ -1685,4 +1683,3 @@ export const api = {
       successMessage: "Document uploaded successfully.",
     }),
 };
-

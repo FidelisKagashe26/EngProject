@@ -40,10 +40,12 @@ type ExpensesPageProps = {
   embedded?: boolean;
   search?: string;
   /** Renders the shared operations tab bar with this page's controls on the search row. */
-  renderTabBar?: (actions?: ReactNode) => ReactNode;
+  renderSearchRow?: (actions?: ReactNode) => ReactNode;
+  /** Renders the top tab strip, allowing this page to inject elements to the right side. */
+  renderTabStrip?: (actions?: ReactNode) => ReactNode;
 };
 
-export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: ExpensesPageProps) => {
+export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: ExpensesPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -310,48 +312,35 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
         />
       ) : null}
 
-      {renderTabBar?.(
-        <>
-          <div className="inline-flex h-11 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeExpenseSection === "categories"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveExpenseSection("categories")}
-              type="button"
-            >
-              Category List
-            </button>
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeExpenseSection === "expenses"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveExpenseSection("expenses")}
-              type="button"
-            >
-              Expenses List
-            </button>
-          </div>
-
-          {activeExpenseSection === "expenses" && (
-            <button
-              className="btn-primary h-11 justify-center whitespace-nowrap"
-              onClick={openAddModal}
-              type="button"
-            >
-              + Add Expense
-            </button>
-          )}
-        </>,
+      {renderTabStrip?.(
+        <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "categories"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("categories")}
+            type="button"
+          >
+            Category List
+          </button>
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "expenses"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("expenses")}
+            type="button"
+          >
+            Expenses List
+          </button>
+        </div>
       )}
 
-      {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard className="[&_h3]:text-xs" title="Expense Records">
           <p className="text-xl font-bold text-slate-900">{expenseSummary.totalRecords}</p>
@@ -369,6 +358,18 @@ export const ExpensesPage = ({ embedded = false, search = "", renderTabBar }: Ex
           <p className="text-xl font-bold text-slate-900">{expenseSummary.projects.size}</p>
         </SurfaceCard>
       </div>
+
+      {renderSearchRow?.(
+        activeExpenseSection === "expenses" ? (
+          <button
+            className="btn-primary h-11 justify-center whitespace-nowrap"
+            onClick={openAddModal}
+            type="button"
+          >
+            + Add Expense
+          </button>
+        ) : null
+      )}
 
       {activeExpenseSection === "categories" ? (
         <section className="space-y-4">

@@ -33,10 +33,12 @@ type EquipmentPageProps = {
   embedded?: boolean;
   search?: string;
   /** Renders the shared operations tab bar with this page's actions on the search row. */
-  renderTabBar?: (actions?: ReactNode) => ReactNode;
+  renderSearchRow?: (actions?: ReactNode) => ReactNode;
+  /** Renders the top tab strip, allowing this page to inject elements to the right side. */
+  renderTabStrip?: (actions?: ReactNode) => ReactNode;
 };
 
-export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: EquipmentPageProps) => {
+export const EquipmentPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: EquipmentPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -291,34 +293,35 @@ export const EquipmentPage = ({ embedded = false, search = "", renderTabBar }: E
         />
       ) : null}
 
-      {renderTabBar?.(
+      {renderTabStrip?.()}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <SurfaceCard title="Total Records">
+          <p className="text-xl font-bold text-slate-900">{summary.totalRecords}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Total Rental Cost">
+          <p className="text-xl font-bold text-slate-900">{formatTzs(summary.totalRentalCost)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Maintenance Cost">
+          <p className="text-xl font-bold text-amber-700">{formatTzs(summary.totalMaintenanceCost)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="Total Equipment Cost">
+          <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(summary.totalCost)}</p>
+        </SurfaceCard>
+        <SurfaceCard title="In Use">
+          <p className="text-xl font-bold text-emerald-700">{summary.inUseCount}</p>
+        </SurfaceCard>
+      </div>
+
+      {renderSearchRow?.(
         <button
           className="btn-primary h-11 justify-center whitespace-nowrap"
           onClick={openAddModal}
           type="button"
         >
           + Add Equipment
-        </button>,
+        </button>
       )}
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <SurfaceCard title="Total Records">
-          <p className="text-2xl font-bold text-slate-900">{summary.totalRecords}</p>
-        </SurfaceCard>
-        <SurfaceCard title="Total Rental Cost">
-          <p className="text-2xl font-bold text-slate-900">{formatTzs(summary.totalRentalCost)}</p>
-        </SurfaceCard>
-        <SurfaceCard title="Maintenance Cost">
-          <p className="text-2xl font-bold text-amber-700">{formatTzs(summary.totalMaintenanceCost)}</p>
-        </SurfaceCard>
-        <SurfaceCard title="Total Equipment Cost">
-          <p className="text-2xl font-bold text-[#0b2a53]">{formatTzs(summary.totalCost)}</p>
-        </SurfaceCard>
-        <SurfaceCard title="In Use">
-          <p className="text-2xl font-bold text-emerald-700">{summary.inUseCount}</p>
-        </SurfaceCard>
-      </div>
 
       {/* Equipment Table */}
       <SurfaceCard title="Equipment Table">

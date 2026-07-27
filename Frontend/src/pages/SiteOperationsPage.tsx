@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
 import { SectionTitle } from "../components/ui";
@@ -28,149 +28,101 @@ const operationTabs: OperationTabConfig[] = [
 const isOperationsTab = (value: string | null): value is OperationsTab =>
   operationTabs.some((tab) => tab.id === value);
 
-// --- Tab Bar ------------------------------------------------
-// Layout: primary operation links first, search controls below.
+// ─── Underline Tab Strip ────────────────────────────────────────────────────────
 
-export type TabBarProps = {
-  activeTab: OperationsTab;
-  onSwitch: (tab: OperationsTab) => void;
-  search: string;
-  onSearchChange: (value: string) => void;
-  tabs?: readonly OperationTabConfig[];
-  /** Page-specific filters/buttons rendered alongside the search input. */
-  actions?: ReactNode;
-};
-
-export const OperationsTabBar = ({
+const OperationsTabStrip = ({
+  tabs,
   activeTab,
   onSwitch,
+  actions,
+}: {
+  tabs: readonly OperationTabConfig[];
+  activeTab: OperationsTab;
+  onSwitch: (tab: OperationsTab) => void;
+  actions?: ReactNode;
+}) => (
+  <div className="flex flex-col justify-between gap-3 border-b border-slate-200 sm:flex-row sm:items-end dark:border-white/10">
+    <nav
+      className="-mb-px flex gap-0 overflow-x-auto"
+      style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+    >
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = activeTab === tab.id;
+        return (
+          <button
+            aria-current={isActive ? "page" : undefined}
+            className={[
+              "flex items-center gap-2 px-5 py-3",
+              "text-sm font-semibold whitespace-nowrap",
+              "border-b-2 transition-all",
+              isActive
+                ? "border-[#3b82f6] text-[#3b82f6]"
+                : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500",
+            ].join(" ")}
+            key={tab.id}
+            onClick={() => onSwitch(tab.id)}
+            type="button"
+          >
+            <Icon className="h-4 w-4" />
+            {tab.label}
+          </button>
+        );
+      })}
+    </nav>
+    {actions && (
+      <div className="pb-2">
+        {actions}
+      </div>
+    )}
+  </div>
+);
+
+// ─── Search Row (search input + page-specific actions) ──────────────────────────
+
+export const OperationsSearchRow = ({
   search,
   onSearchChange,
-  tabs = operationTabs,
+  activeLabel,
   actions,
-}: TabBarProps) => {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const scroll = (direction: "left" | "right") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollBy({
-      left: direction === "left" ? -160 : 160,
-      behavior: "smooth",
-    });
-  };
-
-  const activeLabel =
-    tabs.find((tab) => tab.id === activeTab)?.label ?? "Operations";
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div
+}: {
+  search: string;
+  onSearchChange: (value: string) => void;
+  activeLabel: string;
+  actions?: ReactNode;
+}) => (
+  <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <label className="relative block w-full lg:max-w-md">
+      <Search
         className={[
-          "flex flex-col gap-3 border-b border-slate-100 pb-3",
-          "lg:flex-row lg:items-center lg:justify-between",
+          "pointer-events-none absolute left-3 top-1/2 h-4 w-4",
+          "-translate-y-1/2 text-slate-400",
         ].join(" ")}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <button
-            aria-label="Scroll tabs left"
-            className={[
-              "flex h-10 w-10 flex-shrink-0 items-center",
-              "justify-center rounded-lg text-slate-400 transition",
-              "hover:bg-slate-100 hover:text-slate-700",
-            ].join(" ")}
-            onClick={() => scroll("left")}
-            type="button"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
+      />
+      <input
+        className={[
+          "h-11 w-full rounded-lg border border-slate-200",
+          "bg-slate-50 pl-10 pr-4 text-sm text-slate-700",
+          "placeholder-slate-400 outline-none transition",
+          "focus:border-[#0b2a53] focus:bg-white",
+          "focus:ring-2 focus:ring-[#0b2a53]/10",
+        ].join(" ")}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={`Search ${activeLabel}...`}
+        type="search"
+        value={search}
+      />
+    </label>
 
-          <div
-            className={[
-              "flex min-w-0 flex-1 gap-2 overflow-x-auto",
-              "scroll-smooth",
-            ].join(" ")}
-            ref={scrollRef}
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-          >
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-
-              return (
-                <button
-                  aria-current={isActive ? "page" : undefined}
-                  className={[
-                    "flex h-10 flex-shrink-0 items-center gap-2",
-                    "rounded-lg px-4 text-sm font-semibold",
-                    "transition-all",
-                    isActive
-                      ? "bg-[#0b2a53] text-white shadow-sm ring-1"
-                      : "text-slate-600 hover:bg-slate-100",
-                    isActive
-                      ? "ring-[#0b2a53]/20"
-                      : "hover:text-slate-900",
-                  ].join(" ")}
-                  key={tab.id}
-                  onClick={() => onSwitch(tab.id)}
-                  type="button"
-                >
-                  <Icon className="h-4 w-4" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            aria-label="Scroll tabs right"
-            className={[
-              "flex h-10 w-10 flex-shrink-0 items-center",
-              "justify-center rounded-lg text-slate-400 transition",
-              "hover:bg-slate-100 hover:text-slate-700",
-            ].join(" ")}
-            onClick={() => scroll("right")}
-            type="button"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+    {actions && (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end lg:justify-end">
+        {actions}
       </div>
+    )}
+  </div>
+);
 
-      <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <label className="relative block w-full lg:max-w-md">
-          <Search
-            className={[
-              "pointer-events-none absolute left-3 top-1/2 h-4 w-4",
-              "-translate-y-1/2 text-slate-400",
-            ].join(" ")}
-          />
-          <input
-            className={[
-              "h-11 w-full rounded-lg border border-slate-200",
-              "bg-slate-50 pl-10 pr-4 text-sm text-slate-700",
-              "placeholder-slate-400 outline-none transition",
-              "focus:border-[#0b2a53] focus:bg-white",
-              "focus:ring-2 focus:ring-[#0b2a53]/10",
-            ].join(" ")}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={`Search ${activeLabel}...`}
-            type="search"
-            value={search}
-          />
-        </label>
-
-        {actions && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end lg:justify-end">
-            {actions}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── Site Operations Page ─────────────────────────────────────────────────────
+// ─── Site Operations Page ───────────────────────────────────────────────────────
 
 export const SiteOperationsPage = () => {
   const { user } = useAuth();
@@ -207,15 +159,26 @@ export const SiteOperationsPage = () => {
     setSearch("");
   };
 
-  // Each page renders the bar itself so its own filters and buttons land on the
-  // search row rather than in a separate strip below.
-  const renderTabBar = (actions?: ReactNode) => (
-    <OperationsTabBar
+  const activeLabel =
+    allowedTabs.find((tab) => tab.id === activeTab)?.label ?? "Operations";
+
+  // Each page places the search row after its summary cards, so the parent
+  // provides a callback that renders the shared search input with the page's
+  // own filter controls and action buttons.
+  const renderSearchRow = (actions?: ReactNode) => (
+    <OperationsSearchRow
+      actions={actions}
+      activeLabel={activeLabel}
+      onSearchChange={setSearch}
+      search={search}
+    />
+  );
+
+  const renderTabStrip = (actions?: ReactNode) => (
+    <OperationsTabStrip
       actions={actions}
       activeTab={activeTab}
-      onSearchChange={setSearch}
       onSwitch={switchTab}
-      search={search}
       tabs={allowedTabs}
     />
   );
@@ -226,11 +189,11 @@ export const SiteOperationsPage = () => {
         title="Site Operations"
       />
 
-      {activeTab === "labor"      && <LaborPage     embedded renderTabBar={renderTabBar} search={search} />}
-      {activeTab === "materials"  && <MaterialsPage embedded renderTabBar={renderTabBar} search={search} />}
-      {activeTab === "expenses"   && <ExpensesPage  embedded renderTabBar={renderTabBar} search={search} />}
-      {activeTab === "equipment"  && <EquipmentPage embedded renderTabBar={renderTabBar} search={search} />}
-      {activeTab === "petty-cash" && <PettyCashPage embedded renderTabBar={renderTabBar} search={search} />}
+      {activeTab === "labor"      && <LaborPage     embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
+      {activeTab === "materials"  && <MaterialsPage embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
+      {activeTab === "expenses"   && <ExpensesPage  embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
+      {activeTab === "equipment"  && <EquipmentPage embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
+      {activeTab === "petty-cash" && <PettyCashPage embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
     </div>
   );
 };

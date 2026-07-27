@@ -27,7 +27,7 @@ const requirementSchema = z.object({
   materialName: z.string().min(2),
   requiredQuantity: z.number().nonnegative(),
   unit: z.string().min(1),
-  estimatedUnitCost: z.number().nonnegative(),
+  estimatedUnitCost: z.number().nonnegative().optional().default(0),
   supplySource: materialSupplySourceSchema.optional().default("Company Purchased"),
   requestedQuantity: z.number().nonnegative().optional().default(0),
   // supplyStatus is deliberately absent: it is recomputed from the requirement's
@@ -397,7 +397,7 @@ router.post(
     const parsed = requirementSchema.parse({
       ...req.body,
       requiredQuantity: toMoney(req.body.requiredQuantity),
-      estimatedUnitCost: toMoney(req.body.estimatedUnitCost),
+      estimatedUnitCost: req.body.estimatedUnitCost !== undefined ? toMoney(req.body.estimatedUnitCost) : undefined,
       requestedQuantity: req.body.requestedQuantity !== undefined ? toMoney(req.body.requestedQuantity) : undefined,
     });
 

@@ -30,7 +30,9 @@ type LaborPageProps = {
   embedded?: boolean;
   search?: string;
   /** Renders the shared operations tab bar with this page's filters on the search row. */
-  renderTabBar?: (actions?: ReactNode) => ReactNode;
+  renderSearchRow?: (actions?: ReactNode) => ReactNode;
+  /** Renders the top tab strip, allowing this page to inject elements to the right side. */
+  renderTabStrip?: (actions?: ReactNode) => ReactNode;
 };
 
 const RECURRING_PAYMENT_TYPES = ["Daily", "Weekly", "Monthly"] as const;
@@ -116,7 +118,12 @@ const cyclesBetween = (
   return 0;
 };
 
-export const LaborPage = ({ embedded = false, search = "", renderTabBar }: LaborPageProps) => {
+export const LaborPage = ({
+  embedded = false,
+  search = "",
+  renderSearchRow,
+  renderTabStrip,
+}: LaborPageProps) => {
   const { markSaved } = useUnsavedChanges();
   const [searchParams] = useSearchParams();
   const projectFromQuery = searchParams.get("projectId") ?? "";
@@ -732,41 +739,32 @@ export const LaborPage = ({ embedded = false, search = "", renderTabBar }: Labor
         />
       ) : null}
 
-      {renderTabBar?.(
-        <>
-          <div className="w-full sm:w-52">
-            <GuiSelect
-              className="h-11"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
-              <option value="All">All Sites</option>
-              {projects.map((project) => (
-                <option key={`wk-list-${project.id}`} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </GuiSelect>
-          </div>
-          <button
-            className="btn-primary h-11 justify-center whitespace-nowrap"
-            onClick={openAddWorkerModal}
-            type="button"
+      {renderTabStrip?.(
+        <div className="w-full sm:w-52">
+          <GuiSelect
+            className="h-10"
+            onChange={(event) => setListProjectFilter(event.target.value)}
+            value={listProjectFilter}
           >
-            + Add Worker
-          </button>
-        </>,
+            <option value="All">All Sites</option>
+            {projects.map((project) => (
+              <option key={`wk-list-${project.id}`} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </GuiSelect>
+        </div>
       )}
 
       {/* Stats cards - Dynamic based on filter */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <SurfaceCard title="Total labor paid">
-          <p className="text-2xl font-bold text-slate-900">
+          <p className="text-xl font-bold text-slate-900">
             {formatTzs(filteredTotalLaborPaid)}
           </p>
         </SurfaceCard>
         <SurfaceCard title="Outstanding labor payments">
-          <p className="text-2xl font-bold text-amber-700">
+          <p className="text-xl font-bold text-amber-700">
             {formatTzs(filteredOutstandingPayments)}
           </p>
         </SurfaceCard>
@@ -781,6 +779,17 @@ export const LaborPage = ({ embedded = false, search = "", renderTabBar }: Labor
           </ul>
         </SurfaceCard>
       </div>
+
+      {renderSearchRow?.(
+        <button
+          className="btn-primary h-11 justify-center whitespace-nowrap"
+          onClick={openAddWorkerModal}
+          type="button"
+        >
+          + Add Worker
+        </button>
+      )}
+
 
       {/* Single workers table — payment history lives in each worker's View modal */}
       <SurfaceCard title="Workers List">

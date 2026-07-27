@@ -31,10 +31,12 @@ type PettyCashPageProps = {
   embedded?: boolean;
   search?: string;
   /** Renders the shared operations tab bar with this page's actions on the search row. */
-  renderTabBar?: (actions?: ReactNode) => ReactNode;
+  renderSearchRow?: (actions?: ReactNode) => ReactNode;
+  /** Renders the top tab strip, allowing this page to inject elements to the right side. */
+  renderTabStrip?: (actions?: ReactNode) => ReactNode;
 };
 
-export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: PettyCashPageProps) => {
+export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: PettyCashPageProps) => {
   const { markSaved } = useUnsavedChanges();
 
   const [loading, setLoading] = useState(true);
@@ -226,17 +228,8 @@ export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: P
         />
       ) : null}
 
-      {renderTabBar?.(
-        <button
-          className="btn-primary h-11 justify-center whitespace-nowrap"
-          onClick={openAddModal}
-          type="button"
-        >
-          + Add Transaction
-        </button>,
-      )}
+      {renderTabStrip?.()}
 
-      {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Opening Balance">
           <p className="text-xl font-bold text-slate-900">{formatTzs(OPENING_BALANCE)}</p>
@@ -258,6 +251,16 @@ export const PettyCashPage = ({ embedded = false, search = "", renderTabBar }: P
           </p>
         </SurfaceCard>
       </div>
+
+      {renderSearchRow?.(
+        <button
+          className="btn-primary h-11 justify-center whitespace-nowrap"
+          onClick={openAddModal}
+          type="button"
+        >
+          + Add Transaction
+        </button>
+      )}
 
       {/* Petty Cash Table */}
       <SurfaceCard title="Petty Cash Ledger">

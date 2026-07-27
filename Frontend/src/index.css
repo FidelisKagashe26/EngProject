@@ -312,6 +312,24 @@ a {
     min-width: 100%;
     width: max-content;
     max-width: min(28rem, calc(100vw - 2rem));
+
+    /* Custom thin scrollbar for the menu */
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  .gui-select-menu::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .gui-select-menu::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .gui-select-menu::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
   }
 
   .gui-select-option {
@@ -460,6 +478,11 @@ a {
 
   .dark .gui-select-menu {
     @apply border-slate-700 bg-slate-900;
+    scrollbar-color: #475569 transparent;
+  }
+
+  .dark .gui-select-menu::-webkit-scrollbar-thumb {
+    background-color: #475569;
   }
 
   .dark .gui-select-option {

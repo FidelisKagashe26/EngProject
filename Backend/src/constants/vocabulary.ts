@@ -45,6 +45,23 @@ export const isSelectableProjectStatus = (value: string): value is SelectablePro
 /** Who pays for the material: us, or the client handing it over on site. */
 export const MATERIAL_SUPPLY_SOURCES = ["Company Purchased", "Client Supplied"] as const;
 
+export const MATERIAL_UNITS = [
+  "Bags",
+  "Pieces",
+  "Lengths",
+  "Meters",
+  "Kilograms",
+  "Liters",
+  "Tonnes",
+  "Cubic Meters",
+  "Square Meters",
+  "Rolls",
+  "Trips",
+  "Gallons",
+  "Boxes",
+  "Dozens",
+] as const;
+
 export type MaterialSupplySource = (typeof MATERIAL_SUPPLY_SOURCES)[number];
 
 /** How much of a purchase has physically arrived on site. */

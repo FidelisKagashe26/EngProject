@@ -55,6 +55,7 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [expenseRows, setExpenseRows] = useState<ExpenseApiRecord[]>([]);
+  const [listProjectFilter, setListProjectFilter] = useState(projectFromQuery || "All");
   const [charts, setCharts] = useState<ExpensesResponse["charts"]>({
     byCategory: [],
     byProject: [],
@@ -136,17 +137,23 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
   }, [category, expenseCategories]);
 
   const filteredExpenseRows = useMemo(() => {
-    if (search.trim().length === 0) return expenseRows;
-    const q = search.toLowerCase();
-    return expenseRows.filter(
-      (r) =>
-        r.projectName.toLowerCase().includes(q) ||
-        r.category.toLowerCase().includes(q) ||
-        r.description.toLowerCase().includes(q) ||
-        r.paidBy.toLowerCase().includes(q) ||
-        r.status.toLowerCase().includes(q),
-    );
-  }, [expenseRows, search]);
+    let result = expenseRows;
+    if (listProjectFilter !== "All") {
+      result = result.filter(r => r.projectId === listProjectFilter);
+    }
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.projectName.toLowerCase().includes(q) ||
+          r.category.toLowerCase().includes(q) ||
+          r.description.toLowerCase().includes(q) ||
+          r.paidBy.toLowerCase().includes(q) ||
+          r.status.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [expenseRows, search, listProjectFilter]);
 
   const expenseSummary = useMemo(() => {
     return filteredExpenseRows.reduce(
@@ -313,31 +320,45 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
       ) : null}
 
       {renderTabStrip?.(
-        <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
-          <button
-            className={[
-              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-              activeExpenseSection === "categories"
-                ? "bg-[#0b2a53] text-white"
-                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-            ].join(" ")}
-            onClick={() => setActiveExpenseSection("categories")}
-            type="button"
-          >
-            Category List
-          </button>
-          <button
-            className={[
-              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-              activeExpenseSection === "expenses"
-                ? "bg-[#0b2a53] text-white"
-                : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-            ].join(" ")}
-            onClick={() => setActiveExpenseSection("expenses")}
-            type="button"
-          >
-            Expenses List
-          </button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full justify-end">
+          <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
+            <button
+              className={[
+                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+                activeExpenseSection === "categories"
+                  ? "bg-[#0b2a53] text-white"
+                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+              ].join(" ")}
+              onClick={() => setActiveExpenseSection("categories")}
+              type="button"
+            >
+              Category List
+            </button>
+            <button
+              className={[
+                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+                activeExpenseSection === "expenses"
+                  ? "bg-[#0b2a53] text-white"
+                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
+              ].join(" ")}
+              onClick={() => setActiveExpenseSection("expenses")}
+              type="button"
+            >
+              Expenses List
+            </button>
+          </div>
+          <div className="w-full sm:w-52">
+            <GuiSelect
+              className="h-10"
+              onChange={(event) => setListProjectFilter(event.target.value)}
+              value={listProjectFilter}
+            >
+              <option value="All">All Projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </GuiSelect>
+          </div>
         </div>
       )}
 

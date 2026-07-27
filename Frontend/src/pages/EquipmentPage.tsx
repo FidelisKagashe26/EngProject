@@ -47,6 +47,7 @@ export const EquipmentPage = ({ embedded = false, search = "", renderSearchRow, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
+  const [listProjectFilter, setListProjectFilter] = useState(projectFromQuery || "All");
   const [summary, setSummary] = useState<EquipmentResponse["summary"]>({
     totalRecords: 0,
     totalRentalCost: 0,
@@ -122,20 +123,26 @@ export const EquipmentPage = ({ embedded = false, search = "", renderSearchRow, 
   };
 
   const filteredEquipmentRows = useMemo(() => {
-    if (search.trim().length === 0) return equipmentRows;
-    const q = search.toLowerCase();
-    return equipmentRows.filter(
-      (r) =>
-        r.equipmentName.toLowerCase().includes(q) ||
-        r.equipmentType.toLowerCase().includes(q) ||
-        r.projectName.toLowerCase().includes(q) ||
-        r.ownerName.toLowerCase().includes(q) ||
-        r.assetTag.toLowerCase().includes(q) ||
-        r.assignedTo.toLowerCase().includes(q) ||
-        r.conditionStatus.toLowerCase().includes(q) ||
-        r.status.toLowerCase().includes(q),
-    );
-  }, [equipmentRows, search]);
+    let result = equipmentRows;
+    if (listProjectFilter !== "All") {
+      result = result.filter(r => r.projectId === listProjectFilter);
+    }
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.equipmentName.toLowerCase().includes(q) ||
+          r.equipmentType.toLowerCase().includes(q) ||
+          r.projectName.toLowerCase().includes(q) ||
+          r.ownerName.toLowerCase().includes(q) ||
+          r.assetTag.toLowerCase().includes(q) ||
+          r.assignedTo.toLowerCase().includes(q) ||
+          r.conditionStatus.toLowerCase().includes(q) ||
+          r.status.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [equipmentRows, search, listProjectFilter]);
 
   const equipmentPagination = useTablePagination(filteredEquipmentRows);
 
@@ -293,7 +300,22 @@ export const EquipmentPage = ({ embedded = false, search = "", renderSearchRow, 
         />
       ) : null}
 
-      {renderTabStrip?.()}
+      {renderTabStrip?.(
+        <div className="flex w-full justify-end">
+          <div className="w-full sm:w-52">
+            <GuiSelect
+              className="h-10"
+              onChange={(event) => setListProjectFilter(event.target.value)}
+              value={listProjectFilter}
+            >
+              <option value="All">All Projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </GuiSelect>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Total Records">

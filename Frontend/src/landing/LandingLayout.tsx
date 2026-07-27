@@ -43,7 +43,7 @@ export const LandingLayout = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#faf9fd] font-[Inter,sans-serif] text-[#1a1b1f]">
+    <div className="min-h-screen bg-[#faf9fd] font-sans text-[#1a1b1f]">
       <GlobalLoader />
 
       {/* ── Navbar ── */}

@@ -50,6 +50,7 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
     pendingCount: 0,
   });
   const [rows, setRows] = useState<PettyCashApiRecord[]>([]);
+  const [listProjectFilter, setListProjectFilter] = useState("All");
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -100,17 +101,23 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
   };
 
   const filteredRows = useMemo(() => {
-    if (search.trim().length === 0) return rows;
-    const q = search.toLowerCase();
-    return rows.filter(
-      (r) =>
-        r.description.toLowerCase().includes(q) ||
-        r.projectName.toLowerCase().includes(q) ||
-        r.recordedBy.toLowerCase().includes(q) ||
-        r.transactionType.toLowerCase().includes(q) ||
-        r.status.toLowerCase().includes(q),
-    );
-  }, [rows, search]);
+    let result = rows;
+    if (listProjectFilter !== "All") {
+      result = result.filter(r => r.projectId === listProjectFilter);
+    }
+    if (search.trim().length > 0) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.description.toLowerCase().includes(q) ||
+          r.projectName.toLowerCase().includes(q) ||
+          r.recordedBy.toLowerCase().includes(q) ||
+          r.transactionType.toLowerCase().includes(q) ||
+          r.status.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [rows, search, listProjectFilter]);
 
   const pagination = useTablePagination(filteredRows);
 
@@ -228,7 +235,22 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
         />
       ) : null}
 
-      {renderTabStrip?.()}
+      {renderTabStrip?.(
+        <div className="flex w-full justify-end">
+          <div className="w-full sm:w-52">
+            <GuiSelect
+              className="h-10"
+              onChange={(event) => setListProjectFilter(event.target.value)}
+              value={listProjectFilter}
+            >
+              <option value="All">All Projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </GuiSelect>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Opening Balance">

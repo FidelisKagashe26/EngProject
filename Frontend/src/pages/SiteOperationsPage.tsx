@@ -1,5 +1,13 @@
-import { DollarSign, HardHat, Package, Receipt, Search, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { ChevronDown, DollarSign, HardHat, MoreHorizontal, Package, Receipt, Search, Wrench } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
 import { SectionTitle } from "../components/ui";
@@ -29,6 +37,22 @@ const isOperationsTab = (value: string | null): value is OperationsTab =>
   operationTabs.some((tab) => tab.id === value);
 
 // ─── Underline Tab Strip ────────────────────────────────────────────────────────
+// The nav tabs and each page's own controls (filters, toggles) share one row.
+// Rather than let the tabs overflow or scroll off-screen when a page adds wide
+// controls, the tabs that don't fit collapse into a "More" dropdown. How many
+// fit is measured from the actual available width, so it adapts to the screen
+// size and to whatever controls the page contributes — the page controls
+// themselves always stay put.
+
+const tabStripClass = (isActive: boolean): string =>
+  [
+    "flex items-center gap-2 px-5 py-3",
+    "text-sm font-semibold whitespace-nowrap",
+    "border-b-2 transition-all",
+    isActive
+      ? "border-[#3b82f6] text-[#3b82f6]"
+      : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500",
+  ].join(" ");
 
 const OperationsTabStrip = ({
   tabs,
@@ -40,43 +64,183 @@ const OperationsTabStrip = ({
   activeTab: OperationsTab;
   onSwitch: (tab: OperationsTab) => void;
   actions?: ReactNode;
-}) => (
-  <div className="flex flex-col justify-between gap-3 border-b border-slate-200 sm:flex-row sm:items-end dark:border-white/10">
-    <nav
-      className="-mb-px flex gap-0 overflow-x-auto"
-      style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-    >
-      {tabs.map((tab) => {
-        const Icon = tab.icon;
-        const isActive = activeTab === tab.id;
-        return (
-          <button
-            aria-current={isActive ? "page" : undefined}
-            className={[
-              "flex items-center gap-2 px-5 py-3",
-              "text-sm font-semibold whitespace-nowrap",
-              "border-b-2 transition-all",
-              isActive
-                ? "border-[#3b82f6] text-[#3b82f6]"
-                : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500",
-            ].join(" ")}
-            key={tab.id}
-            onClick={() => onSwitch(tab.id)}
-            type="button"
-          >
-            <Icon className="h-4 w-4" />
-            {tab.label}
-          </button>
-        );
-      })}
-    </nav>
-    {actions && (
-      <div className="pb-2">
-        {actions}
+}) => {
+  const navRef = useRef<HTMLDivElement | null>(null);
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const moreWrapRef = useRef<HTMLDivElement | null>(null);
+  const [visibleCount, setVisibleCount] = useState(tabs.length);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const measure = measureRef.current;
+    if (!nav || !measure) return;
+
+    const tabEls = Array.from(
+      measure.querySelectorAll('[data-role="strip-tab"]'),
+    ) as HTMLElement[];
+    const moreEl = measure.querySelector('[data-role="strip-more"]') as HTMLElement | null;
+    const widths = tabEls.map((el) => el.offsetWidth);
+    const moreWidth = moreEl ? moreEl.offsetWidth : 84;
+
+    const recompute = () => {
+      const available = nav.clientWidth;
+      if (available === 0) return;
+
+      // Everything fits — no "More" needed, so no width reserved for it.
+      const total = widths.reduce((sum, width) => sum + width, 0);
+      if (total <= available) {
+        setVisibleCount(tabs.length);
+        return;
+      }
+
+      // Otherwise fit as many as possible while leaving room for "More".
+      let used = 0;
+      let count = 0;
+      for (const width of widths) {
+        if (used + width + moreWidth <= available) {
+          used += width;
+          count += 1;
+        } else {
+          break;
+        }
+      }
+      setVisibleCount(Math.max(count, 1));
+    };
+
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(nav);
+    // Tab widths shift once the web font swaps in; re-measure when it is ready.
+    document.fonts?.ready?.then(recompute).catch(() => undefined);
+    return () => observer.disconnect();
+  }, [tabs]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (moreWrapRef.current && !moreWrapRef.current.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [moreOpen]);
+
+  const safeVisible = Math.min(visibleCount, tabs.length);
+  const visibleTabs = tabs.slice(0, safeVisible);
+  const overflowTabs = tabs.slice(safeVisible);
+  const activeInOverflow = overflowTabs.some((tab) => tab.id === activeTab);
+
+  return (
+    <div className="flex flex-col justify-between gap-3 border-b border-slate-200 sm:flex-row sm:items-end dark:border-white/10">
+      <div className="relative -mb-px min-w-0 flex-1" ref={navRef}>
+        <nav className="flex items-end">
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                aria-current={isActive ? "page" : undefined}
+                className={tabStripClass(isActive)}
+                key={tab.id}
+                onClick={() => onSwitch(tab.id)}
+                type="button"
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+
+          {overflowTabs.length > 0 && (
+            <div className="relative" ref={moreWrapRef}>
+              <button
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                className={tabStripClass(activeInOverflow)}
+                onClick={() => setMoreOpen((current) => !current)}
+                type="button"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+                More
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition ${moreOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {moreOpen && (
+                <div
+                  className="absolute right-0 top-full z-[80] mt-1 min-w-[13rem] rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-[#0b1220]"
+                  role="menu"
+                >
+                  {overflowTabs.map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        className={[
+                          "flex w-full items-center gap-2 rounded-lg px-3 py-2",
+                          "text-left text-sm font-semibold transition",
+                          isActive
+                            ? "bg-[#3b82f6]/10 text-[#3b82f6]"
+                            : "text-slate-500 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/5",
+                        ].join(" ")}
+                        key={tab.id}
+                        onClick={() => {
+                          onSwitch(tab.id);
+                          setMoreOpen(false);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Icon className="h-4 w-4" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </nav>
+
+        {/* Hidden clone, measured for each tab's natural width so the overflow
+            math is stable no matter what is currently on screen. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-0 flex opacity-0"
+          ref={measureRef}
+          style={{ visibility: "hidden", whiteSpace: "nowrap" }}
+        >
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <span className={tabStripClass(false)} data-role="strip-tab" key={tab.id}>
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </span>
+            );
+          })}
+          <span className={tabStripClass(false)} data-role="strip-more">
+            <MoreHorizontal className="h-4 w-4" />
+            More
+            <ChevronDown className="h-3.5 w-3.5" />
+          </span>
+        </div>
       </div>
-    )}
-  </div>
-);
+
+      {actions && <div className="w-full pb-2 sm:w-auto sm:shrink-0">{actions}</div>}
+    </div>
+  );
+};
 
 // ─── Search Row (search input + page-specific actions) ──────────────────────────
 

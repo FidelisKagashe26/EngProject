@@ -2,6 +2,7 @@ import {
   Children,
   isValidElement,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -278,10 +279,10 @@ export const TablePagination = ({
         Showing {safeStart}-{safeEnd} of {totalCount} {itemLabel}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="form-field gap-0! text-[10px]!">
-          <span className="text-slate-500!">Rows per page</span>
+        <label className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Rows per page</span>
           <GuiSelect
-            className="h-9 min-w-21"
+            className="h-9 min-w-20 text-sm"
             fullWidth={false}
             onChange={(event) => onPageSizeChange(Number(event.target.value) || pageSizeOptions[0] || 5)}
             value={String(pageSize)}
@@ -476,7 +477,13 @@ export const GuiSelect = ({
 }: GuiSelectProps) => {
   const options = useMemo(() => parseOptions(children), [children]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  // When the trigger sits near the right edge (e.g. a filter at the end of a
+  // toolbar), a left-anchored menu with long options would spill past the
+  // viewport and force the whole page to scroll sideways. Flip it to
+  // right-anchored in that case so it stays on screen.
+  const [alignRight, setAlignRight] = useState(false);
 
   const initialSingle = useMemo(() => {
     if (defaultValue !== undefined) return asSingleValue(defaultValue);
@@ -530,6 +537,21 @@ export const GuiSelect = ({
       document.removeEventListener("keydown", handleEscape);
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setAlignRight(false);
+      return;
+    }
+    const menu = menuRef.current;
+    if (!menu) return;
+    // Measured left-anchored (the default). If its right edge overshoots the
+    // viewport, re-anchor to the right. Measuring before paint avoids a flash.
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth - 8) {
+      setAlignRight(true);
+    }
+  }, [open]);
 
   const singleLabel = useMemo(() => {
     const found = options.find((opt) => opt.value === selectedSingle);
@@ -592,7 +614,7 @@ export const GuiSelect = ({
       </button>
 
       {open && (
-        <div className="gui-select-menu">
+        <div className={`gui-select-menu ${alignRight ? "gui-select-menu-right" : ""}`} ref={menuRef}>
           {options.map((option) => {
             const selected = multiple
               ? selectedMulti.includes(option.value)

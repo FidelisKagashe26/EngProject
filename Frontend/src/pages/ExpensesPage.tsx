@@ -395,17 +395,7 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
       {activeExpenseSection === "categories" ? (
         <section className="space-y-4">
           {error && <p className="text-sm text-red-700">{error}</p>}
-          <div className="flex flex-wrap gap-2">
-            {expenseCategories.map((item) => (
-              <span
-                className="rounded-full border border-[#0b2a53]/15 bg-white px-3 py-1 text-xs font-semibold text-[#0b2a53]"
-                key={item}
-              >
-                {item}
-              </span>
-            ))}
-          </div>
-          <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
+          <div className="flex max-w-xl flex-col gap-2 sm:flex-row mb-6">
             <input
               className="input-field"
               onChange={(event) => setNewExpenseCategory(event.target.value)}
@@ -416,6 +406,42 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
               + Add Category
             </button>
           </div>
+
+          <SurfaceCard title="Registered Expense Categories">
+            <div className="ops-table-wrap">
+              <table className="data-table ops-table min-w-[500px]">
+                <thead>
+                  <tr>
+                    <th className="ops-sticky-sn w-16 text-center">S/N</th>
+                    <th>Category Name</th>
+                    <th className="ops-sticky-actions w-24 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenseCategories.map((item, index) => (
+                    <tr key={item}>
+                      <td className="ops-sticky-sn text-center">{index + 1}</td>
+                      <td><span className="ops-cell-text">{item}</span></td>
+                      <td className="ops-sticky-actions text-center">
+                        <button 
+                          className="font-medium text-blue-600 hover:text-blue-800 text-sm"
+                          onClick={() => alert("Edit category functionality coming soon!")}
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {expenseCategories.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="text-center py-4 text-slate-500">No categories found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </SurfaceCard>
         </section>
       ) : (
         <>

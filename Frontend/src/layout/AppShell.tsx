@@ -1,5 +1,4 @@
-import { GuiSelect } from "../components/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bell,
   ChevronDown,
@@ -12,11 +11,12 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { hasAnyPermission } from "../auth";
 import { UnsavedChangesRouteGuard } from "../guards/UnsavedChangesGuard";
-import { api, type AuthUser, type CompanyProfile, type ProjectApiRecord } from "../services/api";
+import type { AuthUser, CompanyProfile } from "../services/api";
 import { mainNavItems, quickAddActions, utilityNavItems } from "./navigation";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 const routeTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -53,11 +53,8 @@ export const AppShell = ({
   user: AuthUser | null;
 }) => {
   const location = useLocation();
-  const navigate = useNavigate();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
-  const [projectJump, setProjectJump] = useState("");
   const companyLogoAlt =
     company?.name.trim().length ? `${company.name.trim()} logo` : "Company logo";
   const visibleMainNavItems = useMemo(
@@ -96,36 +93,6 @@ export const AppShell = ({
     }
     return routeTitles[location.pathname] ?? "Dashboard";
   }, [location.pathname]);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadProjects = async () => {
-      try {
-        const rows = await api.getProjects();
-        if (!mounted) {
-          return;
-        }
-        setProjects(rows);
-      } catch {
-        if (!mounted) {
-          return;
-        }
-        setProjects([]);
-      }
-    };
-
-    void loadProjects();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const handleProjectJumpChange = (projectId: string) => {
-    setProjectJump(projectId);
-    if (projectId.length > 0) {
-      navigate(`/projects/${encodeURIComponent(projectId)}`);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
@@ -195,19 +162,7 @@ export const AppShell = ({
                 type="search"
               />
             </div>
-            <GuiSelect
-              className="hidden w-auto! py-2! text-sm lg:flex"
-              fullWidth={false}
-              onChange={(event) => handleProjectJumpChange(event.target.value)}
-              value={projectJump}
-            >
-              <option value="">All Projects</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </GuiSelect>
+            <ProjectSwitcher className="hidden w-56 lg:block" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -310,24 +265,9 @@ export const AppShell = ({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mb-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quick Access</p>
-              <GuiSelect
-                className="w-full! py-2! text-sm"
-                fullWidth
-                onChange={(event) => {
-                  handleProjectJumpChange(event.target.value);
-                  setMobileMenuOpen(false);
-                }}
-                value={projectJump}
-              >
-                <option value="">All Projects</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </GuiSelect>
+            <div className="mb-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-white/5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Working On</p>
+              <ProjectSwitcher />
               {visibleQuickAddActions.length > 0 ? (
                 <div className="space-y-1">
                   <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Add New</p>

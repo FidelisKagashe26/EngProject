@@ -1,6 +1,7 @@
 import { FileText, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   EmptyState,
   SectionTitle,
@@ -13,7 +14,6 @@ import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
   type DocumentApiRecord,
-  type ProjectApiRecord,
   type TenderApiRecord,
   type TendersSummary,
 } from "../services/api";
@@ -38,9 +38,10 @@ export const TendersPage = () => {
   const [rows, setRows] = useState<TenderApiRecord[]>([]);
   const [summary, setSummary] = useState<TendersSummary>(defaultSummary);
   const [documents, setDocuments] = useState<DocumentApiRecord[]>([]);
-  const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState("All");
+  // Scope comes from the shared header switcher.
+  const { activeProjectId } = useActiveProject();
+  const projectFilter = activeProjectId || "All";
   const [statusFilter, setStatusFilter] = useState("All Status");
   const [selectedTenderId, setSelectedTenderId] = useState("");
 
@@ -49,8 +50,7 @@ export const TendersPage = () => {
 
     const load = async () => {
       try {
-        const [projectRows, tendersResponse, documentRows] = await Promise.all([
-          api.getProjects(),
+        const [tendersResponse, documentRows] = await Promise.all([
           api.getTenders(),
           api.getDocuments(),
         ]);
@@ -59,7 +59,6 @@ export const TendersPage = () => {
           return;
         }
 
-        setProjects(projectRows);
         setRows(tendersResponse.rows);
         setSummary(tendersResponse.summary);
         setDocuments(documentRows);
@@ -228,21 +227,6 @@ export const TendersPage = () => {
                 value={search}
               />
             </div>
-          </label>
-          <label className="form-field">
-            <span>Project</span>
-            <GuiSelect
-              className="input-field"
-              onChange={(event) => setProjectFilter(event.target.value)}
-              value={projectFilter}
-            >
-              <option value="All">All Projects</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </GuiSelect>
           </label>
           <label className="form-field">
             <span>Status</span>

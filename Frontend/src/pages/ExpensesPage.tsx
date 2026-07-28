@@ -1,6 +1,6 @@
 import { BarChart2, PieChart, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   ConfirmModal,
   DetailModal,
@@ -47,15 +47,16 @@ type ExpensesPageProps = {
 
 export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: ExpensesPageProps) => {
   const { markSaved } = useUnsavedChanges();
-  const [searchParams] = useSearchParams();
-  const projectFromQuery = searchParams.get("projectId") ?? "";
+  // Scope comes from the shared header switcher, not a per-page dropdown.
+  const { activeProjectId } = useActiveProject();
+  const projectFromQuery = activeProjectId;
+  const listProjectFilter = activeProjectId || "All";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [expenseRows, setExpenseRows] = useState<ExpenseApiRecord[]>([]);
-  const [listProjectFilter, setListProjectFilter] = useState(projectFromQuery || "All");
   const [charts, setCharts] = useState<ExpensesResponse["charts"]>({
     byCategory: [],
     byProject: [],
@@ -320,46 +321,32 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
       ) : null}
 
       {renderTabStrip?.(
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full justify-end">
-          <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeExpenseSection === "categories"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveExpenseSection("categories")}
-              type="button"
-            >
-              Category List
-            </button>
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeExpenseSection === "expenses"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveExpenseSection("expenses")}
-              type="button"
-            >
-              Expenses List
-            </button>
-          </div>
-          <div className="w-full sm:w-52">
-            <GuiSelect
-              className="h-10"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
-              <option value="All">All Projects</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </GuiSelect>
-          </div>
-        </div>
+        <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto dark:border-white/10 dark:bg-white/5">
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "categories"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("categories")}
+            type="button"
+          >
+            Category List
+          </button>
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeExpenseSection === "expenses"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10",
+            ].join(" ")}
+            onClick={() => setActiveExpenseSection("expenses")}
+            type="button"
+          >
+            Expenses List
+          </button>
+        </div>,
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">

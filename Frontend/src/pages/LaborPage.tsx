@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   ConfirmModal,
   DetailModal,
@@ -125,18 +125,16 @@ export const LaborPage = ({
   renderTabStrip,
 }: LaborPageProps) => {
   const { markSaved } = useUnsavedChanges();
-  const [searchParams] = useSearchParams();
-  const projectFromQuery = searchParams.get("projectId") ?? "";
+  // Scope comes from the shared header switcher, not a per-page dropdown.
+  const { activeProjectId } = useActiveProject();
+  const projectFromQuery = activeProjectId;
+  const listProjectFilter = activeProjectId || "All";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
   const [workers, setWorkers] = useState<WorkerApiRecord[]>([]);
   const [laborPayments, setLaborPayments] = useState<LaborPaymentApiRecord[]>([]);
-
-  const [listProjectFilter, setListProjectFilter] = useState(
-    projectFromQuery || "All",
-  );
 
   // Modal states
   const [showAddWorkerModal, setShowAddWorkerModal] = useState(false);
@@ -221,12 +219,12 @@ export const LaborPage = ({
     };
   }, []);
 
+  // When the active project changes, default the add/pay forms to it.
   useEffect(() => {
     if (projectFromQuery.length === 0) {
       return;
     }
 
-    setListProjectFilter(projectFromQuery);
     setWorkerAssignedProjectId(projectFromQuery);
     setPaymentProjectId(projectFromQuery);
   }, [projectFromQuery]);
@@ -739,22 +737,7 @@ export const LaborPage = ({
         />
       ) : null}
 
-      {renderTabStrip?.(
-        <div className="w-full sm:w-52">
-          <GuiSelect
-            className="h-10"
-            onChange={(event) => setListProjectFilter(event.target.value)}
-            value={listProjectFilter}
-          >
-            <option value="All">All Sites</option>
-            {projects.map((project) => (
-              <option key={`wk-list-${project.id}`} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </GuiSelect>
-        </div>
-      )}
+      {renderTabStrip?.()}
 
       {/* Stats cards - Dynamic based on filter */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

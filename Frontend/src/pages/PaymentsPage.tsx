@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   ConfirmModal,
   DetailModal,
@@ -38,8 +38,9 @@ const paymentMethodOptions = [
 
 export const PaymentsPage = () => {
   const { markSaved } = useUnsavedChanges();
-  const [searchParams] = useSearchParams();
-  const projectFromQuery = searchParams.get("projectId") ?? "";
+  // Scope comes from the shared header switcher.
+  const { activeProjectId } = useActiveProject();
+  const projectFromQuery = activeProjectId;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -58,8 +59,7 @@ export const PaymentsPage = () => {
     projectBalances: [],
   });
 
-  // Transactions table filter
-  const [tableProjectFilter, setTableProjectFilter] = useState(projectFromQuery || "All");
+  const tableProjectFilter = activeProjectId || "All";
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -380,21 +380,8 @@ export const PaymentsPage = () => {
         )}
       </SurfaceCard>
 
-      {/* Transactions header: filter + add */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
-        <label className="form-field sm:w-72">
-          <span className="text-sm">Filter by project</span>
-          <GuiSelect
-            className="input-field"
-            onChange={(e) => setTableProjectFilter(e.target.value)}
-            value={tableProjectFilter}
-          >
-            <option value="All">All Projects</option>
-            {projects.map((p) => (
-              <option key={`filter-${p.id}`} value={p.id}>{p.name}</option>
-            ))}
-          </GuiSelect>
-        </label>
+      {/* Transactions header: add (scope follows the header project switcher) */}
+      <div className="flex justify-end">
         <button className="btn-primary whitespace-nowrap" onClick={openAddModal} type="button">
           + Add Payment
         </button>

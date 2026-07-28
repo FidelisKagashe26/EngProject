@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   DetailModal,
   EmptyState,
@@ -455,8 +455,10 @@ type MaterialsPageProps = {
 
 export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: MaterialsPageProps) => {
   const { markSaved } = useUnsavedChanges();
-  const [searchParams] = useSearchParams();
-  const projectFromQuery = searchParams.get("projectId") ?? "";
+  // Scope comes from the shared header switcher, not a per-page dropdown.
+  const { activeProjectId } = useActiveProject();
+  const projectFromQuery = activeProjectId;
+  const listProjectFilter = activeProjectId || "All";
 
   // ─── Data state ───────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
@@ -465,7 +467,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
   const [requirements, setRequirements] = useState<MaterialRequirementApiRecord[]>([]);
   const [purchases, setPurchases] = useState<MaterialPurchaseApiRecord[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierApiRecord[]>([]);
-  const [listProjectFilter, setListProjectFilter] = useState(projectFromQuery || "All");
   const [activeSection, setActiveSection] = useState<"registered" | "received">("registered");
 
   // ─── Modal visibility state (form state lives inside each modal component) ──
@@ -509,11 +510,6 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
     document.body.style.overflow = anyModalOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [showRegisterModal, showPurchaseModal, viewRequirement, viewPurchase]);
-
-  useEffect(() => {
-    if (projectFromQuery.length === 0) return;
-    setListProjectFilter(projectFromQuery);
-  }, [projectFromQuery]);
 
   const refreshData = async () => {
     const response = await api.getMaterials();
@@ -647,46 +643,32 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
       ) : null}
 
       {renderTabStrip?.(
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full justify-end">
-          <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto">
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeSection === "registered"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveSection("registered")}
-              type="button"
-            >
-              Registered Materials
-            </button>
-            <button
-              className={[
-                "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
-                activeSection === "received"
-                  ? "bg-[#0b2a53] text-white"
-                  : "text-[#0b2a53] hover:bg-[#0b2a53]/5",
-              ].join(" ")}
-              onClick={() => setActiveSection("received")}
-              type="button"
-            >
-              Materials Received
-            </button>
-          </div>
-          <div className="w-full sm:w-52">
-            <GuiSelect
-              className="h-10"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
-              <option value="All">All Projects</option>
-              {projects.map((project) => (
-                <option key={`mat-list-${project.id}`} value={project.id}>{project.name}</option>
-              ))}
-            </GuiSelect>
-          </div>
-        </div>
+        <div className="inline-flex h-10 w-full rounded-lg border border-[#0b2a53]/15 bg-white p-1 shadow-sm sm:w-auto dark:border-white/10 dark:bg-white/5">
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeSection === "registered"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10",
+            ].join(" ")}
+            onClick={() => setActiveSection("registered")}
+            type="button"
+          >
+            Registered Materials
+          </button>
+          <button
+            className={[
+              "flex-1 rounded-md px-4 text-sm font-semibold transition sm:flex-none",
+              activeSection === "received"
+                ? "bg-[#0b2a53] text-white"
+                : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10",
+            ].join(" ")}
+            onClick={() => setActiveSection("received")}
+            type="button"
+          >
+            Materials Received
+          </button>
+        </div>,
       )}
 
       {renderSearchRow?.(

@@ -1,6 +1,7 @@
 import { FileText, FolderOpen, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   ConfirmModal,
   EmptyState,
@@ -45,10 +46,17 @@ export const DocumentsPage = () => {
   const [documents, setDocuments] = useState<DocumentApiRecord[]>([]);
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
 
-  // Filters
+  // Filters. The project filter defaults to (and follows) the header's active
+  // project, but Documents keeps its own control because browsing by project
+  // folder is part of the page.
+  const { activeProjectId } = useActiveProject();
   const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState("All");
+  const [projectFilter, setProjectFilter] = useState(activeProjectId || "All");
   const [categoryFilter, setCategoryFilter] = useState("All");
+
+  useEffect(() => {
+    setProjectFilter(activeProjectId || "All");
+  }, [activeProjectId]);
   const [viewMode, setViewMode] = useState<"folder" | "table">("folder");
 
   // Modals

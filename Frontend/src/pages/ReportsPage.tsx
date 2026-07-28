@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import { IncomeExpenseChart } from "../components/charts";
 import {
   EmptyState,
@@ -76,7 +77,14 @@ const BudgetBar = ({ spent, total }: { spent: number; total: number }) => {
 export const ReportsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [projectFilter, setProjectFilter] = useState("All");
+  // Reports keeps its own project selector (it is an analysis tool), but it
+  // defaults to and follows the header's active project.
+  const { activeProjectId } = useActiveProject();
+  const [projectFilter, setProjectFilter] = useState(activeProjectId || "All");
+
+  useEffect(() => {
+    setProjectFilter(activeProjectId || "All");
+  }, [activeProjectId]);
   const [selectedCategory, setSelectedCategory] = useState<ReportCategory>("project-cost-summary");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All");
   const [pdfFromDate, setPdfFromDate] = useState("");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import {
   ConfirmModal,
   DetailModal,
@@ -38,6 +39,9 @@ type PettyCashPageProps = {
 
 export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: PettyCashPageProps) => {
   const { markSaved } = useUnsavedChanges();
+  // Scope comes from the shared header switcher, not a per-page dropdown.
+  const { activeProjectId } = useActiveProject();
+  const listProjectFilter = activeProjectId || "All";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,7 +54,6 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
     pendingCount: 0,
   });
   const [rows, setRows] = useState<PettyCashApiRecord[]>([]);
-  const [listProjectFilter, setListProjectFilter] = useState("All");
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -235,22 +238,7 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
         />
       ) : null}
 
-      {renderTabStrip?.(
-        <div className="flex w-full justify-end">
-          <div className="w-full sm:w-52">
-            <GuiSelect
-              className="h-10"
-              onChange={(event) => setListProjectFilter(event.target.value)}
-              value={listProjectFilter}
-            >
-              <option value="All">All Projects</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </GuiSelect>
-          </div>
-        </div>
-      )}
+      {renderTabStrip?.()}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <SurfaceCard title="Opening Balance">

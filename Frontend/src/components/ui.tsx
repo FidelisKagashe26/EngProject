@@ -168,7 +168,7 @@ export const ProgressBar = ({
       ? "bg-red-500"
       : safe >= 65
         ? "bg-amber-500"
-        : "bg-[#0b2a53]";
+        : "bg-[#0b2a53] dark:bg-[#3b82f6]";
   return (
     <div className="flex items-center gap-2">
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">

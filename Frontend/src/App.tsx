@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ProtectedRoute, hasAnyPermission, type AppPermission, useAuth } from "./auth";
 import { useCompanySettings } from "./company/CompanySettingsContext";
+import { ActiveProjectProvider } from "./project/ActiveProjectContext";
 import { GlobalLoader } from "./components/GlobalLoader";
 import { TopToastHost } from "./components/TopToastHost";
 import { UnsavedChangesProvider } from "./guards/UnsavedChangesGuard";
@@ -119,13 +120,15 @@ const ProtectedAppLayout = () => {
   }, [darkMode]);
 
   return (
-    <AppShell
-      company={company}
-      darkMode={darkMode}
-      onLogout={logout}
-      onToggleDarkMode={() => setDarkMode((current) => !current)}
-      user={user}
-    />
+    <ActiveProjectProvider>
+      <AppShell
+        company={company}
+        darkMode={darkMode}
+        onLogout={logout}
+        onToggleDarkMode={() => setDarkMode((current) => !current)}
+        user={user}
+      />
+    </ActiveProjectProvider>
   );
 };
 

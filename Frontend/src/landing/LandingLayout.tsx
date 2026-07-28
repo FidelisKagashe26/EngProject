@@ -22,6 +22,7 @@ import { FaFacebook, FaInstagram, FaLinkedinIn, FaXTwitter } from "react-icons/f
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { useWebsiteSettings } from "./WebsiteSettingsContext";
+import { useSmoothScroll } from "./useSmoothScroll";
 
 const NAV_LINKS = [
   { label: "Home",     to: "/",        Icon: Home },
@@ -34,6 +35,7 @@ const NAV_LINKS = [
 export const LandingLayout = () => {
   const [open, setOpen] = useState(false);
   const { settings } = useWebsiteSettings();
+  useSmoothScroll();
 
   const socials = [
     { Icon: FaLinkedinIn,  href: settings.social_linkedin  || "#", label: "LinkedIn"  },

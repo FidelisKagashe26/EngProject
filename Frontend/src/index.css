@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Drive `dark:` utilities from the `.dark` class the app toggles, not the OS's
+   prefers-color-scheme (Tailwind v4's default). Without this, every `dark:`
+   style followed the operating system, so on an OS set to dark the app showed
+   dark controls (e.g. the project switcher panel) even while in light mode. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   font-family: "Urbanist";
   src: url("/Urbanist/Urbanist-VariableFont_wght.ttf") format("truetype");

@@ -40,7 +40,9 @@ type BadgeTone =
   | "Idle"
   | "Reconciled"
   | "Invited"
-  | "Suspended";
+  | "Suspended"
+  | "Paid"
+  | "Not Paid";
 
 const badgeClass: Record<BadgeTone, string> = {
   Active: "bg-blue-50 text-blue-800 border-blue-200",
@@ -64,6 +66,8 @@ const badgeClass: Record<BadgeTone, string> = {
   Reconciled: "bg-emerald-50 text-emerald-800 border-emerald-200",
   Invited: "bg-indigo-50 text-indigo-800 border-indigo-200",
   Suspended: "bg-red-50 text-red-800 border-red-200",
+  Paid: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  "Not Paid": "bg-amber-50 text-amber-800 border-amber-200",
 };
 
 export const StatusBadge = ({ status }: { status: BadgeTone | string }) => {

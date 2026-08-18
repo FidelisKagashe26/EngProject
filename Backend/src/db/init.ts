@@ -122,6 +122,24 @@ export const initializeDatabase = async (): Promise<void> => {
     ADD COLUMN IF NOT EXISTS enforce_cash_limit BOOLEAN NOT NULL DEFAULT FALSE
   `);
 
+  // Billing identity + bank details printed on every invoice, plus the prefixes
+  // for the two invoice number series. Filled in Settings; blank fields are
+  // simply omitted from the printed invoice.
+  await db.query(`
+    ALTER TABLE engicost.companies
+    ADD COLUMN IF NOT EXISTS tin VARCHAR(40) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS vrn VARCHAR(40) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS bank_name VARCHAR(160) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS bank_account_name VARCHAR(160) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS bank_account_number VARCHAR(80) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS bank_branch VARCHAR(120) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS bank_swift VARCHAR(40) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS invoice_proforma_prefix VARCHAR(12) NOT NULL DEFAULT 'PRO',
+    ADD COLUMN IF NOT EXISTS invoice_tax_prefix VARCHAR(12) NOT NULL DEFAULT 'INV',
+    ADD COLUMN IF NOT EXISTS default_payment_terms TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS default_invoice_notes TEXT NOT NULL DEFAULT ''
+  `);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS engicost.users (
       id SERIAL PRIMARY KEY,
@@ -259,6 +277,102 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  await db.query(`
+    ALTER TABLE engicost.client_payments
+    ADD COLUMN IF NOT EXISTS attachment_url TEXT
+  `);
+
+  // ── Invoicing ──────────────────────────────────────────────────────────
+  // Proforma and tax invoices share one table, distinguished by `type`. Money
+  // still flows through client_payments (see invoice_id below) so an invoice
+  // never independently moves a project's totals — it is billed, and real
+  // payments settle it.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.invoices (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      project_id VARCHAR(40) NOT NULL REFERENCES engicost.projects(id) ON DELETE CASCADE,
+      type VARCHAR(20) NOT NULL DEFAULT 'Invoice',
+      number VARCHAR(60) NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'Draft',
+      client_name VARCHAR(200) NOT NULL,
+      client_address TEXT NOT NULL DEFAULT '',
+      client_contact VARCHAR(160) NOT NULL DEFAULT '',
+      client_tin VARCHAR(40) NOT NULL DEFAULT '',
+      issue_date DATE NOT NULL,
+      due_date DATE,
+      currency VARCHAR(10) NOT NULL DEFAULT 'TZS',
+      subtotal NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      discount_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      vat_rate NUMERIC(6, 2) NOT NULL DEFAULT 0,
+      vat_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      total NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      notes TEXT NOT NULL DEFAULT '',
+      terms TEXT NOT NULL DEFAULT '',
+      converted_from_id VARCHAR(40),
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      deleted_at TIMESTAMP,
+      deleted_by VARCHAR(160),
+      created_by VARCHAR(160) NOT NULL DEFAULT '',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE (company_id, number)
+    );
+  `);
+
+  // Set once a proforma is turned into a full invoice: at that point its
+  // materials are recorded as received in the Materials module and their cost
+  // is booked, so the record is locked from further edits/deletes.
+  await db.query(`
+    ALTER TABLE engicost.invoices
+    ADD COLUMN IF NOT EXISTS materials_received BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.invoice_items (
+      id VARCHAR(40) PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      invoice_id VARCHAR(40) NOT NULL REFERENCES engicost.invoices(id) ON DELETE CASCADE,
+      description TEXT NOT NULL,
+      quantity NUMERIC(16, 2) NOT NULL DEFAULT 1,
+      unit VARCHAR(40) NOT NULL DEFAULT '',
+      unit_price NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  // Links an invoice line to the material requirement it was pulled from, so
+  // that turning a proforma into an invoice can mark exactly those materials
+  // received and book their cost.
+  await db.query(`
+    ALTER TABLE engicost.invoice_items
+    ADD COLUMN IF NOT EXISTS requirement_id VARCHAR(40)
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice
+    ON engicost.invoice_items(invoice_id)
+  `);
+
+  // Monotonic per-company, per-type, per-year counter for invoice numbers.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS engicost.invoice_counters (
+      company_id INTEGER NOT NULL REFERENCES engicost.companies(id) ON DELETE CASCADE,
+      type VARCHAR(20) NOT NULL,
+      year INTEGER NOT NULL,
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (company_id, type, year)
+    );
+  `);
+
+  // Which invoice (if any) a client payment settles. Nullable: direct payments
+  // that are not tied to an invoice still work exactly as before.
+  await db.query(`
+    ALTER TABLE engicost.client_payments
+    ADD COLUMN IF NOT EXISTS invoice_id VARCHAR(40)
+  `);
+
   await db.query(`
     ALTER TABLE engicost.client_payments
     ADD COLUMN IF NOT EXISTS attachment_url TEXT

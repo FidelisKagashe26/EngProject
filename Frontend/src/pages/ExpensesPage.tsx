@@ -353,7 +353,7 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
         <SurfaceCard className="[&_h3]:text-xs" title="Expense Records">
           <p className="text-xl font-bold text-slate-900">{expenseSummary.totalRecords}</p>
         </SurfaceCard>
-        <SurfaceCard className="[&_h3]:text-xs" title="Total Spent">
+        <SurfaceCard className="[&_h3]:text-xs" title="Total Expenses">
           <p className="text-xl font-bold text-[#0b2a53]">{formatTzs(expenseSummary.totalSpent)}</p>
         </SurfaceCard>
         <SurfaceCard className="[&_h3]:text-xs" title="Approved Amount">

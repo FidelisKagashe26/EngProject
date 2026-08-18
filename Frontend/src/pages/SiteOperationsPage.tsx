@@ -51,7 +51,7 @@ const tabStripClass = (isActive: boolean): string =>
     "border-b-2 transition-all",
     isActive
       ? "border-[#3b82f6] text-[#3b82f6]"
-      : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500",
+      : "border-transparent text-slate-500 hover:text-[#0b2a53] hover:border-slate-300 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:border-slate-500",
   ].join(" ");
 
 const OperationsTabStrip = ({

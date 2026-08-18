@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useActiveProject } from "../project/ActiveProjectContext";
+import { pushTopToast } from "../components/topToast";
 import {
   DetailModal,
   EmptyState,
@@ -71,6 +72,9 @@ const RegisterMaterialModal = ({
   const [materialName, setMaterialName] = useState(editing?.materialName || "");
   const [requiredQty, setRequiredQty] = useState(editing ? String(editing.requiredQuantity) : "");
   const [unit, setUnit] = useState(editing?.unit || MATERIAL_UNITS[0]);
+  const [estimatedUnitCost, setEstimatedUnitCost] = useState(
+    editing && editing.estimatedUnitCost > 0 ? String(editing.estimatedUnitCost) : "",
+  );
   const [supplySource, setSupplySource] = useState<MaterialSupplySource>(editing?.supplySource || "Company Purchased");
   const [priority, setPriority] = useState(editing?.priority || "Medium");
   const [neededByDate, setNeededByDate] = useState(editing?.neededByDate ?? "");
@@ -98,6 +102,7 @@ const RegisterMaterialModal = ({
           materialName: materialName.trim(),
           requiredQuantity: Number(requiredQty) || 0,
           unit: unit.trim(),
+          estimatedUnitCost: Number(estimatedUnitCost) || 0,
           supplySource,
           priority,
           neededByDate: neededByDate || undefined,
@@ -109,6 +114,7 @@ const RegisterMaterialModal = ({
           materialName: materialName.trim(),
           requiredQuantity: Number(requiredQty) || 0,
           unit: unit.trim(),
+          estimatedUnitCost: Number(estimatedUnitCost) || 0,
           supplySource,
           requestedQuantity: 0,
           priority,
@@ -149,6 +155,19 @@ const RegisterMaterialModal = ({
             <GuiSelect className="input-field" onChange={(e) => setUnit(e.target.value)} value={unit}>
               {options(MATERIAL_UNITS)}
             </GuiSelect>
+          </label>
+          <label className="form-field">
+            <span>Estimated Unit Cost (Optional)</span>
+            <input
+              className="input-field"
+              onChange={(e) => setEstimatedUnitCost(e.target.value)}
+              placeholder="e.g. 18000"
+              type="number"
+              value={estimatedUnitCost}
+            />
+            <span className="text-[10px] font-normal normal-case tracking-normal text-slate-400">
+              Your cost per unit — pulled in when recording a purchase (still editable there).
+            </span>
           </label>
           <label className="form-field">
             <span>Supply Source (Provider)</span>
@@ -231,8 +250,24 @@ const RecordMaterialModal = ({
 
   const effectiveMaterialName = selectedReq?.materialName || fallbackMaterialName;
   const [qtyPurchased, setQtyPurchased] = useState(editing ? String(editing.quantityPurchased) : "");
-  const [unitCost, setUnitCost] = useState(editing ? String(editing.unitCost) : "");
+  const [unitCost, setUnitCost] = useState(
+    editing ? String(editing.unitCost) : "",
+  );
   const [supplySource, setSupplySource] = useState<MaterialSupplySource>(editing?.supplySource || "Company Purchased");
+
+  // When recording a new purchase, pull the chosen material's estimated cost in
+  // as the starting unit cost — but leave it editable, since prices drift. Only
+  // re-pulls when the selected material or supply source changes, so a value the
+  // user has typed is never clobbered mid-edit.
+  useEffect(() => {
+    if (editing) return;
+    if (supplySource === "Client Supplied") return;
+    if (selectedReq && selectedReq.estimatedUnitCost > 0) {
+      setUnitCost(String(selectedReq.estimatedUnitCost));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReq?.id, supplySource, editing]);
+
   const [supplierName, setSupplierName] = useState(editing?.supplierName || "");
   const [purchaseDate, setPurchaseDate] = useState(editing?.purchaseDate || "");
   const [deliveryNoteNumber, setDeliveryNoteNumber] = useState(editing?.deliveryNoteNumber || "");
@@ -517,6 +552,64 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
     setPurchases(response.purchases);
   };
 
+  // ─── Bulk import from Excel ─────────────────────────────────────────────────
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importProjectId, setImportProjectId] = useState(activeProjectId);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
+
+  const openImport = () => {
+    setImportProjectId(activeProjectId || projects[0]?.id || "");
+    setShowImportModal(true);
+  };
+
+  const handleDownloadMaterialTemplate = async () => {
+    try {
+      const { blob, filename } = await api.downloadMaterialsTemplate();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      pushTopToast({ tone: "error", title: "Materials", message: "Failed to download the template." });
+    }
+  };
+
+  const handleImportMaterials = async (file: File) => {
+    if (!importProjectId) {
+      pushTopToast({ tone: "error", title: "Materials", message: "Choose a project first." });
+      return;
+    }
+    setImporting(true);
+    try {
+      const result = await api.importMaterials(importProjectId, file);
+      await refreshData();
+      const extra = result.skipped > 0 ? ` (${result.skipped} row(s) skipped)` : "";
+      pushTopToast({
+        tone: result.skipped > 0 ? "info" : "success",
+        title: "Materials",
+        message: `${result.imported} material(s) imported${extra}.`,
+      });
+      if (result.errors.length > 0) {
+        pushTopToast({ tone: "error", title: "Skipped rows", message: result.errors.slice(0, 4).join(" · ") });
+      }
+      setShowImportModal(false);
+    } catch (importError) {
+      pushTopToast({
+        tone: "error",
+        title: "Materials",
+        message: importError instanceof Error ? importError.message : "Import failed.",
+      });
+    } finally {
+      setImporting(false);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  };
+
   // ─── Filtered requirements ────────────────────────────────────────────────────
   const filteredRequirements = useMemo(() => {
     let result = requirements;
@@ -673,13 +766,22 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
 
       {renderSearchRow?.(
         activeSection === "registered" ? (
-          <button
-            className="btn-secondary h-11 justify-center whitespace-nowrap"
-            onClick={openRegisterNew}
-            type="button"
-          >
-            + Register Material
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              className="btn-secondary h-11 justify-center whitespace-nowrap"
+              onClick={openImport}
+              type="button"
+            >
+              Import Excel
+            </button>
+            <button
+              className="btn-secondary h-11 justify-center whitespace-nowrap"
+              onClick={openRegisterNew}
+              type="button"
+            >
+              + Register Material
+            </button>
+          </div>
         ) : (
           <button
             className="btn-primary h-11 justify-center whitespace-nowrap"
@@ -963,6 +1065,55 @@ export const MaterialsPage = ({ embedded = false, search = "", renderSearchRow, 
           requirements={requirements}
           suppliers={suppliers}
         />
+      )}
+
+      {/* ── Bulk import from Excel ──────────────────────────────────────────────── */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+          <SurfaceCard className="my-8 w-full max-w-lg" title="Import Materials from Excel">
+            <p className="mb-3 text-sm text-slate-500">
+              Download the template, fill one row per material the project needs, then
+              upload it. Each valid row is registered against the chosen project.
+            </p>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="form-field">
+                <span>Project / Site</span>
+                <GuiSelect className="input-field" onChange={(e) => setImportProjectId(e.target.value)} value={importProjectId}>
+                  <option value="">Select a project…</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </GuiSelect>
+              </label>
+              <div className="flex items-end">
+                <button className="btn-secondary h-11 w-full justify-center" onClick={() => void handleDownloadMaterialTemplate()} type="button">
+                  Download Excel template
+                </button>
+              </div>
+            </div>
+
+            <input
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => { const file = e.target.files?.[0]; if (file) void handleImportMaterials(file); }}
+              ref={importFileRef}
+              type="file"
+            />
+
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-white/10">
+              <button className="btn-secondary" onClick={() => setShowImportModal(false)} type="button">Cancel</button>
+              <button
+                className="btn-primary"
+                disabled={importing || !importProjectId}
+                onClick={() => importFileRef.current?.click()}
+                type="button"
+              >
+                {importing ? "Importing…" : "Upload filled file"}
+              </button>
+            </div>
+          </SurfaceCard>
+        </div>
       )}
     </div>
   );

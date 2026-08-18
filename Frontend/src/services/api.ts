@@ -287,6 +287,7 @@ export interface MaterialRequirementApiRecord {
   clientSuppliedQuantity: number;
   remainingQuantity: number;
   unit: string;
+  estimatedUnitCost: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
   lastRequestDate: string | null;
@@ -468,6 +469,82 @@ export interface CreatePaymentPayload {
 
 export type UpdatePaymentPayload = Partial<CreatePaymentPayload>;
 
+// ── Invoicing ──────────────────────────────────────────────────────────────
+export type InvoiceType = "Proforma" | "Invoice";
+
+export interface InvoiceItem {
+  id?: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amount?: number;
+  /** Set when the line was pulled from a project material. */
+  requirementId?: string;
+}
+
+export interface InvoiceApiRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  type: InvoiceType;
+  number: string;
+  status: string;
+  displayStatus: string;
+  clientName: string;
+  clientAddress: string;
+  clientContact: string;
+  clientTin: string;
+  issueDate: string;
+  dueDate: string | null;
+  currency: string;
+  subtotal: number;
+  discountAmount: number;
+  vatRate: number;
+  vatAmount: number;
+  total: number;
+  amountPaid: number;
+  balance: number;
+  notes: string;
+  terms: string;
+  convertedFromId: string | null;
+  materialsReceived: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  items: InvoiceItem[];
+}
+
+export interface InvoicesResponse {
+  rows: InvoiceApiRecord[];
+}
+
+export interface CreateInvoicePayload {
+  type: InvoiceType;
+  projectId: string;
+  clientName: string;
+  clientAddress?: string;
+  clientContact?: string;
+  clientTin?: string;
+  issueDate: string;
+  dueDate?: string;
+  discountAmount?: number;
+  vatRate?: number;
+  notes?: string;
+  terms?: string;
+  items: InvoiceItem[];
+}
+
+export type UpdateInvoicePayload = Omit<CreateInvoicePayload, "type">;
+
+export interface RecordInvoicePaymentPayload {
+  amountReceived: number;
+  paymentDate: string;
+  paymentMethod: string;
+  referenceNumber?: string;
+}
+
+
 export interface CreatePaymentResponse {
   id: string;
   projectId: string;
@@ -592,6 +669,9 @@ export interface CreateMaterialRequirementPayload {
   materialName: string;
   requiredQuantity: number;
   unit: string;
+  /** Your own estimated cost per unit (not the client price). Used to book
+   *  spend when the material is received / invoiced. */
+  estimatedUnitCost?: number;
   supplySource: MaterialSupplySource;
   requestedQuantity: number;
   // supplyStatus is absent on purpose: the server recomputes it from the
@@ -706,6 +786,19 @@ export interface CompanyProfile {
    * payments, and blocking that only stops the spend being recorded.
    */
   enforceCashLimit: boolean;
+  // Billing identity + bank details printed on invoices, and the invoice
+  // number prefixes. All optional; blank fields are omitted from the invoice.
+  tin: string;
+  vrn: string;
+  bankName: string;
+  bankAccountName: string;
+  bankAccountNumber: string;
+  bankBranch: string;
+  bankSwift: string;
+  invoiceProformaPrefix: string;
+  invoiceTaxPrefix: string;
+  defaultPaymentTerms: string;
+  defaultInvoiceNotes: string;
 }
 
 export interface SettingsResponse {
@@ -718,7 +811,23 @@ export interface SettingsResponse {
 
 export type UpdateCompanyProfilePayload = Pick<
   CompanyProfile,
-  "name" | "email" | "phone" | "location" | "currency" | "enforceCashLimit"
+  | "name"
+  | "email"
+  | "phone"
+  | "location"
+  | "currency"
+  | "enforceCashLimit"
+  | "tin"
+  | "vrn"
+  | "bankName"
+  | "bankAccountName"
+  | "bankAccountNumber"
+  | "bankBranch"
+  | "bankSwift"
+  | "invoiceProformaPrefix"
+  | "invoiceTaxPrefix"
+  | "defaultPaymentTerms"
+  | "defaultInvoiceNotes"
 >;
 
 export interface CreateDocumentPayload {
@@ -1441,6 +1550,55 @@ export const api = {
       method: "PATCH",
     }),
   getMaterials: () => apiRequest<MaterialsResponse>("/materials"),
+  downloadMaterialsTemplate: async (): Promise<{ blob: Blob; filename: string }> => {
+    beginApiRequest();
+    try {
+      const headers = new Headers();
+      if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+      const response = await fetch(`${API_BASE_URL}/materials/requirements/template`, {
+        method: "GET",
+        headers,
+      });
+      if (!response.ok) throw new ApiError("Failed to download template.", response.status, null);
+      const blob = await response.blob();
+      const filename =
+        parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+        "materials-template.xlsx";
+      return { blob, filename };
+    } finally {
+      endApiRequest();
+    }
+  },
+  importMaterials: async (
+    projectId: string,
+    file: File,
+  ): Promise<{ imported: number; skipped: number; errors: string[] }> => {
+    beginApiRequest();
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("projectId", projectId);
+      const headers = new Headers();
+      if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+      const response = await fetch(`${API_BASE_URL}/materials/requirements/import`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const payload = await parseJsonSafe(response);
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" && payload !== null && "message" in payload &&
+          typeof (payload as { message?: unknown }).message === "string"
+            ? (payload as { message: string }).message
+            : `Import failed with status ${response.status}`;
+        throw new ApiError(message, response.status, payload);
+      }
+      return payload as { imported: number; skipped: number; errors: string[] };
+    } finally {
+      endApiRequest();
+    }
+  },
   createMaterialRequirement: (payload: CreateMaterialRequirementPayload) =>
     apiRequest<MaterialRequirementApiRecord>("/materials/requirements", {
       method: "POST",
@@ -1545,6 +1703,71 @@ export const api = {
       const filename =
         parseContentDispositionFilename(response.headers.get("content-disposition")) ??
         `report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      return { blob, filename };
+    } finally {
+      endApiRequest();
+    }
+  },
+  getInvoices: (params?: { projectId?: string; type?: InvoiceType }) => {
+    const query = new URLSearchParams();
+    if (params?.projectId) query.set("projectId", params.projectId);
+    if (params?.type) query.set("type", params.type);
+    const suffix = query.toString().length > 0 ? `?${query.toString()}` : "";
+    return apiRequest<InvoicesResponse>(`/invoices${suffix}`);
+  },
+  getInvoice: (id: string) =>
+    apiRequest<InvoiceApiRecord>(`/invoices/${encodeURIComponent(id)}`),
+  createInvoice: (payload: CreateInvoicePayload) =>
+    apiRequest<InvoiceApiRecord>("/invoices", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateInvoice: (id: string, payload: UpdateInvoicePayload) =>
+    apiRequest<InvoiceApiRecord>(`/invoices/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  setInvoiceStatus: (id: string, status: string) =>
+    apiRequest<InvoiceApiRecord>(`/invoices/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  convertInvoice: (id: string) =>
+    apiRequest<InvoiceApiRecord>(`/invoices/${encodeURIComponent(id)}/convert`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  recordInvoicePayment: (id: string, payload: RecordInvoicePaymentPayload) =>
+    apiRequest<InvoiceApiRecord>(`/invoices/${encodeURIComponent(id)}/payments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteInvoice: (id: string) =>
+    apiRequest<{ message: string }>(`/invoices/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  downloadInvoicePdf: async (id: string): Promise<{ blob: Blob; filename: string }> => {
+    beginApiRequest();
+    try {
+      const headers = new Headers();
+      if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+      const response = await fetch(`${API_BASE_URL}/invoices/${encodeURIComponent(id)}/pdf`, {
+        method: "GET",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await parseJsonSafe(response);
+        const message =
+          typeof payload === "object" && payload !== null && "message" in payload &&
+          typeof (payload as { message?: unknown }).message === "string"
+            ? (payload as { message: string }).message
+            : `Request failed with status ${response.status}`;
+        throw new ApiError(message, response.status, payload);
+      }
+      const blob = await response.blob();
+      const filename =
+        parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+        `invoice-${id}.pdf`;
       return { blob, filename };
     } finally {
       endApiRequest();

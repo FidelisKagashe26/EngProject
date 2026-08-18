@@ -1,10 +1,13 @@
 import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { withTransaction } from "../db/transaction";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
+import { buildRequirementsTemplate, parseRequirementsWorkbook } from "../services/materialsTemplate";
 import {
   APPROVAL_THRESHOLDS,
   getApprovalStatusForAmount,
@@ -19,6 +22,12 @@ import {
 } from "../constants/vocabulary";
 
 const router = Router();
+
+// In-memory upload for the Excel bulk-import (parsed straight from the buffer).
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 const materialSupplySourceSchema = z.enum(MATERIAL_SUPPLY_SOURCES);
 
@@ -480,6 +489,135 @@ router.post(
       priority: row.priority,
       neededByDate: row.needed_by_date,
       notes: row.notes ?? "",
+    });
+  }),
+);
+
+// ── Download a blank Excel template for bulk material import ──
+router.get(
+  "/requirements/template",
+  handleAsync(async (_req, res) => {
+    const buffer = await buildRequirementsTemplate();
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", 'attachment; filename="materials-template.xlsx"');
+    res.send(buffer);
+  }),
+);
+
+// ── Bulk-import material requirements for a project from an uploaded Excel ──
+// The file is validated row-by-row against the same schema as the single-add
+// form; only valid rows are inserted, and any skipped rows are reported back.
+router.post(
+  "/requirements/import",
+  upload.single("file"),
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.body?.projectId ?? "").trim();
+    if (!projectId) {
+      res.status(400).json({ message: "Choose a project to import the materials into." });
+      return;
+    }
+    const project = await getProjectById(companyId, projectId);
+    if (!project) {
+      res.status(400).json({ message: "Selected project/site does not exist." });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ message: "Attach a filled-in Excel file (.xlsx)." });
+      return;
+    }
+
+    let rawRows;
+    try {
+      rawRows = await parseRequirementsWorkbook(req.file.buffer);
+    } catch {
+      res.status(400).json({ message: "Could not read that file. Use the provided .xlsx template." });
+      return;
+    }
+    if (rawRows.length === 0) {
+      res.status(400).json({ message: "No material rows were found in the file." });
+      return;
+    }
+
+    const errors: string[] = [];
+    const toInsert: Array<z.infer<typeof requirementSchema>> = [];
+    rawRows.forEach((raw, i) => {
+      const rowNum = i + 2; // header occupies row 1
+      const result = requirementSchema.safeParse({
+        projectId,
+        materialName: raw.materialName,
+        requiredQuantity: raw.requiredQuantity,
+        unit: raw.unit,
+        estimatedUnitCost: raw.estimatedUnitCost,
+        supplySource: raw.supplySource || undefined,
+        priority: raw.priority || undefined,
+        neededByDate: raw.neededByDate || undefined,
+        notes: raw.notes,
+      });
+      if (result.success) {
+        toInsert.push(result.data);
+      } else {
+        const first = result.error.issues[0];
+        errors.push(`Row ${rowNum}: ${first?.path.join(".") || "value"} — ${first?.message || "invalid"}`);
+      }
+    });
+
+    if (toInsert.length === 0) {
+      res.status(400).json({ message: "No valid material rows to import.", errors });
+      return;
+    }
+
+    await withTransaction(async (client) => {
+      for (const parsed of toInsert) {
+        await client.query(
+          `
+          INSERT INTO engicost.material_requirements (
+            id, company_id, project_id, material_name, required_quantity, unit,
+            estimated_unit_cost, supply_source, requested_quantity, last_request_date,
+            supply_status, priority, needed_by_date, notes
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, NULL, 'Planned', $10, $11, $12
+          )
+          `,
+          [
+            makeId("REQ"),
+            companyId,
+            projectId,
+            parsed.materialName,
+            parsed.requiredQuantity,
+            parsed.unit,
+            parsed.estimatedUnitCost,
+            parsed.supplySource,
+            0,
+            parsed.priority,
+            parsed.neededByDate ?? null,
+            parsed.notes,
+          ],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, 'Store Keeper', 'Imported Material Requirements', 'Materials', $3, $4, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          projectId,
+          `Imported ${toInsert.length} material requirement(s) for ${project.name} from Excel.`,
+        ],
+      );
+    });
+
+    res.status(201).json({
+      imported: toInsert.length,
+      skipped: rawRows.length - toInsert.length,
+      errors,
     });
   }),
 );

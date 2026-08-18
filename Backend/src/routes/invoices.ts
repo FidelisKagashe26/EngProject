@@ -1,0 +1,879 @@
+import { Router } from "express";
+import type { PoolClient } from "pg";
+import { z } from "zod";
+import { getSingleTenantCompanyId } from "../db/init";
+import { makeId } from "../db/ids";
+import { db } from "../db/pool";
+import { withTransaction } from "../db/transaction";
+import { requireSuperAdmin } from "../middleware/auth";
+import { nextInvoiceNumber, type InvoiceType } from "../services/invoiceNumber";
+import { renderInvoicePdf } from "../services/invoicePdf";
+import { applyProjectSpend } from "../services/projectLedger";
+import { handleAsync, toMoney } from "./utils";
+
+const router = Router();
+
+const round2 = (value: number): number => Math.round((Number(value) || 0) * 100) / 100;
+
+const itemSchema = z.object({
+  description: z.string().min(1),
+  quantity: z.number().nonnegative().default(1),
+  unit: z.string().optional().default(""),
+  unitPrice: z.number().nonnegative().default(0),
+  // Set when the line was pulled from a project material — lets the
+  // proforma→invoice step mark that material received and book its cost.
+  requirementId: z.string().optional().default(""),
+});
+
+const invoiceSchema = z.object({
+  type: z.enum(["Proforma", "Invoice"]),
+  projectId: z.string().min(3),
+  clientName: z.string().min(2),
+  clientAddress: z.string().optional().default(""),
+  clientContact: z.string().optional().default(""),
+  clientTin: z.string().optional().default(""),
+  issueDate: z.string().date(),
+  dueDate: z.string().date().optional(),
+  discountAmount: z.number().nonnegative().optional().default(0),
+  // VAT is opt-in: a rate of 0 (or omitted) means the VAT line is never shown.
+  vatRate: z.number().min(0).max(100).optional().default(0),
+  notes: z.string().optional().default(""),
+  terms: z.string().optional().default(""),
+  items: z.array(itemSchema).min(1),
+});
+
+const updateSchema = invoiceSchema.omit({ type: true });
+
+type InvoiceRow = {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  type: string;
+  number: string;
+  status: string;
+  client_name: string;
+  client_address: string;
+  client_contact: string;
+  client_tin: string;
+  issue_date: string;
+  due_date: string | null;
+  currency: string;
+  subtotal: string;
+  discount_amount: string;
+  vat_rate: string;
+  vat_amount: string;
+  total: string;
+  notes: string;
+  terms: string;
+  converted_from_id: string | null;
+  materials_received: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  amount_paid: string;
+};
+
+type ItemRow = {
+  id: string;
+  invoice_id: string;
+  description: string;
+  quantity: string;
+  unit: string;
+  unit_price: string;
+  amount: string;
+  sort_order: number;
+  requirement_id: string | null;
+};
+
+/**
+ * The paid picture, computed from real linked payments — never stored. Only two
+ * display states are exposed: "Paid" once the total is fully settled, otherwise
+ * "Not Paid" (any remaining balance, including partial). A proforma is never
+ * paid against, so it always reads "Not Paid".
+ */
+const derive = (row: InvoiceRow) => {
+  const total = Number(row.total);
+  const amountPaid = Number(row.amount_paid);
+  const balance = Math.max(round2(total - amountPaid), 0);
+  const displayStatus = total > 0 && amountPaid >= total ? "Paid" : "Not Paid";
+  return { amountPaid: round2(amountPaid), balance, displayStatus };
+};
+
+const mapInvoice = (row: InvoiceRow, items: ItemRow[] = []) => {
+  const { amountPaid, balance, displayStatus } = derive(row);
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    projectName: row.project_name ?? "",
+    type: row.type,
+    number: row.number,
+    status: row.status,
+    displayStatus,
+    clientName: row.client_name,
+    clientAddress: row.client_address,
+    clientContact: row.client_contact,
+    clientTin: row.client_tin,
+    issueDate: row.issue_date,
+    dueDate: row.due_date,
+    currency: row.currency,
+    subtotal: Number(row.subtotal),
+    discountAmount: Number(row.discount_amount),
+    vatRate: Number(row.vat_rate),
+    vatAmount: Number(row.vat_amount),
+    total: Number(row.total),
+    amountPaid,
+    balance,
+    notes: row.notes,
+    terms: row.terms,
+    convertedFromId: row.converted_from_id,
+    materialsReceived: row.materials_received,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    items: items
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((item) => ({
+        id: item.id,
+        description: item.description,
+        quantity: Number(item.quantity),
+        unit: item.unit,
+        unitPrice: Number(item.unit_price),
+        amount: Number(item.amount),
+        requirementId: item.requirement_id ?? "",
+      })),
+  };
+};
+
+const INVOICE_SELECT = `
+  SELECT
+    i.id, i.project_id, p.name AS project_name, i.type, i.number, i.status,
+    i.client_name, i.client_address, i.client_contact, i.client_tin,
+    i.issue_date::text, i.due_date::text, i.currency,
+    i.subtotal::text, i.discount_amount::text, i.vat_rate::text, i.vat_amount::text,
+    i.total::text, i.notes, i.terms, i.converted_from_id, i.materials_received, i.created_by,
+    i.created_at::text, i.updated_at::text,
+    COALESCE((
+      SELECT SUM(cp.amount_received)
+      FROM engicost.client_payments cp
+      WHERE cp.invoice_id = i.id AND cp.is_deleted = FALSE
+    ), 0)::text AS amount_paid
+  FROM engicost.invoices i
+  LEFT JOIN engicost.projects p ON p.id = i.project_id
+`;
+
+/** Recompute money from the items + discount + optional VAT. */
+const computeTotals = (
+  items: Array<{ quantity: number; unitPrice: number }>,
+  discountAmount: number,
+  vatRate: number,
+) => {
+  const subtotal = round2(
+    items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0), 0),
+  );
+  const discount = Math.min(round2(discountAmount), subtotal);
+  const taxable = Math.max(subtotal - discount, 0);
+  const vatAmount = vatRate > 0 ? round2((taxable * vatRate) / 100) : 0;
+  const total = round2(taxable + vatAmount);
+  return { subtotal, discount, vatAmount, total };
+};
+
+// ── List ────────────────────────────────────────────────────────────────
+router.get(
+  "/",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const projectId = String(req.query.projectId ?? "").trim();
+    const type = String(req.query.type ?? "").trim();
+
+    const filters = ["i.company_id = $1", "i.is_deleted = FALSE"];
+    const params: Array<string | number> = [companyId];
+    if (projectId) {
+      params.push(projectId);
+      filters.push(`i.project_id = $${params.length}`);
+    }
+    if (type === "Proforma" || type === "Invoice") {
+      params.push(type);
+      filters.push(`i.type = $${params.length}`);
+    }
+
+    const result = await db.query<InvoiceRow>(
+      `${INVOICE_SELECT} WHERE ${filters.join(" AND ")} ORDER BY i.created_at DESC`,
+      params,
+    );
+
+    res.json({ rows: result.rows.map((row) => mapInvoice(row)) });
+  }),
+);
+
+// ── Single (with items) ───────────────────────────────────────────────────
+const loadInvoice = async (companyId: number, id: string) => {
+  const result = await db.query<InvoiceRow>(
+    `${INVOICE_SELECT} WHERE i.company_id = $1 AND i.id = $2 AND i.is_deleted = FALSE`,
+    [companyId, id],
+  );
+  if (result.rowCount === 0) return null;
+  const items = await db.query<ItemRow>(
+    `SELECT id, invoice_id, description, quantity::text, unit, unit_price::text, amount::text, sort_order, requirement_id
+     FROM engicost.invoice_items WHERE company_id = $1 AND invoice_id = $2`,
+    [companyId, id],
+  );
+  return mapInvoice(result.rows[0], items.rows);
+};
+
+router.get(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const invoice = await loadInvoice(companyId, String(req.params.id));
+    if (!invoice) {
+      res.status(404).json({ message: "Invoice not found." });
+      return;
+    }
+    res.json(invoice);
+  }),
+);
+
+// ── Create ────────────────────────────────────────────────────────────────
+router.post(
+  "/",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const parsed = invoiceSchema.parse({
+      ...req.body,
+      discountAmount: toMoney(req.body.discountAmount),
+      vatRate: Number(req.body.vatRate) || 0,
+      items: (Array.isArray(req.body.items) ? req.body.items : []).map((item: unknown) => {
+        const raw = item as Record<string, unknown>;
+        return {
+          description: String(raw.description ?? ""),
+          quantity: toMoney(raw.quantity),
+          unit: String(raw.unit ?? ""),
+          unitPrice: toMoney(raw.unitPrice),
+          requirementId: String(raw.requirementId ?? ""),
+        };
+      }),
+    });
+
+    const project = await db.query<{ id: string; currency?: string }>(
+      "SELECT id FROM engicost.projects WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE",
+      [companyId, parsed.projectId],
+    );
+    if (project.rowCount === 0) {
+      res.status(400).json({ message: "Selected project does not exist." });
+      return;
+    }
+
+    const company = await db.query<{
+      currency: string;
+      invoice_proforma_prefix: string;
+      invoice_tax_prefix: string;
+    }>(
+      "SELECT currency, invoice_proforma_prefix, invoice_tax_prefix FROM engicost.companies WHERE id = $1",
+      [companyId],
+    );
+    const currency = company.rows[0]?.currency || "TZS";
+    const prefix =
+      parsed.type === "Proforma"
+        ? company.rows[0]?.invoice_proforma_prefix || "PRO"
+        : company.rows[0]?.invoice_tax_prefix || "INV";
+
+    const totals = computeTotals(parsed.items, parsed.discountAmount, parsed.vatRate);
+    const createdBy = req.authUser?.fullName ?? "System";
+    const invoiceId = makeId("INV");
+
+    const number = await withTransaction(async (client) => {
+      const year = Number(parsed.issueDate.slice(0, 4)) || new Date().getUTCFullYear();
+      const generated = await nextInvoiceNumber(client, companyId, parsed.type as InvoiceType, prefix, year);
+
+      await client.query(
+        `
+        INSERT INTO engicost.invoices (
+          id, company_id, project_id, type, number, status,
+          client_name, client_address, client_contact, client_tin,
+          issue_date, due_date, currency,
+          subtotal, discount_amount, vat_rate, vat_amount, total,
+          notes, terms, created_by
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'Draft',
+          $6, $7, $8, $9,
+          $10, $11, $12,
+          $13, $14, $15, $16, $17,
+          $18, $19, $20
+        )
+        `,
+        [
+          invoiceId,
+          companyId,
+          parsed.projectId,
+          parsed.type,
+          generated,
+          parsed.clientName,
+          parsed.clientAddress,
+          parsed.clientContact,
+          parsed.clientTin,
+          parsed.issueDate,
+          parsed.dueDate ?? null,
+          currency,
+          totals.subtotal,
+          totals.discount,
+          parsed.vatRate,
+          totals.vatAmount,
+          totals.total,
+          parsed.notes,
+          parsed.terms,
+          createdBy,
+        ],
+      );
+
+      let sort = 0;
+      for (const item of parsed.items) {
+        await client.query(
+          `
+          INSERT INTO engicost.invoice_items
+            (id, company_id, invoice_id, description, quantity, unit, unit_price, amount, sort_order, requirement_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
+          `,
+          [
+            makeId("INL"),
+            companyId,
+            invoiceId,
+            item.description,
+            item.quantity,
+            item.unit,
+            item.unitPrice,
+            round2((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)),
+            sort++,
+            item.requirementId ?? "",
+          ],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Created Invoice', 'Invoices', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [makeId("ACT"), companyId, createdBy, parsed.projectId, `${parsed.type} ${generated} for ${parsed.clientName}`],
+      );
+
+      return generated;
+    });
+
+    const invoice = await loadInvoice(companyId, invoiceId);
+    res.status(201).json({ ...invoice, number });
+  }),
+);
+
+// ── Update (blocked once money is on it, or once converted) ────────────────
+router.put(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+
+    const existing = await loadInvoice(companyId, id);
+    if (!existing) {
+      res.status(404).json({ message: "Invoice not found." });
+      return;
+    }
+    if (existing.amountPaid > 0) {
+      res.status(400).json({ message: "This invoice has payments against it and can no longer be edited." });
+      return;
+    }
+    if (existing.materialsReceived) {
+      res.status(400).json({
+        message: "This invoice's materials are already received and booked, so it can no longer be edited.",
+      });
+      return;
+    }
+
+    const parsed = updateSchema.parse({
+      ...req.body,
+      discountAmount: toMoney(req.body.discountAmount),
+      vatRate: Number(req.body.vatRate) || 0,
+      items: (Array.isArray(req.body.items) ? req.body.items : []).map((item: unknown) => {
+        const raw = item as Record<string, unknown>;
+        return {
+          description: String(raw.description ?? ""),
+          quantity: toMoney(raw.quantity),
+          unit: String(raw.unit ?? ""),
+          unitPrice: toMoney(raw.unitPrice),
+          requirementId: String(raw.requirementId ?? ""),
+        };
+      }),
+    });
+
+    const totals = computeTotals(parsed.items, parsed.discountAmount, parsed.vatRate);
+
+    await withTransaction(async (client) => {
+      await client.query(
+        `
+        UPDATE engicost.invoices SET
+          project_id = $3, client_name = $4, client_address = $5, client_contact = $6,
+          client_tin = $7, issue_date = $8, due_date = $9,
+          subtotal = $10, discount_amount = $11, vat_rate = $12, vat_amount = $13, total = $14,
+          notes = $15, terms = $16, updated_at = NOW()
+        WHERE company_id = $1 AND id = $2
+        `,
+        [
+          companyId,
+          id,
+          parsed.projectId,
+          parsed.clientName,
+          parsed.clientAddress,
+          parsed.clientContact,
+          parsed.clientTin,
+          parsed.issueDate,
+          parsed.dueDate ?? null,
+          totals.subtotal,
+          totals.discount,
+          parsed.vatRate,
+          totals.vatAmount,
+          totals.total,
+          parsed.notes,
+          parsed.terms,
+        ],
+      );
+
+      await client.query("DELETE FROM engicost.invoice_items WHERE company_id = $1 AND invoice_id = $2", [
+        companyId,
+        id,
+      ]);
+
+      let sort = 0;
+      for (const item of parsed.items) {
+        await client.query(
+          `
+          INSERT INTO engicost.invoice_items
+            (id, company_id, invoice_id, description, quantity, unit, unit_price, amount, sort_order, requirement_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
+          `,
+          [
+            makeId("INL"),
+            companyId,
+            id,
+            item.description,
+            item.quantity,
+            item.unit,
+            item.unitPrice,
+            round2((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)),
+            sort++,
+            item.requirementId ?? "",
+          ],
+        );
+      }
+    });
+
+    res.json(await loadInvoice(companyId, id));
+  }),
+);
+
+// ── Mark status (Sent / Cancelled) ─────────────────────────────────────────
+router.patch(
+  "/:id/status",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const status = String(req.body?.status ?? "");
+    const allowed = ["Draft", "Sent", "Accepted", "Cancelled"];
+    if (!allowed.includes(status)) {
+      res.status(400).json({ message: "Invalid status." });
+      return;
+    }
+
+    const updated = await db.query(
+      `UPDATE engicost.invoices SET status = $3, updated_at = NOW()
+       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE AND status <> 'Converted'`,
+      [companyId, id, status],
+    );
+    if (updated.rowCount === 0) {
+      res.status(404).json({ message: "Invoice not found or cannot change status." });
+      return;
+    }
+    res.json(await loadInvoice(companyId, id));
+  }),
+);
+
+type LoadedInvoice = NonNullable<Awaited<ReturnType<typeof loadInvoice>>>;
+
+/**
+ * Turn a proforma into a full invoice IN PLACE (same record, no second
+ * document): assign the next invoice number, book every line pulled from a
+ * project material as a received purchase against the project (cost = the
+ * material's own estimated unit cost, not the client price), and flag
+ * materials_received. Throws `{ __ledger }` when a spend guard blocks a
+ * material's cost. Returns the new invoice number.
+ *
+ * Runs inside a caller-provided transaction so it can be reused both by the
+ * explicit convert route and by "Pay" (which converts then records payment).
+ */
+const convertProformaInPlace = async (
+  client: PoolClient,
+  companyId: number,
+  source: LoadedInvoice,
+  prefix: string,
+  createdBy: string,
+): Promise<string> => {
+  const today = new Date().toISOString().slice(0, 10);
+  const year = Number(source.issueDate.slice(0, 4)) || Number(today.slice(0, 4));
+  const invoiceNumber = await nextInvoiceNumber(client, companyId, "Invoice", prefix, year);
+
+  // For each line pulled from a material: record a receipt (Delivered) and
+  // book its cost. The cost is the material's own estimated unit cost —
+  // not the price billed to the client — so revenue and cost stay separate.
+  for (const item of source.items) {
+    if (!item.requirementId) continue;
+
+    const requirement = await client.query<{
+      estimated_unit_cost: string;
+      supply_source: string;
+      material_name: string;
+    }>(
+      `SELECT estimated_unit_cost::text, supply_source, material_name
+       FROM engicost.material_requirements
+       WHERE company_id = $1 AND id = $2 AND project_id = $3`,
+      [companyId, item.requirementId, source.projectId],
+    );
+    if (requirement.rowCount === 0) continue;
+
+    const req0 = requirement.rows[0];
+    const isClientSupplied = req0.supply_source === "Client Supplied";
+    const quantity = Number(item.quantity) || 0;
+    const unitCost = isClientSupplied ? 0 : Number(req0.estimated_unit_cost) || 0;
+    const totalCost = round2(quantity * unitCost);
+
+    await client.query(
+      `
+      INSERT INTO engicost.material_purchases (
+        id, company_id, project_id, requirement_id, material_name, quantity_purchased,
+        supplier_name, unit_cost, total_cost, supply_source, purchase_date, delivery_note_number,
+        delivery_status, receipt_ref, notes, delivered_quantity,
+        approval_status, approval_requested_by, approval_requested_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11, $12,
+        'Delivered', $13, $14, $6,
+        'AUTO_APPROVED', $15, NOW()
+      )
+      `,
+      [
+        makeId("MP"),                                            // $1  id
+        companyId,                                               // $2  company_id
+        source.projectId,                                        // $3  project_id
+        item.requirementId,                                      // $4  requirement_id
+        req0.material_name,                                      // $5  material_name
+        quantity,                                                // $6  quantity_purchased / delivered_quantity
+        isClientSupplied ? "Client Supplied" : "Auto (invoiced)", // $7  supplier_name
+        unitCost,                                                // $8  unit_cost
+        totalCost,                                               // $9  total_cost
+        req0.supply_source,                                      // $10 supply_source
+        today,                                                   // $11 purchase_date
+        "",                                                      // $12 delivery_note_number
+        invoiceNumber,                                           // $13 receipt_ref
+        `Auto-received from invoice ${invoiceNumber}`,           // $14 notes
+        createdBy,                                               // $15 approval_requested_by
+      ],
+    );
+
+    if (totalCost > 0) {
+      const failure = await applyProjectSpend(client, {
+        companyId,
+        projectId: source.projectId,
+        category: "material",
+        delta: totalCost,
+        context: "invoiced materials received",
+      });
+      if (failure) {
+        // Abort the whole conversion so the ledger is never left partial.
+        throw { __ledger: failure };
+      }
+    }
+
+    // Recompute the requirement's delivery status from its receipts.
+    await client.query(
+      `
+      UPDATE engicost.material_requirements mr
+      SET supply_status = CASE
+            WHEN delivered.quantity >= mr.required_quantity THEN 'Fulfilled'
+            WHEN delivered.quantity > 0 THEN 'Partially Delivered'
+            ELSE mr.supply_status
+          END,
+          updated_at = NOW()
+      FROM (
+        SELECT COALESCE(SUM(LEAST(delivered_quantity, quantity_purchased)), 0) AS quantity
+        FROM engicost.material_purchases
+        WHERE company_id = $1 AND requirement_id = $2 AND is_deleted = FALSE
+          AND approval_status IN ('APPROVED', 'AUTO_APPROVED')
+          AND delivery_status IN ('Delivered', 'Partially Delivered')
+      ) delivered
+      WHERE mr.company_id = $1 AND mr.id = $2
+      `,
+      [companyId, item.requirementId],
+    );
+  }
+
+  // Flip the SAME record: Proforma → Invoice, new number, mark received.
+  await client.query(
+    `
+    UPDATE engicost.invoices
+    SET type = 'Invoice', number = $3, status = 'Draft',
+        materials_received = TRUE, updated_at = NOW()
+    WHERE company_id = $1 AND id = $2
+    `,
+    [companyId, source.id, invoiceNumber],
+  );
+
+  await client.query(
+    `
+    INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+    VALUES ($1, $2, $3, 'Converted Proforma to Invoice', 'Invoices', $4, $5, '127.0.0.1 / Local Dev')
+    `,
+    [makeId("ACT"), companyId, createdBy, source.projectId, `${source.number} became ${invoiceNumber}; materials received`],
+  );
+
+  return invoiceNumber;
+};
+
+// ── Convert a proforma into a full invoice, IN PLACE ────────────────────────
+// The same record flips from Proforma to Invoice (no second document); it gets
+// a fresh invoice number, and every line pulled from a project material is
+// recorded as received in the Materials module with its cost booked against the
+// project — so the materials are marked delivered without being entered twice.
+// Payment (below) reuses this, so most users never call convert directly.
+router.post(
+  "/:id/convert",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+
+    const source = await loadInvoice(companyId, id);
+    if (!source) {
+      res.status(404).json({ message: "Proforma not found." });
+      return;
+    }
+    if (source.type !== "Proforma") {
+      res.status(400).json({ message: "Only a proforma can be converted." });
+      return;
+    }
+
+    const company = await db.query<{ invoice_tax_prefix: string }>(
+      "SELECT invoice_tax_prefix FROM engicost.companies WHERE id = $1",
+      [companyId],
+    );
+    const prefix = company.rows[0]?.invoice_tax_prefix || "INV";
+    const createdBy = req.authUser?.fullName ?? "System";
+
+    try {
+      await withTransaction((client) =>
+        convertProformaInPlace(client, companyId, source, prefix, createdBy),
+      );
+      res.json(await loadInvoice(companyId, id));
+    } catch (error) {
+      if (error && typeof error === "object" && "__ledger" in error) {
+        res.status(400).json((error as { __ledger: unknown }).__ledger);
+        return;
+      }
+      throw error;
+    }
+  }),
+);
+
+// ── Record a payment against the invoice (this is what touches real money) ──
+router.post(
+  "/:id/payments",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const amount = toMoney(req.body?.amountReceived);
+    const paymentDate = String(req.body?.paymentDate ?? "").slice(0, 10);
+    const paymentMethod = String(req.body?.paymentMethod ?? "Cash");
+    const referenceNumber = String(req.body?.referenceNumber ?? "");
+    const recordedBy = req.authUser?.fullName ?? "System";
+
+    if (amount <= 0) {
+      res.status(400).json({ message: "Enter a payment amount greater than zero." });
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      res.status(400).json({ message: "Provide a valid payment date." });
+      return;
+    }
+
+    const invoice = await loadInvoice(companyId, id);
+    if (!invoice) {
+      res.status(404).json({ message: "Invoice not found." });
+      return;
+    }
+    if (amount > invoice.balance + 0.01) {
+      res.status(400).json({
+        message: `Payment exceeds the outstanding balance (${invoice.balance.toLocaleString("en-TZ")}).`,
+      });
+      return;
+    }
+
+    // Paying a proforma converts it to a full invoice in the same action: the
+    // single "Pay" click books its materials against the project and assigns the
+    // invoice number, then records the payment — there is no separate convert.
+    const company = await db.query<{ invoice_tax_prefix: string }>(
+      "SELECT invoice_tax_prefix FROM engicost.companies WHERE id = $1",
+      [companyId],
+    );
+    const prefix = company.rows[0]?.invoice_tax_prefix || "INV";
+
+    try {
+      await withTransaction(async (client) => {
+        // Still a proforma? Flip it in place first (books materials, gets number).
+        const paidNumber =
+          invoice.type === "Proforma"
+            ? await convertProformaInPlace(client, companyId, invoice, prefix, recordedBy)
+            : invoice.number;
+
+        // A real client payment, linked to this invoice. It flows into the
+        // project's amount_received exactly like any other client payment, so the
+        // project financials and cash-on-hand move for real.
+        await client.query(
+          `
+          INSERT INTO engicost.client_payments (
+            id, company_id, project_id, invoice_id, client_name, payment_type, milestone,
+            amount_expected, amount_received, payment_date, payment_method, reference_number,
+            status, notes, approval_status, approval_requested_by, approval_requested_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, 'Invoice', $6,
+            $7, $7, $8, $9, $10,
+            'Received', $11, 'AUTO_APPROVED', $12, NOW()
+          )
+          `,
+          [
+            makeId("PAY"),
+            companyId,
+            invoice.projectId,
+            id,
+            invoice.clientName,
+            paidNumber,
+            amount,
+            paymentDate,
+            paymentMethod,
+            referenceNumber,
+            `Payment against ${paidNumber}`,
+            recordedBy,
+          ],
+        );
+
+        await client.query(
+          `UPDATE engicost.projects SET amount_received = amount_received + $3, updated_at = NOW()
+           WHERE company_id = $1 AND id = $2`,
+          [companyId, invoice.projectId, amount],
+        );
+
+        await client.query(
+          `
+          INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+          VALUES ($1, $2, $3, 'Recorded Invoice Payment', 'Invoices', $4, $5, '127.0.0.1 / Local Dev')
+          `,
+          [makeId("ACT"), companyId, recordedBy, invoice.projectId, `${paidNumber}: ${amount.toLocaleString("en-TZ")}`],
+        );
+      });
+    } catch (error) {
+      if (error && typeof error === "object" && "__ledger" in error) {
+        res.status(400).json((error as { __ledger: unknown }).__ledger);
+        return;
+      }
+      throw error;
+    }
+
+    res.status(201).json(await loadInvoice(companyId, id));
+  }),
+);
+
+// ── PDF ────────────────────────────────────────────────────────────────────
+router.get(
+  "/:id/pdf",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const invoice = await loadInvoice(companyId, String(req.params.id));
+    if (!invoice) {
+      res.status(404).json({ message: "Invoice not found." });
+      return;
+    }
+
+    const company = await db.query<{
+      name: string;
+      email: string | null;
+      phone: string | null;
+      location: string | null;
+      tin: string;
+      vrn: string;
+      bank_name: string;
+      bank_account_name: string;
+      bank_account_number: string;
+      bank_branch: string;
+      bank_swift: string;
+    }>(
+      `SELECT name, email, phone, location, tin, vrn,
+              bank_name, bank_account_name, bank_account_number, bank_branch, bank_swift
+       FROM engicost.companies WHERE id = $1`,
+      [companyId],
+    );
+
+    const { filename, data } = await renderInvoicePdf(invoice, company.rows[0]);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(data);
+  }),
+);
+
+// ── Soft delete ─────────────────────────────────────────────────────────────
+router.delete(
+  "/:id",
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const deletedBy = req.authUser?.fullName ?? "System";
+
+    const invoice = await loadInvoice(companyId, id);
+    if (!invoice) {
+      res.status(404).json({ message: "Invoice not found." });
+      return;
+    }
+    if (invoice.amountPaid > 0) {
+      res.status(400).json({ message: "This invoice has payments against it and cannot be deleted." });
+      return;
+    }
+    if (invoice.materialsReceived) {
+      res.status(400).json({
+        message: "This invoice's materials are already received and booked, so it cannot be deleted here.",
+      });
+      return;
+    }
+
+    await db.query(
+      `UPDATE engicost.invoices SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $3, updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, id, deletedBy],
+    );
+    res.json({ message: "Invoice deleted." });
+  }),
+);
+
+// Restore is reserved for a super admin, mirroring the other financial modules.
+router.patch(
+  "/:id/restore",
+  requireSuperAdmin,
+  handleAsync(async (req, res) => {
+    const companyId = await getSingleTenantCompanyId();
+    const id = String(req.params.id);
+    const restored = await db.query(
+      `UPDATE engicost.invoices SET is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW()
+       WHERE company_id = $1 AND id = $2 AND is_deleted = TRUE`,
+      [companyId, id],
+    );
+    if (restored.rowCount === 0) {
+      res.status(404).json({ message: "Deleted invoice not found." });
+      return;
+    }
+    res.json(await loadInvoice(companyId, id));
+  }),
+);
+
+export default router;

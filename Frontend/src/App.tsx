@@ -22,6 +22,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
+import { InvoicesPage } from "./pages/InvoicesPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectFormPage } from "./pages/ProjectFormPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -301,6 +302,14 @@ function App() {
                 </PermissionOnly>
               }
               path="/payments"
+            />
+            <Route
+              element={
+                <PermissionOnly permissions={["payments.view"]}>
+                  <InvoicesPage />
+                </PermissionOnly>
+              }
+              path="/invoices"
             />
             <Route element={<Navigate replace to="/projects" />} path="/documents" />
             <Route

@@ -817,6 +817,18 @@ export const SettingsPage = () => {
   const [companyLocation, setCompanyLocation] = useState("");
   const [companyCurrency, setCompanyCurrency] = useState("TZS");
   const [enforceCashLimit, setEnforceCashLimit] = useState(false);
+  // Invoicing / billing identity
+  const [tin, setTin] = useState("");
+  const [vrn, setVrn] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankBranch, setBankBranch] = useState("");
+  const [bankSwift, setBankSwift] = useState("");
+  const [invoiceProformaPrefix, setInvoiceProformaPrefix] = useState("PRO");
+  const [invoiceTaxPrefix, setInvoiceTaxPrefix] = useState("INV");
+  const [defaultPaymentTerms, setDefaultPaymentTerms] = useState("");
+  const [defaultInvoiceNotes, setDefaultInvoiceNotes] = useState("");
   const [companySaving, setCompanySaving] = useState(false);
 
   const [oldPassword, setOldPassword] = useState("");
@@ -927,6 +939,17 @@ export const SettingsPage = () => {
     setCompanyLocation(company.location);
     setCompanyCurrency(company.currency);
     setEnforceCashLimit(company.enforceCashLimit);
+    setTin(company.tin);
+    setVrn(company.vrn);
+    setBankName(company.bankName);
+    setBankAccountName(company.bankAccountName);
+    setBankAccountNumber(company.bankAccountNumber);
+    setBankBranch(company.bankBranch);
+    setBankSwift(company.bankSwift);
+    setInvoiceProformaPrefix(company.invoiceProformaPrefix);
+    setInvoiceTaxPrefix(company.invoiceTaxPrefix);
+    setDefaultPaymentTerms(company.defaultPaymentTerms);
+    setDefaultInvoiceNotes(company.defaultInvoiceNotes);
   }, [company]);
 
   const handleSimpleSave = (event: FormEvent<HTMLFormElement>) => {
@@ -982,6 +1005,17 @@ export const SettingsPage = () => {
       location: companyLocation.trim(),
       currency: companyCurrency.trim().toUpperCase(),
       enforceCashLimit,
+      tin: tin.trim(),
+      vrn: vrn.trim(),
+      bankName: bankName.trim(),
+      bankAccountName: bankAccountName.trim(),
+      bankAccountNumber: bankAccountNumber.trim(),
+      bankBranch: bankBranch.trim(),
+      bankSwift: bankSwift.trim(),
+      invoiceProformaPrefix: invoiceProformaPrefix.trim() || "PRO",
+      invoiceTaxPrefix: invoiceTaxPrefix.trim() || "INV",
+      defaultPaymentTerms: defaultPaymentTerms.trim(),
+      defaultInvoiceNotes: defaultInvoiceNotes.trim(),
     };
 
     if (payload.name.length < 2) {
@@ -1014,6 +1048,17 @@ export const SettingsPage = () => {
       setCompanyLocation(updated.location);
       setCompanyCurrency(updated.currency);
       setEnforceCashLimit(updated.enforceCashLimit);
+      setTin(updated.tin);
+      setVrn(updated.vrn);
+      setBankName(updated.bankName);
+      setBankAccountName(updated.bankAccountName);
+      setBankAccountNumber(updated.bankAccountNumber);
+      setBankBranch(updated.bankBranch);
+      setBankSwift(updated.bankSwift);
+      setInvoiceProformaPrefix(updated.invoiceProformaPrefix);
+      setInvoiceTaxPrefix(updated.invoiceTaxPrefix);
+      setDefaultPaymentTerms(updated.defaultPaymentTerms);
+      setDefaultInvoiceNotes(updated.defaultInvoiceNotes);
       markSaved();
       showToast("success", "Company", "Profile updated.");
     } catch (error) {
@@ -1350,6 +1395,67 @@ export const SettingsPage = () => {
                         disabled={companySettingsLoading || companySaving}
                         type="submit"
                       >
+                        {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </SurfaceCard>
+
+                <SurfaceCard title="Invoicing & Bank Details">
+                  <p className="mb-3 text-xs text-slate-500">
+                    These appear on every proforma and invoice. Blank fields are
+                    simply left off the printed document.
+                  </p>
+                  <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleCompanyProfileSave}>
+                    <label className="form-field">
+                      <span>TIN</span>
+                      <input className="input-field" onChange={(e) => setTin(e.target.value)} placeholder="Tax Identification Number" value={tin} />
+                    </label>
+                    <label className="form-field">
+                      <span>VRN (VAT number)</span>
+                      <input className="input-field" onChange={(e) => setVrn(e.target.value)} placeholder="VAT Registration Number" value={vrn} />
+                    </label>
+                    <label className="form-field">
+                      <span>Bank Name</span>
+                      <input className="input-field" onChange={(e) => setBankName(e.target.value)} placeholder="e.g. CRDB Bank" value={bankName} />
+                    </label>
+                    <label className="form-field">
+                      <span>Account Name</span>
+                      <input className="input-field" onChange={(e) => setBankAccountName(e.target.value)} placeholder="Account holder name" value={bankAccountName} />
+                    </label>
+                    <label className="form-field">
+                      <span>Account Number</span>
+                      <input className="input-field" onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="Account number" value={bankAccountNumber} />
+                    </label>
+                    <label className="form-field">
+                      <span>Branch</span>
+                      <input className="input-field" onChange={(e) => setBankBranch(e.target.value)} placeholder="Branch" value={bankBranch} />
+                    </label>
+                    <label className="form-field">
+                      <span>SWIFT / BIC (Optional)</span>
+                      <input className="input-field" onChange={(e) => setBankSwift(e.target.value)} placeholder="SWIFT code" value={bankSwift} />
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="form-field">
+                        <span>Proforma Prefix</span>
+                        <input className="input-field" maxLength={12} onChange={(e) => setInvoiceProformaPrefix(e.target.value)} placeholder="PRO" value={invoiceProformaPrefix} />
+                      </label>
+                      <label className="form-field">
+                        <span>Invoice Prefix</span>
+                        <input className="input-field" maxLength={12} onChange={(e) => setInvoiceTaxPrefix(e.target.value)} placeholder="INV" value={invoiceTaxPrefix} />
+                      </label>
+                    </div>
+                    <label className="form-field sm:col-span-2">
+                      <span>Default Payment Terms (auto-fills new invoices)</span>
+                      <textarea className="input-field min-h-16" onChange={(e) => setDefaultPaymentTerms(e.target.value)} placeholder="e.g. 50% advance, balance on completion" value={defaultPaymentTerms} />
+                    </label>
+                    <label className="form-field sm:col-span-2">
+                      <span>Default Invoice Notes (auto-fills new invoices)</span>
+                      <textarea className="input-field min-h-16" onChange={(e) => setDefaultInvoiceNotes(e.target.value)} placeholder="Recurring note shown on every invoice" value={defaultInvoiceNotes} />
+                    </label>
+                    <div className="sm:col-span-2 flex justify-end">
+                      <button className="btn-primary" disabled={companySettingsLoading || companySaving} type="submit">
                         {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         Save
                       </button>

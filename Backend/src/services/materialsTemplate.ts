@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { MATERIAL_SUPPLY_SOURCES, PRIORITIES } from "../constants/vocabulary";
+import { MATERIAL_SUPPLY_SOURCES, MATERIAL_UNITS, PRIORITIES } from "../constants/vocabulary";
 
 /**
  * Bulk material-requirement import via Excel. One sheet, one row per material a
@@ -42,9 +42,10 @@ export const buildRequirementsTemplate = async (): Promise<Buffer> => {
     width: header.length < 14 ? 16 : header.length + 4,
   }));
 
-  // Bold header row.
+  // Bold header row, frozen so the labels stay visible while scrolling.
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).alignment = { vertical: "middle" };
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   // Two example rows so the expected shape is obvious.
   sheet.addRow([
@@ -54,19 +55,45 @@ export const buildRequirementsTemplate = async (): Promise<Buffer> => {
     "Electrical Wire (Waya)", 200, "Meters", 1500, "Client Supplied", "Low", "", "",
   ]);
 
-  // A second sheet documenting the allowed values.
+  // Drop-down pick-lists on the Unit, Supply Source and Priority columns so the
+  // user can pick a valid value instead of guessing the spelling. Applied to a
+  // generous row range (2..500) to cover a large import. Column order matches
+  // REQUIREMENT_COLUMNS: C = Unit, E = Supply Source, F = Priority.
+  const LAST_ROW = 500;
+  const listOf = (values: readonly string[]): string[] => [`"${values.join(",")}"`];
+  const addDropdown = (col: string, values: readonly string[], label: string) => {
+    for (let r = 2; r <= LAST_ROW; r += 1) {
+      sheet.getCell(`${col}${r}`).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: listOf(values),
+        showErrorMessage: true,
+        errorStyle: "warning",
+        errorTitle: `Choose a ${label}`,
+        error: `Pick one of: ${values.join(", ")}. (Any capitalisation is accepted on import.)`,
+      };
+    }
+  };
+  addDropdown("C", MATERIAL_UNITS, "unit");
+  addDropdown("E", MATERIAL_SUPPLY_SOURCES, "supply source");
+  addDropdown("F", PRIORITIES, "priority");
+
+  // A second sheet documenting the allowed values (also a copy-paste reference).
   const guide = workbook.addWorksheet("Guide");
   guide.addRow(["Column", "Notes / allowed values"]);
   guide.getRow(1).font = { bold: true };
   guide.addRow(["Material Name", "Required. The material's name."]);
   guide.addRow(["Required Quantity", "Required. A number, e.g. 100."]);
-  guide.addRow(["Unit", "Required, e.g. Bags, Pieces, Meters, Trips."]);
+  guide.addRow(["Unit", `Required. Pick from: ${MATERIAL_UNITS.join(", ")}.`]);
   guide.addRow(["Estimated Unit Cost", "Optional. Your cost per unit (not the client price). Used to book spend when invoiced."]);
-  guide.addRow(["Supply Source", MATERIAL_SUPPLY_SOURCES.join(" | ")]);
-  guide.addRow(["Priority", PRIORITIES.join(" | ")]);
+  guide.addRow(["Supply Source", `Pick from: ${MATERIAL_SUPPLY_SOURCES.join(", ")}. (Default: Company Purchased.)`]);
+  guide.addRow(["Priority", `Pick from: ${PRIORITIES.join(", ")}. (Default: Medium.)`]);
   guide.addRow(["Needed By Date", "Optional. Format YYYY-MM-DD, e.g. 2026-09-30."]);
   guide.addRow(["Notes", "Optional free text."]);
-  guide.columns = [{ width: 22 }, { width: 70 }];
+  guide.addRow([]);
+  guide.addRow(["Note", "Capitalisation does not matter — 'bags', 'BAGS' and 'Bags' all import as 'Bags'. The system tidies it up for you."]);
+  guide.getColumn(1).width = 22;
+  guide.getColumn(2).width = 90;
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer as unknown as Buffer;

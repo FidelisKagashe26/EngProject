@@ -211,6 +211,19 @@ export const initializeDatabase = async (): Promise<void> => {
     ALTER TABLE engicost.projects
     ADD COLUMN IF NOT EXISTS payment_terms TEXT NOT NULL DEFAULT ''
   `);
+  // Client contact details, used to auto-fill invoices and for follow-up.
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS client_phone VARCHAR(40) NOT NULL DEFAULT ''
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS client_email VARCHAR(160) NOT NULL DEFAULT ''
+  `);
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS client_tin VARCHAR(60) NOT NULL DEFAULT ''
+  `);
   // Running spend per budget category, kept alongside total_spent so the three
   // category budgets can be enforced without re-aggregating on every write.
   await db.query(`
@@ -326,6 +339,12 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.invoices
     ADD COLUMN IF NOT EXISTS materials_received BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+  // Flags a Draft invoice the system built automatically from recorded material
+  // purchases, so it can be labelled and the day's running draft found again.
+  await db.query(`
+    ALTER TABLE engicost.invoices
+    ADD COLUMN IF NOT EXISTS auto_generated BOOLEAN NOT NULL DEFAULT FALSE
   `);
 
   await db.query(`

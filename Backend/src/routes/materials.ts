@@ -8,6 +8,7 @@ import { withTransaction } from "../db/transaction";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import { buildRequirementsTemplate, parseRequirementsWorkbook } from "../services/materialsTemplate";
+import { appendPurchaseToAutoInvoice } from "../services/autoInvoice";
 import {
   APPROVAL_THRESHOLDS,
   getApprovalStatusForAmount,
@@ -18,8 +19,37 @@ import { applyProjectSpend, moveProjectSpend } from "../services/projectLedger";
 import {
   MATERIAL_DELIVERY_STATUSES,
   MATERIAL_SUPPLY_SOURCES,
+  MATERIAL_UNITS,
   PRIORITIES,
 } from "../constants/vocabulary";
+
+/**
+ * Map a free-typed value onto a known option regardless of capitalisation, so
+ * "bags"/"BAGS"/"Bags" all become "Bags". `fuzzy` also accepts a prefix match
+ * (used for the short pick-lists like priority/supply source). Returns
+ * undefined when nothing matches, letting the schema apply its default.
+ */
+const canonicalValue = (
+  raw: string,
+  options: readonly string[],
+  fuzzy = false,
+): string | undefined => {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  const exact = options.find((o) => o.toLowerCase() === lower);
+  if (exact || !fuzzy) return exact;
+  return options.find(
+    (o) => o.toLowerCase().startsWith(lower) || lower.startsWith(o.toLowerCase()),
+  );
+};
+
+/** Tidy free text to Title Case, e.g. "cubic meters" → "Cubic Meters". */
+const properCase = (raw: string): string =>
+  String(raw ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 
 const router = Router();
 
@@ -550,10 +580,12 @@ router.post(
         projectId,
         materialName: raw.materialName,
         requiredQuantity: raw.requiredQuantity,
-        unit: raw.unit,
+        // Normalise capitalisation onto the known vocabulary; an unknown unit is
+        // kept as Title Case, an unknown source/priority falls back to default.
+        unit: canonicalValue(raw.unit, MATERIAL_UNITS) ?? properCase(raw.unit),
         estimatedUnitCost: raw.estimatedUnitCost,
-        supplySource: raw.supplySource || undefined,
-        priority: raw.priority || undefined,
+        supplySource: canonicalValue(raw.supplySource, MATERIAL_SUPPLY_SOURCES, true),
+        priority: canonicalValue(raw.priority, PRIORITIES, true),
         neededByDate: raw.neededByDate || undefined,
         notes: raw.notes,
       });
@@ -1070,6 +1102,22 @@ router.post(
       }
 
       await refreshRequirementSupplyStatus(client, companyId, parsed.requirementId);
+
+      // Auto-bill: a booked, company-purchased receipt is appended to the
+      // project's open draft invoice for that day (client price starts at cost,
+      // editable). Client-supplied and not-yet-approved receipts are skipped.
+      if (!isClientSupplied && !needsApproval) {
+        await appendPurchaseToAutoInvoice(client, {
+          companyId,
+          projectId: parsed.projectId,
+          materialName: parsed.materialName,
+          quantity: parsed.quantityPurchased,
+          unit: "",
+          unitCost: parsed.unitCost,
+          purchaseDate: parsed.purchaseDate,
+          createdBy: requestedBy,
+        });
+      }
 
       await client.query(
         `

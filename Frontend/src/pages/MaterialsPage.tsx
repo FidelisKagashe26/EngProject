@@ -165,9 +165,6 @@ const RegisterMaterialModal = ({
               type="number"
               value={estimatedUnitCost}
             />
-            <span className="text-[10px] font-normal normal-case tracking-normal text-slate-400">
-              Your cost per unit — pulled in when recording a purchase (still editable there).
-            </span>
           </label>
           <label className="form-field">
             <span>Supply Source (Provider)</span>

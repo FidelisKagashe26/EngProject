@@ -21,6 +21,9 @@ const toFingerprint = (values: {
   projectName: string;
   siteLocation: string;
   clientName: string;
+  clientPhone: string;
+  clientEmail: string;
+  clientTin: string;
   contractNumber: string;
   startDate: string;
   endDate: string;
@@ -40,6 +43,9 @@ const toPayload = (values: {
   projectName: string;
   siteLocation: string;
   clientName: string;
+  clientPhone: string;
+  clientEmail: string;
+  clientTin: string;
   contractNumber: string;
   startDate: string;
   endDate: string;
@@ -64,6 +70,9 @@ const toPayload = (values: {
     name: values.projectName,
     siteLocation: values.siteLocation,
     clientName: values.clientName,
+    clientPhone: values.clientPhone,
+    clientEmail: values.clientEmail,
+    clientTin: values.clientTin,
     contractNumber: values.contractNumber,
     startDate: values.startDate,
     expectedCompletionDate: values.endDate,
@@ -148,6 +157,9 @@ export const ProjectFormPage = () => {
   const [projectName, setProjectName] = useState("");
   const [siteLocation, setSiteLocation] = useState("");
   const [clientName, setClientName] = useState("");
+  const [clientPhone, setClientPhone] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientTin, setClientTin] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -189,13 +201,13 @@ export const ProjectFormPage = () => {
   const currentFingerprint = useMemo(
     () =>
       toFingerprint({
-        projectName, siteLocation, clientName, contractNumber,
+        projectName, siteLocation, clientName, clientPhone, clientEmail, clientTin, contractNumber,
         startDate, endDate, description, status, contractValue,
         initialAdvance, laborBudget, materialBudget, operationalBudget,
         profitMargin, paymentTerms, notes,
       }),
     [
-      projectName, siteLocation, clientName, contractNumber,
+      projectName, siteLocation, clientName, clientPhone, clientEmail, clientTin, contractNumber,
       startDate, endDate, description, status, contractValue,
       initialAdvance, laborBudget, materialBudget, operationalBudget,
       profitMargin, paymentTerms, notes,
@@ -234,6 +246,9 @@ export const ProjectFormPage = () => {
         setProjectName(row.name);
         setSiteLocation(row.siteLocation);
         setClientName(row.clientName);
+        setClientPhone(row.clientPhone ?? "");
+        setClientEmail(row.clientEmail ?? "");
+        setClientTin(row.clientTin ?? "");
         setContractNumber(row.contractNumber);
         setStartDate(row.startDate);
         setEndDate(row.expectedCompletionDate);
@@ -254,7 +269,9 @@ export const ProjectFormPage = () => {
 
         const fp = toFingerprint({
           projectName: row.name, siteLocation: row.siteLocation,
-          clientName: row.clientName, contractNumber: row.contractNumber,
+          clientName: row.clientName, clientPhone: row.clientPhone ?? "",
+          clientEmail: row.clientEmail ?? "", clientTin: row.clientTin ?? "",
+          contractNumber: row.contractNumber,
           startDate: row.startDate, endDate: row.expectedCompletionDate,
           description: row.description ?? "", status: row.status,
           contractValue: String(row.contractValue),
@@ -293,6 +310,7 @@ export const ProjectFormPage = () => {
     projectName.trim().length > 0 &&
     siteLocation.trim().length > 0 &&
     clientName.trim().length > 0 &&
+    clientPhone.trim().length > 0 &&
     contractNumber.trim().length > 0 &&
     startDate.trim().length > 0 &&
     endDate.trim().length > 0 &&
@@ -380,6 +398,9 @@ export const ProjectFormPage = () => {
           name: projectName,
           siteLocation,
           clientName,
+          clientPhone,
+          clientEmail,
+          clientTin,
           contractNumber,
           startDate,
           expectedCompletionDate: endDate,
@@ -401,6 +422,9 @@ export const ProjectFormPage = () => {
             projectName,
             siteLocation,
             clientName,
+            clientPhone,
+            clientEmail,
+            clientTin,
             contractNumber,
             startDate,
             endDate,
@@ -512,6 +536,37 @@ export const ProjectFormPage = () => {
                 onChange={(e) => setClientName(e.target.value)}
                 placeholder="Dodoma Municipal Council"
                 value={clientName}
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Client Phone <span className="text-red-600">*</span></span>
+              <input
+                className={`input-field ${err(clientPhone)}`}
+                onChange={(e) => setClientPhone(e.target.value)}
+                placeholder="e.g. 0712 345 678"
+                value={clientPhone}
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Client Email (Optional)</span>
+              <input
+                className="input-field"
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="e.g. client@company.co.tz"
+                type="email"
+                value={clientEmail}
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Client TIN (Optional)</span>
+              <input
+                className="input-field"
+                onChange={(e) => setClientTin(e.target.value)}
+                placeholder="e.g. 123-456-789"
+                value={clientTin}
               />
             </label>
 

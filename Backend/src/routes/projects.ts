@@ -16,6 +16,9 @@ const projectSchema = z.object({
   name: z.string().min(2),
   siteLocation: z.string().min(2),
   clientName: z.string().min(2),
+  clientPhone: z.string().optional().default(""),
+  clientEmail: z.string().optional().default(""),
+  clientTin: z.string().optional().default(""),
   contractNumber: z.string().min(3),
   startDate: z.string().date(),
   expectedCompletionDate: z.string().date(),
@@ -51,6 +54,9 @@ const projectUpdateSchema = z.object({
   name: z.string().min(2).optional(),
   siteLocation: z.string().min(2).optional(),
   clientName: z.string().min(2).optional(),
+  clientPhone: z.string().optional(),
+  clientEmail: z.string().optional(),
+  clientTin: z.string().optional(),
   contractNumber: z.string().min(3).optional(),
   startDate: z.string().date().optional(),
   expectedCompletionDate: z.string().date().optional(),
@@ -74,6 +80,9 @@ const mapProject = (row: {
   name: string;
   site_location: string;
   client_name: string;
+  client_phone: string;
+  client_email: string;
+  client_tin: string;
   contract_number: string;
   start_date: string;
   expected_completion_date: string;
@@ -102,6 +111,9 @@ const mapProject = (row: {
   name: row.name,
   siteLocation: row.site_location,
   clientName: row.client_name,
+  clientPhone: row.client_phone,
+  clientEmail: row.client_email,
+  clientTin: row.client_tin,
   contractNumber: row.contract_number,
   startDate: row.start_date,
   expectedCompletionDate: row.expected_completion_date,
@@ -192,6 +204,9 @@ router.get(
         name,
         site_location,
         client_name,
+        client_phone,
+        client_email,
+        client_tin,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -237,6 +252,9 @@ router.get(
         name,
         site_location,
         client_name,
+        client_phone,
+        client_email,
+        client_tin,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -301,18 +319,23 @@ router.post(
         id, company_id, name, site_location, client_name, contract_number,
         start_date, expected_completion_date, contract_value, amount_received,
         total_spent, status, progress, pending_client_payments, labor_budget, material_budget,
-        operational_budget, expected_profit_margin_pct, payment_terms, description, notes
+        operational_budget, expected_profit_margin_pct, payment_terms, description, notes,
+        client_phone, client_email, client_tin
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16,
-        $17, $18, $19, $20, $21
+        $17, $18, $19, $20, $21,
+        $22, $23, $24
       )
       RETURNING
         id,
         name,
         site_location,
         client_name,
+        client_phone,
+        client_email,
+        client_tin,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -359,6 +382,9 @@ router.post(
         parsed.paymentTerms,
         parsed.description,
         parsed.notes,
+        parsed.clientPhone,
+        parsed.clientEmail,
+        parsed.clientTin,
       ],
     );
 
@@ -461,6 +487,9 @@ router.put(
         name,
         site_location,
         client_name,
+        client_phone,
+        client_email,
+        client_tin,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -510,6 +539,9 @@ router.put(
         payment_terms = $16,
         description = $17,
         notes = $18,
+        client_phone = $19,
+        client_email = $20,
+        client_tin = $21,
         updated_at = NOW()
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING
@@ -517,6 +549,9 @@ router.put(
         name,
         site_location,
         client_name,
+        client_phone,
+        client_email,
+        client_tin,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -560,6 +595,9 @@ router.put(
         parsed.paymentTerms ?? (row.payment_terms ?? ""),
         parsed.description ?? row.description,
         parsed.notes ?? row.notes,
+        parsed.clientPhone ?? row.client_phone,
+        parsed.clientEmail ?? row.client_email,
+        parsed.clientTin ?? row.client_tin,
       ],
     );
 

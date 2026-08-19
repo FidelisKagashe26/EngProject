@@ -5,7 +5,7 @@ import { useCompanySettings } from "../company/CompanySettingsContext";
 import { AppToast, GuiSelect, SectionTitle, SurfaceCard } from "../components/ui";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
 import { resolveUploadUrl } from "../utils/uploads";
-import { api, ApiError, type CreateGalleryItemPayload, type GalleryItemRecord, type QuoteRequestApiRecord, type SmtpStatusResponse, type WebsiteSettings } from "../services/api";
+import { api, ApiError, type CreateGalleryItemPayload, type GalleryItemRecord, type QuoteRequestApiRecord, type WebsiteSettings } from "../services/api";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -157,18 +157,24 @@ const WebsiteManagementSection = ({
   const [galleryCategories, setGalleryCategories] = useState<string[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const galleryFetched = useRef(false);
+  const quotesFetched = useRef(false);
   const [galleryForm, setGalleryForm] = useState<CreateGalleryItemPayload>({
     title: "", subtitle: "", category: "", imageUrl: "", sortOrder: 0, isVisible: true,
   });
   const [galleryFormSaving, setGalleryFormSaving] = useState(false);
   const [galleryFormError, setGalleryFormError] = useState("");
 
-  // Load quotes when tab opens
+  // Load quotes ONCE when the tab first opens. Using a fetched-guard (like site
+  // settings and gallery) instead of `quoteRequests.length === 0` is essential:
+  // the length stays 0 both when the list is genuinely empty and when a load
+  // fails, so the old condition re-fired forever, hammering the API and hanging
+  // the page.
   useEffect(() => {
-    if (tab === "quotes" && quoteRequests.length === 0 && !quoteLoading) {
+    if (tab === "quotes" && !quotesFetched.current) {
+      quotesFetched.current = true;
       onLoadQuotes();
     }
-  }, [tab, quoteRequests.length, quoteLoading, onLoadQuotes]);
+  }, [tab, onLoadQuotes]);
 
   // Load site settings once when tab opens
   useEffect(() => {
@@ -799,9 +805,6 @@ export const SettingsPage = () => {
   const { markSaved } = useUnsavedChanges();
   const {
     company,
-    expenseCategories,
-    materialUnits,
-    paymentMethods,
     loading: companySettingsLoading,
     errorMessage: companySettingsErrorMessage,
     saveCompanyProfile,
@@ -829,6 +832,11 @@ export const SettingsPage = () => {
   const [invoiceTaxPrefix, setInvoiceTaxPrefix] = useState("INV");
   const [defaultPaymentTerms, setDefaultPaymentTerms] = useState("");
   const [defaultInvoiceNotes, setDefaultInvoiceNotes] = useState("");
+  // Notification/Security toggle states — persisted with the company profile.
+  const [prefs, setPrefs] = useState<Record<string, boolean>>({});
+  const pref = (key: string, fallback: boolean): boolean => prefs[key] ?? fallback;
+  const togglePref = (key: string, value: boolean): void =>
+    setPrefs((current) => ({ ...current, [key]: value }));
   const [companySaving, setCompanySaving] = useState(false);
 
   const [oldPassword, setOldPassword] = useState("");
@@ -838,11 +846,6 @@ export const SettingsPage = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
-
-  const [smtpStatus, setSmtpStatus] = useState<SmtpStatusResponse | null>(null);
-  const [smtpLoading, setSmtpLoading] = useState(true);
-  const [smtpTestEmail, setSmtpTestEmail] = useState("");
-  const [smtpTesting, setSmtpTesting] = useState(false);
 
   // Quote requests state
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequestApiRecord[]>([]);
@@ -869,39 +872,6 @@ export const SettingsPage = () => {
   };
 
   useEffect(() => {
-    let mounted = true;
-
-    const loadSmtpStatus = async () => {
-      setSmtpLoading(true);
-
-      try {
-        const response = await api.getSmtpStatus();
-        if (mounted) {
-          setSmtpStatus(response);
-        }
-      } catch (error) {
-        if (mounted) {
-          if (error instanceof ApiError) {
-            showToast("error", "SMTP", error.message);
-          } else {
-            showToast("error", "SMTP", "Unable to load SMTP settings.");
-          }
-        }
-      } finally {
-        if (mounted) {
-          setSmtpLoading(false);
-        }
-      }
-    };
-
-    void loadSmtpStatus();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (companySettingsErrorMessage) {
       showToast("error", "Settings", companySettingsErrorMessage);
     }
@@ -914,12 +884,6 @@ export const SettingsPage = () => {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (user?.email && smtpTestEmail.trim().length === 0) {
-      setSmtpTestEmail(user.email);
-    }
-  }, [smtpTestEmail, user?.email]);
 
   useEffect(() => {
     if (!user) {
@@ -950,13 +914,8 @@ export const SettingsPage = () => {
     setInvoiceTaxPrefix(company.invoiceTaxPrefix);
     setDefaultPaymentTerms(company.defaultPaymentTerms);
     setDefaultInvoiceNotes(company.defaultInvoiceNotes);
+    setPrefs(company.systemPreferences ?? {});
   }, [company]);
-
-  const handleSimpleSave = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    markSaved();
-    showToast("success", "Saved", "Changes saved.");
-  };
 
   const handleMyAccountSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1016,6 +975,15 @@ export const SettingsPage = () => {
       invoiceTaxPrefix: invoiceTaxPrefix.trim() || "INV",
       defaultPaymentTerms: defaultPaymentTerms.trim(),
       defaultInvoiceNotes: defaultInvoiceNotes.trim(),
+      systemPreferences: {
+        notifyOverspend: pref("notifyOverspend", true),
+        notifyPendingPayments: pref("notifyPendingPayments", true),
+        notifyLaborDue: pref("notifyLaborDue", true),
+        notifyDeadlines: pref("notifyDeadlines", false),
+        secTwoFactor: pref("secTwoFactor", false),
+        secStrongPassword: pref("secStrongPassword", true),
+        secSessionTimeout: pref("secSessionTimeout", true),
+      },
     };
 
     if (payload.name.length < 2) {
@@ -1107,30 +1075,6 @@ export const SettingsPage = () => {
     }
   };
 
-  const handleSmtpTest = async (event: FormEvent<HTMLFormElement>) => {    event.preventDefault();
-
-    const recipient = smtpTestEmail.trim().toLowerCase();
-    if (!emailPattern.test(recipient)) {
-      showToast("error", "SMTP", "Enter a valid recipient email.");
-      return;
-    }
-
-    setSmtpTesting(true);
-    try {
-      const response = await api.sendSmtpTestEmail({ to: recipient });
-      markSaved();
-      showToast("success", "SMTP", response.message);
-    } catch (error) {
-      if (error instanceof ApiError) {
-        showToast("error", "SMTP", error.message);
-      } else {
-        showToast("error", "SMTP", "Failed to send SMTP test email.");
-      }
-    } finally {
-      setSmtpTesting(false);
-    }
-  };
-
   const loadQuoteRequests = async () => {
     setQuoteLoading(true);
     try {
@@ -1173,7 +1117,7 @@ export const SettingsPage = () => {
       <SectionTitle title="Settings" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[250px_1fr]">
-        <SurfaceCard className="hidden h-fit lg:block" title="Menu">
+        <SurfaceCard className="hidden h-fit lg:sticky lg:top-6 lg:block" title="Menu">
           <div className="space-y-2">
             {sectionOptions.map((option) => {
               const isActive = option.id === activeSection;
@@ -1462,190 +1406,56 @@ export const SettingsPage = () => {
                     </div>
                   </form>
                 </SurfaceCard>
+              </div>
 
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <SurfaceCard title="Notification Settings">
-                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleCompanyProfileSave}>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Overspending alerts</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("notifyOverspend", true)} onChange={(e) => togglePref("notifyOverspend", e.target.checked)} type="checkbox" />
                     </label>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Pending client payments</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("notifyPendingPayments", true)} onChange={(e) => togglePref("notifyPendingPayments", e.target.checked)} type="checkbox" />
                     </label>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Outstanding labor payments</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("notifyLaborDue", true)} onChange={(e) => togglePref("notifyLaborDue", e.target.checked)} type="checkbox" />
                     </label>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Project deadline reminders</span>
-                      <input type="checkbox" />
+                      <input checked={pref("notifyDeadlines", false)} onChange={(e) => togglePref("notifyDeadlines", e.target.checked)} type="checkbox" />
                     </label>
-                    <button className="btn-primary" type="submit">
+                    <button className="btn-primary" disabled={companySaving} type="submit">
+                      {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Save
                     </button>
                   </form>
-                </SurfaceCard>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <SurfaceCard title="Expense Categories">
-                  <div className="space-y-2">
-                    {expenseCategories.length === 0 ? (
-                      <p className="text-sm text-slate-500">No expense categories configured yet.</p>
-                    ) : (
-                      expenseCategories.map((category) => (
-                        <label className="form-field" key={`set-exp-${category}`}>
-                          <span>{category}</span>
-                          <input className="input-field" defaultValue={category} />
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </SurfaceCard>
-
-                <SurfaceCard title="Material Units">
-                  <div className="space-y-2">
-                    {materialUnits.length === 0 ? (
-                      <p className="text-sm text-slate-500">No material units configured yet.</p>
-                    ) : (
-                      materialUnits.map((unit) => (
-                        <label className="form-field" key={`set-unit-${unit}`}>
-                          <span>{unit}</span>
-                          <input className="input-field" defaultValue={unit} />
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </SurfaceCard>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <SurfaceCard title="Payment Methods">
-                  <div className="space-y-2">
-                    {paymentMethods.length === 0 ? (
-                      <p className="text-sm text-slate-500">No payment methods configured yet.</p>
-                    ) : (
-                      paymentMethods.map((method) => (
-                        <label className="form-field" key={`set-pay-${method}`}>
-                          <span>{method}</span>
-                          <input className="input-field" defaultValue={method} />
-                        </label>
-                      ))
-                    )}
-                  </div>
                 </SurfaceCard>
 
                 <SurfaceCard title="Security Settings">
-                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleCompanyProfileSave}>
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Two-factor authentication</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("secTwoFactor", false)} onChange={(e) => togglePref("secTwoFactor", e.target.checked)} type="checkbox" />
                     </label>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Enforce strong password policy</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("secStrongPassword", true)} onChange={(e) => togglePref("secStrongPassword", e.target.checked)} type="checkbox" />
                     </label>
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-white/10">
                       <span>Session timeout (30 mins)</span>
-                      <input defaultChecked type="checkbox" />
+                      <input checked={pref("secSessionTimeout", true)} onChange={(e) => togglePref("secSessionTimeout", e.target.checked)} type="checkbox" />
                     </label>
-                    <button className="btn-primary" type="submit">
+                    <button className="btn-primary" disabled={companySaving} type="submit">
+                      {companySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Save
                     </button>
                   </form>
                 </SurfaceCard>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <SurfaceCard title="SMTP Email">
-                  <div className="space-y-3 text-sm text-slate-700">
-                    {smtpLoading ? (
-                      <div className="flex items-center gap-2 text-slate-500">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Loading...</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                          <span>Status</span>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                              smtpStatus?.configured
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-amber-200 bg-amber-50 text-amber-700"
-                            }`}
-                          >
-                            {smtpStatus?.configured ? "Configured" : "Not configured"}
-                          </span>
-                        </div>
-                        <label className="form-field">
-                          <span>SMTP Host</span>
-                          <input className="input-field bg-slate-50" readOnly value={smtpStatus?.host ?? ""} />
-                        </label>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <label className="form-field">
-                            <span>Port</span>
-                            <input
-                              className="input-field bg-slate-50"
-                              readOnly
-                              value={smtpStatus ? String(smtpStatus.port) : ""}
-                            />
-                          </label>
-                          <label className="form-field">
-                            <span>Secure</span>
-                            <input
-                              className="input-field bg-slate-50"
-                              readOnly
-                              value={smtpStatus?.secure ? "Yes" : "No"}
-                            />
-                          </label>
-                        </div>
-                        <label className="form-field">
-                          <span>From Email</span>
-                          <input className="input-field bg-slate-50" readOnly value={smtpStatus?.fromEmail ?? ""} />
-                        </label>
-                      </>
-                    )}
-
-                    <form className="space-y-3 border-t border-slate-200 pt-3" onSubmit={handleSmtpTest}>
-                      <label className="form-field">
-                        <span>Test Recipient Email</span>
-                        <input
-                          className="input-field"
-                          onChange={(event) => setSmtpTestEmail(event.target.value)}
-                          placeholder="admin@company.com"
-                          type="email"
-                          value={smtpTestEmail}
-                        />
-                      </label>
-                      <button
-                        className="btn-primary w-full justify-center"
-                        disabled={smtpTesting || smtpLoading}
-                        type="submit"
-                      >
-                        {smtpTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Send Test
-                      </button>
-                    </form>
-                  </div>
-                </SurfaceCard>
-
-                <SurfaceCard title="Backup Settings">
-                  <form className="space-y-3 text-sm text-slate-700" onSubmit={handleSimpleSave}>
-                    <p>Auto backup: Daily 23:00</p>
-                    <p>Last: 23 Apr 2026 23:01</p>
-                    <div className="flex gap-2">
-                      <button className="btn-secondary" type="button">
-                        Run Backup Now
-                      </button>
-                      <button className="btn-primary" type="submit">
-                        Save
-                      </button>
-                    </div>
-                  </form>
-                </SurfaceCard>
-              </div>
             </>
           )}
 

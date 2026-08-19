@@ -1,4 +1,3 @@
-import { BarChart2, PieChart, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useActiveProject } from "../project/ActiveProjectContext";
 import {
@@ -178,17 +177,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
 
   const expensePagination = useTablePagination(filteredExpenseRows);
 
-  const monthTrendSummary = useMemo(() => {
-    const trend = charts.monthlyTrend;
-    if (trend.length < 2) return "Monthly trend will appear after at least two months of expense records.";
-    const current = trend[trend.length - 1];
-    const previous = trend[trend.length - 2];
-    const previousTotal = previous?.total ?? 0;
-    if (previousTotal <= 0) return `${current.month} has ${formatTzs(current.total)} in total expenses.`;
-    const delta = ((current.total - previousTotal) / previousTotal) * 100;
-    const direction = delta >= 0 ? "higher" : "lower";
-    return `${current.month} expenses are ${Math.abs(delta).toFixed(1)}% ${direction} than ${previous.month}.`;
-  }, [charts.monthlyTrend]);
 
   const resetForm = () => {
     setEditingExpenseId("");
@@ -514,40 +502,6 @@ export const ExpensesPage = ({ embedded = false, search = "", renderSearchRow, r
         )}
       </SurfaceCard>
 
-      {/* Expense Insights */}
-      <SurfaceCard title="Expense Insights">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              <PieChart className="h-4 w-4 text-[#0b2a53]" />
-              By Category
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {charts.byCategory.slice(0, 3).map((item) => (
-                <li key={`by-cat-${item.label}`}>{item.label} - {formatTzs(item.total)}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              <BarChart2 className="h-4 w-4 text-[#0b2a53]" />
-              By Project
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {charts.byProject.slice(0, 3).map((item) => (
-                <li key={`by-project-${item.label}`}>{item.label} - {formatTzs(item.total)}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              <TrendingUp className="h-4 w-4 text-[#0b2a53]" />
-              Monthly Trend
-            </p>
-            <p className="mt-2 text-sm text-slate-700">{monthTrendSummary}</p>
-          </div>
-        </div>
-      </SurfaceCard>
         </>
       )}
 

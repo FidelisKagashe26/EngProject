@@ -21,12 +21,9 @@ import { useTablePagination } from "../hooks/useTablePagination";
 import {
   api,
   type PettyCashApiRecord,
-  type PettyCashResponse,
   type ProjectApiRecord,
 } from "../services/api";
 import { formatDate, formatTzs } from "../utils/format";
-
-const OPENING_BALANCE = 1_800_000;
 
 type PettyCashPageProps = {
   embedded?: boolean;
@@ -40,7 +37,7 @@ type PettyCashPageProps = {
 export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, renderTabStrip }: PettyCashPageProps) => {
   const { markSaved } = useUnsavedChanges();
   // Scope comes from the shared header switcher, not a per-page dropdown.
-  const { activeProjectId } = useActiveProject();
+  const { activeProjectId, activeProject } = useActiveProject();
   const listProjectFilter = activeProjectId || "All";
 
   const [loading, setLoading] = useState(true);
@@ -48,11 +45,6 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
   const [error, setError] = useState("");
 
   const [projects, setProjects] = useState<ProjectApiRecord[]>([]);
-  const [summary, setSummary] = useState<PettyCashResponse["summary"]>({
-    totalCashIn: 0,
-    totalCashOut: 0,
-    pendingCount: 0,
-  });
   const [rows, setRows] = useState<PettyCashApiRecord[]>([]);
 
   // Modal states
@@ -83,7 +75,6 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
         ]);
         if (!mounted) return;
         setProjects(projectRows);
-        setSummary(pettyCashResponse.summary);
         setRows(pettyCashResponse.rows);
         setError("");
       } catch (loadError) {
@@ -99,7 +90,6 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
 
   const refreshData = async () => {
     const response = await api.getPettyCash();
-    setSummary(response.summary);
     setRows(response.rows);
   };
 
@@ -124,9 +114,35 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
 
   const pagination = useTablePagination(filteredRows);
 
+  // Petty cash is now per-project. In a project view the opening balance is that
+  // project's own petty-cash float; across "All" it is the sum of every
+  // project's float. Cards + table always share the same scope.
+  const isProjectView = listProjectFilter !== "All";
+  const openingBalance = useMemo(
+    () =>
+      isProjectView
+        ? activeProject?.pettyCash ?? 0
+        : projects.reduce((sum, p) => sum + (p.pettyCash || 0), 0),
+    [isProjectView, activeProject, projects],
+  );
+
+  const scope = useMemo(() => {
+    const scopeRows =
+      listProjectFilter === "All" ? rows : rows.filter((r) => r.projectId === listProjectFilter);
+    const cashIn = scopeRows
+      .filter((r) => r.transactionType === "Cash In")
+      .reduce((s, r) => s + r.amount, 0);
+    const cashOut = scopeRows
+      .filter((r) => r.transactionType === "Cash Out")
+      .reduce((s, r) => s + r.amount, 0);
+    const pending = scopeRows.filter((r) => r.status === "Pending").length;
+    return { cashIn, cashOut, pending };
+  }, [rows, listProjectFilter]);
+
+  // Available petty cash = float + top-ups − spend. Cash-out is capped at this.
   const currentBalance = useMemo(
-    () => OPENING_BALANCE + summary.totalCashIn - summary.totalCashOut,
-    [summary],
+    () => openingBalance + scope.cashIn - scope.cashOut,
+    [openingBalance, scope],
   );
 
   const projectedBalance = useMemo(() => {
@@ -241,23 +257,23 @@ export const PettyCashPage = ({ embedded = false, search = "", renderSearchRow, 
       {renderTabStrip?.()}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <SurfaceCard title="Opening Balance">
-          <p className="text-xl font-bold text-slate-900">{formatTzs(OPENING_BALANCE)}</p>
+        <SurfaceCard title={isProjectView ? "Petty Cash Float" : "Total Allocated"}>
+          <p className="text-xl font-bold text-slate-900">{formatTzs(openingBalance)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Total Cash In">
-          <p className="text-xl font-bold text-emerald-700">{formatTzs(summary.totalCashIn)}</p>
+        <SurfaceCard title="Cash In">
+          <p className="text-xl font-bold text-emerald-700">{formatTzs(scope.cashIn)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Total Cash Out">
-          <p className="text-xl font-bold text-amber-700">{formatTzs(summary.totalCashOut)}</p>
+        <SurfaceCard title="Cash Out">
+          <p className="text-xl font-bold text-amber-700">{formatTzs(scope.cashOut)}</p>
         </SurfaceCard>
-        <SurfaceCard title="Current Balance">
+        <SurfaceCard title={isProjectView ? "Available (cap)" : "Current Balance"}>
           <p className={`text-xl font-bold ${currentBalance >= 0 ? "text-[#0b2a53]" : "text-red-700"}`}>
             {formatTzs(currentBalance)}
           </p>
         </SurfaceCard>
         <SurfaceCard title="Pending Reconciliation">
           <p className="text-xl font-bold text-red-700">
-            {summary.pendingCount} {summary.pendingCount === 1 ? "Entry" : "Entries"}
+            {scope.pending} {scope.pending === 1 ? "Entry" : "Entries"}
           </p>
         </SurfaceCard>
       </div>

@@ -50,6 +50,7 @@ export interface ProjectApiRecord {
   clientPhone: string;
   clientEmail: string;
   clientTin: string;
+  pettyCash: number;
   contractNumber: string;
   startDate: string;
   expectedCompletionDate: string;
@@ -135,6 +136,7 @@ export interface CreateProjectPayload {
   clientPhone: string;
   clientEmail: string;
   clientTin: string;
+  pettyCash: number;
   contractNumber: string;
   startDate: string;
   expectedCompletionDate: string;
@@ -412,6 +414,9 @@ export interface PaymentApiRecord {
   id: string;
   projectId: string;
   projectName: string;
+  /** Set when the payment was applied to a specific invoice. */
+  invoiceId: string;
+  invoiceNumber: string;
   client: string;
   paymentType: string;
   milestone: string;
@@ -461,6 +466,8 @@ export interface CreatePaymentPayload {
   clientName: string;
   paymentType: "Advance" | "Milestone" | "Stage" | "Final" | "Other";
   milestone: string;
+  /** Optional: apply this payment to a specific invoice of the project. */
+  invoiceId?: string;
   amountExpected: number;
   amountReceived: number;
   paymentDate: string;
@@ -806,6 +813,7 @@ export interface CompanyProfile {
   invoiceTaxPrefix: string;
   defaultPaymentTerms: string;
   defaultInvoiceNotes: string;
+  systemPreferences: Record<string, boolean>;
 }
 
 export interface SettingsResponse {
@@ -835,6 +843,7 @@ export type UpdateCompanyProfilePayload = Pick<
   | "invoiceTaxPrefix"
   | "defaultPaymentTerms"
   | "defaultInvoiceNotes"
+  | "systemPreferences"
 >;
 
 export interface CreateDocumentPayload {

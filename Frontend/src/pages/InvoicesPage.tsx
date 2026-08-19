@@ -394,11 +394,6 @@ export const InvoicesPage = () => {
         title="Invoices"
       />
 
-      <p className="rounded-lg border border-[#0b2a53]/10 bg-[#0b2a53]/5 px-3 py-2 text-xs text-[#0b2a53] dark:border-white/10 dark:bg-white/5 dark:text-blue-300">
-        <span className="font-semibold">Auto</span> drafts are built for you as materials are purchased —
-        one per project per day, priced at cost. Open a draft, set your client prices, then Pay it.
-      </p>
-
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <SurfaceCard title="Total invoiced">

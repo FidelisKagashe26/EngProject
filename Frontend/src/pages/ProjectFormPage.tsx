@@ -17,6 +17,23 @@ type SaveMode = "project" | "draft" | null;
 // profitLossEst     → auto: amountReceived - totalSpent (backend)
 // pendingPayments   → auto: contractValue - amountReceived
 
+// Planned profit is whatever the contract value has left after the three budget
+// lines. The margin % is derived from it, never typed — so it can't drift from
+// the numbers above it. (Petty cash is a float spent from the operational
+// budget, so it is not counted again here.)
+const computeExpectedProfit = (
+  contractValue: number,
+  laborBudget: number,
+  materialBudget: number,
+  operationalBudget: number,
+) => {
+  const plannedCost = laborBudget + materialBudget + operationalBudget;
+  const expectedProfit = contractValue - plannedCost;
+  const marginPct =
+    contractValue > 0 ? Math.round((expectedProfit / contractValue) * 10000) / 100 : 0;
+  return { plannedCost, expectedProfit, marginPct };
+};
+
 const toFingerprint = (values: {
   projectName: string;
   siteLocation: string;
@@ -24,6 +41,7 @@ const toFingerprint = (values: {
   clientPhone: string;
   clientEmail: string;
   clientTin: string;
+  pettyCash: string;
   contractNumber: string;
   startDate: string;
   endDate: string;
@@ -34,7 +52,6 @@ const toFingerprint = (values: {
   laborBudget: string;
   materialBudget: string;
   operationalBudget: string;
-  profitMargin: string;
   paymentTerms: string;
   notes: string;
 }) => JSON.stringify(values);
@@ -46,6 +63,7 @@ const toPayload = (values: {
   clientPhone: string;
   clientEmail: string;
   clientTin: string;
+  pettyCash: string;
   contractNumber: string;
   startDate: string;
   endDate: string;
@@ -55,7 +73,6 @@ const toPayload = (values: {
   laborBudget: string;
   materialBudget: string;
   operationalBudget: string;
-  profitMargin: string;
   paymentTerms: string;
   description: string;
   notes: string;
@@ -65,7 +82,12 @@ const toPayload = (values: {
   const laborBudget = Number(values.laborBudget) || 0;
   const materialBudget = Number(values.materialBudget) || 0;
   const operationalBudget = Number(values.operationalBudget) || 0;
-  const expectedProfitMarginPct = Number(values.profitMargin) || 0;
+  const expectedProfitMarginPct = computeExpectedProfit(
+    contractVal,
+    laborBudget,
+    materialBudget,
+    operationalBudget,
+  ).marginPct;
   return {
     name: values.projectName,
     siteLocation: values.siteLocation,
@@ -73,6 +95,7 @@ const toPayload = (values: {
     clientPhone: values.clientPhone,
     clientEmail: values.clientEmail,
     clientTin: values.clientTin,
+    pettyCash: Number(values.pettyCash) || 0,
     contractNumber: values.contractNumber,
     startDate: values.startDate,
     expectedCompletionDate: values.endDate,
@@ -160,6 +183,7 @@ export const ProjectFormPage = () => {
   const [clientPhone, setClientPhone] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientTin, setClientTin] = useState("");
+  const [pettyCash, setPettyCash] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -173,7 +197,6 @@ export const ProjectFormPage = () => {
   const [laborBudget, setLaborBudget] = useState("");
   const [materialBudget, setMaterialBudget] = useState("");
   const [operationalBudget, setOperationalBudget] = useState("");
-  const [profitMargin, setProfitMargin] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [notes, setNotes] = useState("");
   const [initialDocuments, setInitialDocuments] = useState<File[]>([]);
@@ -196,21 +219,29 @@ export const ProjectFormPage = () => {
   const remainingBalance = contractVal - spentVal;
   const pendingPayments = Math.max(contractVal - advanceVal, 0);
   const profitLossEstimate = advanceVal - spentVal;
+  // Expected profit & margin — derived from the contract value and the three
+  // budgets, shown read-only (not typed).
+  const expected = computeExpectedProfit(
+    contractVal,
+    Number(laborBudget) || 0,
+    Number(materialBudget) || 0,
+    Number(operationalBudget) || 0,
+  );
 
   // ── Dirty tracking ──
   const currentFingerprint = useMemo(
     () =>
       toFingerprint({
-        projectName, siteLocation, clientName, clientPhone, clientEmail, clientTin, contractNumber,
+        projectName, siteLocation, clientName, clientPhone, clientEmail, clientTin, pettyCash, contractNumber,
         startDate, endDate, description, status, contractValue,
         initialAdvance, laborBudget, materialBudget, operationalBudget,
-        profitMargin, paymentTerms, notes,
+        paymentTerms, notes,
       }),
     [
       projectName, siteLocation, clientName, clientPhone, clientEmail, clientTin, contractNumber,
       startDate, endDate, description, status, contractValue,
       initialAdvance, laborBudget, materialBudget, operationalBudget,
-      profitMargin, paymentTerms, notes,
+      paymentTerms, notes,
     ],
   );
   const currentFingerprintRef = useRef(currentFingerprint);
@@ -249,6 +280,7 @@ export const ProjectFormPage = () => {
         setClientPhone(row.clientPhone ?? "");
         setClientEmail(row.clientEmail ?? "");
         setClientTin(row.clientTin ?? "");
+        setPettyCash(row.pettyCash > 0 ? String(row.pettyCash) : "");
         setContractNumber(row.contractNumber);
         setStartDate(row.startDate);
         setEndDate(row.expectedCompletionDate);
@@ -258,9 +290,6 @@ export const ProjectFormPage = () => {
         setLaborBudget(row.laborBudget > 0 ? String(row.laborBudget) : "");
         setMaterialBudget(row.materialBudget > 0 ? String(row.materialBudget) : "");
         setOperationalBudget(row.operationalBudget > 0 ? String(row.operationalBudget) : "");
-        setProfitMargin(
-          row.expectedProfitMarginPct > 0 ? String(row.expectedProfitMarginPct) : "",
-        );
         setPaymentTerms(row.paymentTerms ?? "");
         // Live running totals — shown as read-only
         setLiveAmountReceived(row.amountReceived);
@@ -271,6 +300,7 @@ export const ProjectFormPage = () => {
           projectName: row.name, siteLocation: row.siteLocation,
           clientName: row.clientName, clientPhone: row.clientPhone ?? "",
           clientEmail: row.clientEmail ?? "", clientTin: row.clientTin ?? "",
+          pettyCash: row.pettyCash > 0 ? String(row.pettyCash) : "",
           contractNumber: row.contractNumber,
           startDate: row.startDate, endDate: row.expectedCompletionDate,
           description: row.description ?? "", status: row.status,
@@ -279,8 +309,6 @@ export const ProjectFormPage = () => {
           laborBudget: row.laborBudget > 0 ? String(row.laborBudget) : "",
           materialBudget: row.materialBudget > 0 ? String(row.materialBudget) : "",
           operationalBudget: row.operationalBudget > 0 ? String(row.operationalBudget) : "",
-          profitMargin:
-            row.expectedProfitMarginPct > 0 ? String(row.expectedProfitMarginPct) : "",
           paymentTerms: row.paymentTerms ?? "",
           notes: row.notes ?? "",
         });
@@ -401,6 +429,7 @@ export const ProjectFormPage = () => {
           clientPhone,
           clientEmail,
           clientTin,
+          pettyCash: Number(pettyCash) || 0,
           contractNumber,
           startDate,
           expectedCompletionDate: endDate,
@@ -411,7 +440,7 @@ export const ProjectFormPage = () => {
           laborBudget: Number(laborBudget) || 0,
           materialBudget: Number(materialBudget) || 0,
           operationalBudget: Number(operationalBudget) || 0,
-          expectedProfitMarginPct: Number(profitMargin) || 0,
+          expectedProfitMarginPct: expected.marginPct,
           paymentTerms,
           description,
           notes,
@@ -425,6 +454,7 @@ export const ProjectFormPage = () => {
             clientPhone,
             clientEmail,
             clientTin,
+            pettyCash,
             contractNumber,
             startDate,
             endDate,
@@ -434,7 +464,6 @@ export const ProjectFormPage = () => {
             laborBudget,
             materialBudget,
             operationalBudget,
-            profitMargin,
             paymentTerms,
             description,
             notes,
@@ -721,15 +750,35 @@ export const ProjectFormPage = () => {
                 placeholder="18000000"
                 value={operationalBudget}
               />
-              <label className="form-field">
-                <span>Expected Profit Margin (%)</span>
-                <input
-                  className="input-field"
-                  onChange={(e) => setProfitMargin(e.target.value)}
-                  placeholder="18"
-                  type="number"
-                  value={profitMargin}
+              <div>
+                <FinancialInput
+                  label="Petty Cash Float"
+                  onChange={setPettyCash}
+                  placeholder="500000"
+                  value={pettyCash}
                 />
+                <p className="mt-1 text-[10px] text-slate-400">
+                  This project's petty-cash allocation. Cash-out on the Petty Cash tab can't exceed it.
+                </p>
+              </div>
+              <label className="form-field">
+                <span>Expected Profit (TZS) <span className="text-[10px] font-normal normal-case tracking-normal text-slate-400">Auto</span></span>
+                <input
+                  className={`input-field bg-slate-50 font-semibold ${expected.expectedProfit < 0 ? "text-red-700" : "text-emerald-700"}`}
+                  readOnly
+                  value={`TZS ${Math.round(expected.expectedProfit).toLocaleString("en-TZ")}`}
+                />
+              </label>
+              <label className="form-field">
+                <span>Expected Profit Margin (%) <span className="text-[10px] font-normal normal-case tracking-normal text-slate-400">Auto</span></span>
+                <input
+                  className="input-field bg-slate-50 font-semibold text-[#0b2a53]"
+                  readOnly
+                  value={`${expected.marginPct}%`}
+                />
+                <span className="mt-1 text-[10px] text-slate-400">
+                  Contract Value − (Labour + Materials + Operational). Fill those above and this updates itself.
+                </span>
               </label>
               <label className="form-field">
                 <span>Payment Terms</span>

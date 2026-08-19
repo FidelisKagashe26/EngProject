@@ -150,6 +150,37 @@ router.post(
       // project's operational budget exactly like an expense would. Cash In
       // tops the float back up and is not a project cost.
       if (parsed.transactionType === "Cash Out" && parsed.projectId.trim().length > 0) {
+        // Hard cap: a project's petty-cash spending may never exceed its own
+        // petty-cash float (allocation + top-ups − what has already been spent).
+        const balResult = await client.query<{ petty_cash: string; spent: string; topped: string }>(
+          `
+          SELECT
+            p.petty_cash::text AS petty_cash,
+            COALESCE((SELECT SUM(amount) FROM engicost.petty_cash_transactions
+                      WHERE company_id = $1 AND project_id = $2 AND transaction_type = 'Cash Out' AND is_deleted = FALSE), 0)::text AS spent,
+            COALESCE((SELECT SUM(amount) FROM engicost.petty_cash_transactions
+                      WHERE company_id = $1 AND project_id = $2 AND transaction_type = 'Cash In' AND is_deleted = FALSE), 0)::text AS topped
+          FROM engicost.projects p
+          WHERE p.company_id = $1 AND p.id = $2
+          `,
+          [companyId, parsed.projectId],
+        );
+        const bal = balResult.rows[0];
+        const availablePettyCash =
+          Number(bal?.petty_cash ?? 0) + Number(bal?.topped ?? 0) - Number(bal?.spent ?? 0);
+        if (parsed.amount > availablePettyCash + 0.001) {
+          return {
+            failure: {
+              message: `Cash out exceeds this project's available petty cash (${availablePettyCash.toLocaleString("en-TZ")}). Raise the project's petty cash or lower the amount.`,
+              projectName,
+              availableCash: availablePettyCash,
+              remainingBudget: availablePettyCash,
+              requestedAmount: parsed.amount,
+            },
+            row: null,
+          };
+        }
+
         const failure = await applyProjectSpend(client, {
           companyId,
           projectId: parsed.projectId,

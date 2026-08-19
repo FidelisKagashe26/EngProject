@@ -19,6 +19,7 @@ const projectSchema = z.object({
   clientPhone: z.string().optional().default(""),
   clientEmail: z.string().optional().default(""),
   clientTin: z.string().optional().default(""),
+  pettyCash: z.number().nonnegative().optional().default(0),
   contractNumber: z.string().min(3),
   startDate: z.string().date(),
   expectedCompletionDate: z.string().date(),
@@ -57,6 +58,7 @@ const projectUpdateSchema = z.object({
   clientPhone: z.string().optional(),
   clientEmail: z.string().optional(),
   clientTin: z.string().optional(),
+  pettyCash: z.number().nonnegative().optional(),
   contractNumber: z.string().min(3).optional(),
   startDate: z.string().date().optional(),
   expectedCompletionDate: z.string().date().optional(),
@@ -83,6 +85,7 @@ const mapProject = (row: {
   client_phone: string;
   client_email: string;
   client_tin: string;
+  petty_cash: string;
   contract_number: string;
   start_date: string;
   expected_completion_date: string;
@@ -114,6 +117,7 @@ const mapProject = (row: {
   clientPhone: row.client_phone,
   clientEmail: row.client_email,
   clientTin: row.client_tin,
+  pettyCash: Number(row.petty_cash),
   contractNumber: row.contract_number,
   startDate: row.start_date,
   expectedCompletionDate: row.expected_completion_date,
@@ -207,6 +211,7 @@ router.get(
         client_phone,
         client_email,
         client_tin,
+        petty_cash::text,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -255,6 +260,7 @@ router.get(
         client_phone,
         client_email,
         client_tin,
+        petty_cash::text,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -320,13 +326,13 @@ router.post(
         start_date, expected_completion_date, contract_value, amount_received,
         total_spent, status, progress, pending_client_payments, labor_budget, material_budget,
         operational_budget, expected_profit_margin_pct, payment_terms, description, notes,
-        client_phone, client_email, client_tin
+        client_phone, client_email, client_tin, petty_cash
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16,
         $17, $18, $19, $20, $21,
-        $22, $23, $24
+        $22, $23, $24, $25
       )
       RETURNING
         id,
@@ -336,6 +342,7 @@ router.post(
         client_phone,
         client_email,
         client_tin,
+        petty_cash::text,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -385,6 +392,7 @@ router.post(
         parsed.clientPhone,
         parsed.clientEmail,
         parsed.clientTin,
+        parsed.pettyCash,
       ],
     );
 
@@ -490,6 +498,7 @@ router.put(
         client_phone,
         client_email,
         client_tin,
+        petty_cash::text,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -542,6 +551,7 @@ router.put(
         client_phone = $19,
         client_email = $20,
         client_tin = $21,
+        petty_cash = $22,
         updated_at = NOW()
       WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
       RETURNING
@@ -552,6 +562,7 @@ router.put(
         client_phone,
         client_email,
         client_tin,
+        petty_cash::text,
         contract_number,
         start_date::text,
         expected_completion_date::text,
@@ -598,6 +609,7 @@ router.put(
         parsed.clientPhone ?? row.client_phone,
         parsed.clientEmail ?? row.client_email,
         parsed.clientTin ?? row.client_tin,
+        parsed.pettyCash ?? Number(row.petty_cash),
       ],
     );
 

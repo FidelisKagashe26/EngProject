@@ -31,6 +31,10 @@ const paymentSchema = z.object({
   clientName: z.string().min(2),
   paymentType: z.enum(["Advance", "Milestone", "Stage", "Final", "Other"]),
   milestone: z.string().optional().default(""),
+  // Optional: settle a specific invoice with this payment. Linking makes the
+  // invoice read as paid without touching amount_received twice (the invoice's
+  // paid figure is a SUM of its linked payments, computed on read).
+  invoiceId: z.string().optional().default(""),
   // amountExpected is legacy; the page is now a received-money transaction log.
   // When omitted it defaults to the received amount (see POST handler).
   amountExpected: z.number().nonnegative().optional(),
@@ -56,6 +60,8 @@ router.get(
         id: string;
         project_id: string;
         project_name: string;
+        invoice_id: string | null;
+        invoice_number: string | null;
         client_name: string;
         payment_type: string;
         milestone: string | null;
@@ -75,6 +81,8 @@ router.get(
           cp.id,
           cp.project_id,
           p.name AS project_name,
+          cp.invoice_id,
+          iv.number AS invoice_number,
           cp.client_name,
           cp.payment_type,
           cp.milestone,
@@ -90,6 +98,7 @@ router.get(
           cp.attachment_type
         FROM engicost.client_payments cp
         JOIN engicost.projects p ON p.id = cp.project_id
+        LEFT JOIN engicost.invoices iv ON iv.id = cp.invoice_id
         WHERE cp.company_id = $1 AND cp.is_deleted = FALSE
         ORDER BY cp.payment_date DESC, cp.created_at DESC
         `,
@@ -151,6 +160,8 @@ router.get(
         id: row.id,
         projectId: row.project_id,
         projectName: row.project_name,
+        invoiceId: row.invoice_id ?? "",
+        invoiceNumber: row.invoice_number ?? "",
         client: row.client_name,
         paymentType: row.payment_type,
         milestone: row.milestone ?? "",
@@ -196,15 +207,26 @@ router.post(
     const approvalStatus = getApprovalStatusForAmount("client_payments", parsed.amountReceived);
     const requestedBy = req.body.requestedBy || req.authUser?.fullName || "System";
 
+    // Optional invoice link: keep it only if it really is this project's invoice,
+    // otherwise ignore it rather than failing the payment.
+    let effectiveInvoiceId = parsed.invoiceId.trim();
+    if (effectiveInvoiceId) {
+      const inv = await db.query(
+        "SELECT id FROM engicost.invoices WHERE company_id = $1 AND id = $2 AND project_id = $3 AND is_deleted = FALSE",
+        [companyId, effectiveInvoiceId, parsed.projectId],
+      );
+      if (inv.rowCount === 0) effectiveInvoiceId = "";
+    }
+
     const inserted = await db.query(
       `
       INSERT INTO engicost.client_payments (
-        id, company_id, project_id, client_name, payment_type, milestone, amount_expected,
+        id, company_id, project_id, invoice_id, client_name, payment_type, milestone, amount_expected,
         amount_received, payment_date, payment_method, reference_number, status, notes,
         attachment_url, attachment_name, attachment_type,
         approval_status, approval_requested_by, approval_requested_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7,
+        $1, $2, $3, NULLIF($19, ''), $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13,
         NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
         $17, $18, NOW()
@@ -246,6 +268,7 @@ router.post(
         parsed.attachmentType,
         approvalStatus,
         requestedBy,
+        effectiveInvoiceId,
       ],
     );
 

@@ -137,7 +137,9 @@ export const initializeDatabase = async (): Promise<void> => {
     ADD COLUMN IF NOT EXISTS invoice_proforma_prefix VARCHAR(12) NOT NULL DEFAULT 'PRO',
     ADD COLUMN IF NOT EXISTS invoice_tax_prefix VARCHAR(12) NOT NULL DEFAULT 'INV',
     ADD COLUMN IF NOT EXISTS default_payment_terms TEXT NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS default_invoice_notes TEXT NOT NULL DEFAULT ''
+    ADD COLUMN IF NOT EXISTS default_invoice_notes TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS petty_cash_opening_balance NUMERIC(16, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS system_preferences TEXT NOT NULL DEFAULT '{}'
   `);
 
   await db.query(`
@@ -223,6 +225,11 @@ export const initializeDatabase = async (): Promise<void> => {
   await db.query(`
     ALTER TABLE engicost.projects
     ADD COLUMN IF NOT EXISTS client_tin VARCHAR(60) NOT NULL DEFAULT ''
+  `);
+  // Each project runs its own petty-cash float; spending on it may not exceed it.
+  await db.query(`
+    ALTER TABLE engicost.projects
+    ADD COLUMN IF NOT EXISTS petty_cash NUMERIC(16, 2) NOT NULL DEFAULT 0
   `);
   // Running spend per budget category, kept alongside total_spent so the three
   // category budgets can be enforced without re-aggregating on every write.

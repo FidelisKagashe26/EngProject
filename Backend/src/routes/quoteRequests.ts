@@ -26,7 +26,7 @@ router.get(
       `
       SELECT id, full_name, email, phone, service, message, status, created_at::text
       FROM engicost.quote_requests
-      WHERE company_id = $1 AND id = $2 AND is_deleted = FALSE
+      WHERE company_id = $1 AND is_deleted = FALSE
       ORDER BY created_at DESC
       `,
       [companyId],

@@ -30,6 +30,8 @@ const companySchema = z.object({
   // Recurring text that auto-fills new invoices.
   defaultPaymentTerms: z.string().optional(),
   defaultInvoiceNotes: z.string().optional(),
+  // Notification/Security toggle states, persisted as-is.
+  systemPreferences: z.record(z.string(), z.boolean()).optional(),
 });
 
 const expenseCategories = [
@@ -67,13 +69,29 @@ type CompanyRow = {
   invoice_tax_prefix: string;
   default_payment_terms: string;
   default_invoice_notes: string;
+  system_preferences: string;
 };
 
 const COMPANY_COLUMNS = `
   id, name, email, phone, location, currency, enforce_cash_limit,
   tin, vrn, bank_name, bank_account_name, bank_account_number, bank_branch, bank_swift,
-  invoice_proforma_prefix, invoice_tax_prefix, default_payment_terms, default_invoice_notes
+  invoice_proforma_prefix, invoice_tax_prefix, default_payment_terms, default_invoice_notes,
+  system_preferences
 `;
+
+const parseSystemPreferences = (raw: string | null): Record<string, boolean> => {
+  try {
+    const parsed = JSON.parse(raw ?? "{}");
+    if (parsed && typeof parsed === "object") {
+      const out: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed)) out[k] = Boolean(v);
+      return out;
+    }
+  } catch {
+    /* fall through to empty */
+  }
+  return {};
+};
 
 const mapCompany = (row: CompanyRow) => ({
   id: row.id,
@@ -94,6 +112,7 @@ const mapCompany = (row: CompanyRow) => ({
   invoiceTaxPrefix: row.invoice_tax_prefix ?? "INV",
   defaultPaymentTerms: row.default_payment_terms ?? "",
   defaultInvoiceNotes: row.default_invoice_notes ?? "",
+  systemPreferences: parseSystemPreferences(row.system_preferences),
 });
 
 router.get(
@@ -142,7 +161,8 @@ router.put(
         invoice_proforma_prefix = COALESCE(NULLIF($15, ''), invoice_proforma_prefix),
         invoice_tax_prefix = COALESCE(NULLIF($16, ''), invoice_tax_prefix),
         default_payment_terms = COALESCE($17, default_payment_terms),
-        default_invoice_notes = COALESCE($18, default_invoice_notes)
+        default_invoice_notes = COALESCE($18, default_invoice_notes),
+        system_preferences = COALESCE($19, system_preferences)
       WHERE id = $1
       RETURNING ${COMPANY_COLUMNS}
       `,
@@ -165,6 +185,7 @@ router.put(
         parsed.invoiceTaxPrefix ?? "",
         parsed.defaultPaymentTerms ?? null,
         parsed.defaultInvoiceNotes ?? null,
+        parsed.systemPreferences ? JSON.stringify(parsed.systemPreferences) : null,
       ],
     );
 

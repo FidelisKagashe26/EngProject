@@ -11,6 +11,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { SITE_OPERATION_PERMISSIONS, hasPermission, useAuth } from "../auth";
 import { SectionTitle } from "../components/ui";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import { EquipmentPage } from "./EquipmentPage";
 import { ExpensesPage } from "./ExpensesPage";
 import { LaborPage } from "./LaborPage";
@@ -290,15 +291,19 @@ export const OperationsSearchRow = ({
 
 export const SiteOperationsPage = () => {
   const { user } = useAuth();
+  const { activeProject } = useActiveProject();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
-  const allowedTabs = useMemo(
-    () =>
-      operationTabs.filter((tab) =>
-        hasPermission(user?.role, SITE_OPERATION_PERMISSIONS[tab.id]),
-      ),
-    [user?.role],
-  );
+  // A Draft project exists only to prepare its first invoice, so only Materials
+  // is available on it — labour/expenses/equipment/petty-cash open once it goes
+  // Active. (No active project = cross-project view, everything allowed.)
+  const isDraftProject = activeProject?.status === "Draft";
+  const allowedTabs = useMemo(() => {
+    const roleAllowed = operationTabs.filter((tab) =>
+      hasPermission(user?.role, SITE_OPERATION_PERMISSIONS[tab.id]),
+    );
+    return isDraftProject ? roleAllowed.filter((tab) => tab.id === "materials") : roleAllowed;
+  }, [user?.role, isDraftProject]);
   const requestedTab = isOperationsTab(searchParams.get("tab"))
     ? (searchParams.get("tab") as OperationsTab)
     : null;
@@ -352,6 +357,14 @@ export const SiteOperationsPage = () => {
       <SectionTitle
         title="Site Operations"
       />
+
+      {isDraftProject ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <span className="font-semibold">{activeProject?.name}</span> is a Draft — only Materials is
+          open so you can prepare its invoice. Set the project Active to unlock labour, expenses,
+          equipment and petty cash.
+        </p>
+      ) : null}
 
       {activeTab === "labor"      && <LaborPage     embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}
       {activeTab === "materials"  && <MaterialsPage embedded renderSearchRow={renderSearchRow} renderTabStrip={renderTabStrip} search={search} />}

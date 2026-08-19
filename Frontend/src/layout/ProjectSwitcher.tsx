@@ -18,7 +18,8 @@ const itemClass = (selected: boolean): string =>
  * reads the choice from there.
  */
 export const ProjectSwitcher = ({ className = "" }: { className?: string }) => {
-  const { projects, activeProject, activeProjectId, setActiveProjectId } = useActiveProject();
+  const { projects, activeProject, activeProjectId, setActiveProjectId, refreshProjects } =
+    useActiveProject();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -26,6 +27,9 @@ export const ProjectSwitcher = ({ className = "" }: { className?: string }) => {
 
   useEffect(() => {
     if (!open) return;
+    // Pull the latest list each time it opens so freshly-created projects
+    // (including Drafts) are always selectable.
+    void refreshProjects();
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
     const onPointerDown = (event: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
@@ -42,7 +46,7 @@ export const ProjectSwitcher = ({ className = "" }: { className?: string }) => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onEscape);
     };
-  }, [open]);
+  }, [open, refreshProjects]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

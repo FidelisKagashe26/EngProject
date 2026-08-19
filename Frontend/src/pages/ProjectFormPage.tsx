@@ -5,6 +5,7 @@ import { useAuth } from "../auth";
 import { FinancialInput, SectionTitle, SuccessToast, SurfaceCard, GuiSelect, options } from "../components/ui";
 import { PROJECT_STATUSES, isClosedProjectStatus } from "../constants/options";
 import { useUnsavedChanges } from "../guards/UnsavedChangesGuard";
+import { useActiveProject } from "../project/ActiveProjectContext";
 import { api, type CreateProjectPayload, type ProjectApiRecord } from "../services/api";
 import { formatTzs } from "../utils/format";
 
@@ -171,6 +172,7 @@ export const ProjectFormPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { markSaved, setDirty } = useUnsavedChanges();
+  const { refreshProjects } = useActiveProject();
   const isEditMode = useMemo(() => Boolean(projectId), [projectId]);
   const baselineFingerprintRef = useRef("");
   const dirtyCheckReadyRef = useRef(false);
@@ -479,6 +481,9 @@ export const ProjectFormPage = () => {
           error instanceof Error ? error.message : "Initial documents were not saved.";
       }
       markSaved();
+      // Keep the global project switcher in sync so a just-created project
+      // (including a Draft) is selectable immediately, without a page reload.
+      void refreshProjects();
       setSaveMode(mode);
       if (attachmentSaveError.length > 0) {
         setSubmitError(

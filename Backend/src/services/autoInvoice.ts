@@ -163,3 +163,79 @@ export const appendPurchaseToAutoInvoice = async (
     [companyId, invoiceId, subtotal, vatAmount, total],
   );
 };
+
+/**
+ * Create a stand-alone Draft "receipt" invoice for a client payment that was
+ * recorded outside the invoice flow (e.g. via Payments & Cash Flow). One line
+ * for the amount paid, linked afterwards to the payment so it reads as Paid.
+ * Books no material spend (no requirement_id). Returns the new invoice id/number.
+ */
+export const createReceiptInvoice = async (
+  client: PoolClient,
+  params: {
+    companyId: number;
+    projectId: string;
+    clientName: string;
+    amount: number;
+    description: string;
+    issueDate: string;
+    createdBy: string;
+  },
+): Promise<{ id: string; number: string }> => {
+  const { companyId, projectId, clientName, amount, description, issueDate, createdBy } = params;
+  const day = issueDate.slice(0, 10);
+  const total = round2(amount);
+
+  const proj = await client.query<{
+    client_name: string;
+    client_phone: string;
+    client_email: string;
+    client_tin: string;
+  }>(
+    `SELECT client_name, client_phone, client_email, client_tin
+     FROM engicost.projects WHERE company_id = $1 AND id = $2`,
+    [companyId, projectId],
+  );
+  const p = proj.rows[0];
+  const clientContact = [p?.client_phone, p?.client_email]
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean)
+    .join(" · ");
+
+  const company = await client.query<{ currency: string; invoice_tax_prefix: string }>(
+    `SELECT currency, invoice_tax_prefix FROM engicost.companies WHERE id = $1`,
+    [companyId],
+  );
+  const currency = company.rows[0]?.currency || "TZS";
+  const prefix = company.rows[0]?.invoice_tax_prefix || "INV";
+  const year = Number(day.slice(0, 4)) || new Date().getUTCFullYear();
+  const number = await nextInvoiceNumber(client, companyId, "Invoice", prefix, year);
+  const id = makeId("INV");
+
+  await client.query(
+    `
+    INSERT INTO engicost.invoices (
+      id, company_id, project_id, type, number, status,
+      client_name, client_address, client_contact, client_tin,
+      issue_date, currency, subtotal, discount_amount, vat_rate, vat_amount, total,
+      notes, terms, auto_generated, materials_received, created_by
+    ) VALUES (
+      $1, $2, $3, 'Invoice', $4, 'Draft',
+      $5, '', $6, $7,
+      $8, $9, $10, 0, 0, 0, $10,
+      '', '', TRUE, FALSE, $11
+    )
+    `,
+    [id, companyId, projectId, number, clientName || p?.client_name || "", clientContact, p?.client_tin ?? "", day, currency, total, createdBy],
+  );
+  await client.query(
+    `
+    INSERT INTO engicost.invoice_items
+      (id, company_id, invoice_id, description, quantity, unit, unit_price, amount, sort_order, requirement_id)
+    VALUES ($1, $2, $3, $4, 1, '', $5, $5, 0, NULL)
+    `,
+    [makeId("INL"), companyId, id, description, total],
+  );
+
+  return { id, number };
+};

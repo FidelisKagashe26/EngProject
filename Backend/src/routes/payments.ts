@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getSingleTenantCompanyId } from "../db/init";
 import { makeId } from "../db/ids";
 import { db } from "../db/pool";
+import { withTransaction } from "../db/transaction";
+import { createReceiptInvoice } from "../services/autoInvoice";
 import { requireSuperAdmin } from "../middleware/auth";
 import { handleAsync, toMoney } from "./utils";
 import {
@@ -218,88 +220,111 @@ router.post(
       if (inv.rowCount === 0) effectiveInvoiceId = "";
     }
 
-    const inserted = await db.query(
-      `
-      INSERT INTO engicost.client_payments (
-        id, company_id, project_id, invoice_id, client_name, payment_type, milestone, amount_expected,
-        amount_received, payment_date, payment_method, reference_number, status, notes,
-        attachment_url, attachment_name, attachment_type,
-        approval_status, approval_requested_by, approval_requested_at
-      ) VALUES (
-        $1, $2, $3, NULLIF($19, ''), $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13,
-        NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
-        $17, $18, NOW()
-      )
-      RETURNING
-        id,
-        project_id,
-        client_name,
-        payment_type,
-        milestone,
-        amount_expected::text,
-        amount_received::text,
-        payment_date::text,
-        payment_method,
-        reference_number,
-        status,
-        notes,
-        attachment_url,
-        attachment_name,
-        attachment_type,
-        approval_status
-      `,
-      [
-        makeId("PAY"),
-        companyId,
-        parsed.projectId,
-        parsed.clientName,
-        parsed.paymentType,
-        parsed.milestone,
-        amountExpected,
-        parsed.amountReceived,
-        parsed.paymentDate,
-        parsed.paymentMethod,
-        parsed.referenceNumber,
-        paymentStatus(amountExpected, parsed.amountReceived),
-        parsed.notes,
-        parsed.attachmentUrl,
-        parsed.attachmentName,
-        parsed.attachmentType,
-        approvalStatus,
-        requestedBy,
-        effectiveInvoiceId,
-      ],
-    );
+    let createdInvoiceNumber = "";
+    const inserted = await withTransaction(async (client) => {
+      // A recorded payment that is not tied to an existing invoice gets its own
+      // Draft "receipt" invoice, so every payment always has an invoice ready to
+      // send to the client. Linking it below makes that invoice read as Paid,
+      // and amount_received is still only moved once.
+      if (!effectiveInvoiceId && !needsApproval) {
+        const receipt = await createReceiptInvoice(client, {
+          companyId,
+          projectId: parsed.projectId,
+          clientName: parsed.clientName,
+          amount: parsed.amountReceived,
+          description: parsed.milestone.trim() || `${parsed.paymentType} payment`,
+          issueDate: parsed.paymentDate,
+          createdBy: requestedBy,
+        });
+        effectiveInvoiceId = receipt.id;
+        createdInvoiceNumber = receipt.number;
+      }
 
-    if (!needsApproval) {
-      await db.query(
+      const paymentResult = await client.query(
         `
-        UPDATE engicost.projects
-        SET
-          amount_received = amount_received + $3,
-          updated_at = NOW()
-        WHERE company_id = $1 AND id = $2
+        INSERT INTO engicost.client_payments (
+          id, company_id, project_id, invoice_id, client_name, payment_type, milestone, amount_expected,
+          amount_received, payment_date, payment_method, reference_number, status, notes,
+          attachment_url, attachment_name, attachment_type,
+          approval_status, approval_requested_by, approval_requested_at
+        ) VALUES (
+          $1, $2, $3, NULLIF($19, ''), $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13,
+          NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
+          $17, $18, NOW()
+        )
+        RETURNING
+          id,
+          project_id,
+          client_name,
+          payment_type,
+          milestone,
+          amount_expected::text,
+          amount_received::text,
+          payment_date::text,
+          payment_method,
+          reference_number,
+          status,
+          notes,
+          attachment_url,
+          attachment_name,
+          attachment_type,
+          approval_status
         `,
-        [companyId, parsed.projectId, parsed.amountReceived],
+        [
+          makeId("PAY"),
+          companyId,
+          parsed.projectId,
+          parsed.clientName,
+          parsed.paymentType,
+          parsed.milestone,
+          amountExpected,
+          parsed.amountReceived,
+          parsed.paymentDate,
+          parsed.paymentMethod,
+          parsed.referenceNumber,
+          paymentStatus(amountExpected, parsed.amountReceived),
+          parsed.notes,
+          parsed.attachmentUrl,
+          parsed.attachmentName,
+          parsed.attachmentType,
+          approvalStatus,
+          requestedBy,
+          effectiveInvoiceId,
+        ],
       );
-    }
 
-    await db.query(
-      `
-      INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
-      VALUES ($1, $2, $3, 'Recorded Client Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
-      `,
-      [
-        makeId("ACT"),
-        companyId,
-        requestedBy,
-        parsed.projectId,
-        needsApproval
-          ? `${parsed.paymentType} payment pending approval: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`
-          : `${parsed.paymentType} payment received: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`,
-      ],
-    );
+      if (!needsApproval) {
+        await client.query(
+          `
+          UPDATE engicost.projects
+          SET
+            amount_received = amount_received + $3,
+            updated_at = NOW()
+          WHERE company_id = $1 AND id = $2
+          `,
+          [companyId, parsed.projectId, parsed.amountReceived],
+        );
+      }
+
+      await client.query(
+        `
+        INSERT INTO engicost.activity_logs (id, company_id, actor_name, action, module, project_id, description, ip_device)
+        VALUES ($1, $2, $3, 'Recorded Client Payment', 'Payments', $4, $5, '127.0.0.1 / Local Dev')
+        `,
+        [
+          makeId("ACT"),
+          companyId,
+          requestedBy,
+          parsed.projectId,
+          needsApproval
+            ? `${parsed.paymentType} payment pending approval: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`
+            : `${parsed.paymentType} payment received: TZS ${parsed.amountReceived.toLocaleString("en-TZ")}`,
+        ],
+      );
+
+      return paymentResult;
+    });
 
     const row = inserted.rows[0];
     res.status(201).json({
@@ -321,6 +346,8 @@ router.post(
       approvalStatus: row.approval_status,
       requiresApproval: needsApproval,
       threshold: APPROVAL_THRESHOLDS.client_payments,
+      // Set when a receipt invoice was auto-created for this payment.
+      generatedInvoiceNumber: createdInvoiceNumber || "",
     });
   }),
 );

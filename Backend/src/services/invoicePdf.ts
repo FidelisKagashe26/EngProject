@@ -367,7 +367,7 @@ export const renderInvoicePdf = (
         .fillColor(MUTED)
         .text(
           invoice.type === "Proforma"
-            ? "This is a proforma invoice and is not a tax document."
+            ? company.name || "Company"
             : "Thank you for your business.",
           left,
           doc.page.height - MARGIN - 14,

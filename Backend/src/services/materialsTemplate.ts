@@ -31,6 +31,14 @@ export type RawRequirementRow = {
 const normalise = (value: unknown): string =>
   String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// The pre-filled demo rows all carry this name. They exist only to show the
+// user every valid unit in the right column; the importer ignores any row with
+// this name, so uploading the template unchanged imports nothing (the user must
+// replace the samples with their own materials first).
+export const SAMPLE_MATERIAL_NAME = "SAMPLE — delete this row";
+export const isSampleRowName = (value: unknown): boolean =>
+  normalise(value).startsWith("sampledelete");
+
 /** Build the blank template (headers + two example rows + a guidance note). */
 export const buildRequirementsTemplate = async (): Promise<Buffer> => {
   const workbook = new ExcelJS.Workbook();
@@ -47,13 +55,21 @@ export const buildRequirementsTemplate = async (): Promise<Buffer> => {
   sheet.getRow(1).alignment = { vertical: "middle" };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
-  // Two example rows so the expected shape is obvious.
-  sheet.addRow([
-    "Cement (Simenti)", 100, "Bags", 18000, "Company Purchased", "High", "", "Structural works",
-  ]);
-  sheet.addRow([
-    "Electrical Wire (Waya)", 200, "Meters", 1500, "Client Supplied", "Low", "", "",
-  ]);
+  // One pre-filled demo row per valid unit (14 rows) so the user sees every unit
+  // spelled correctly in the right column. These are placeholders: the importer
+  // rejects them, so the user deletes them and enters their own materials.
+  MATERIAL_UNITS.forEach((unit, i) => {
+    sheet.addRow([
+      SAMPLE_MATERIAL_NAME,
+      100,
+      unit,
+      "",
+      i % 2 === 0 ? "Company Purchased" : "Client Supplied",
+      PRIORITIES[i % PRIORITIES.length],
+      "",
+      "Example only — delete this row and enter your own material.",
+    ]);
+  });
 
   // Drop-down pick-lists on the Unit, Supply Source and Priority columns so the
   // user can pick a valid value instead of guessing the spelling. Applied to a
@@ -163,8 +179,12 @@ export const parseRequirementsWorkbook = async (
   for (let r = 2; r <= lastRow; r += 1) {
     const row = sheet.getRow(r);
     const materialName = cellText(row, "materialName").trim();
-    // Skip fully-blank rows.
-    if (!materialName && !cellText(row, "requiredQuantity").trim() && !cellText(row, "unit").trim()) {
+    // Skip fully-blank rows and the pre-filled demo rows (so an unchanged
+    // template imports nothing — the user must replace the samples first).
+    if (
+      isSampleRowName(materialName) ||
+      (!materialName && !cellText(row, "requiredQuantity").trim() && !cellText(row, "unit").trim())
+    ) {
       continue;
     }
     rows.push({

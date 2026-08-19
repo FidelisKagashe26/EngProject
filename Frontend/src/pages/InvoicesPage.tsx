@@ -49,7 +49,7 @@ const round2 = (value: number): number => Math.round((Number(value) || 0) * 100)
 
 export const InvoicesPage = () => {
   const { markSaved } = useUnsavedChanges();
-  const { activeProjectId, activeProject, projects } = useActiveProject();
+  const { activeProjectId, activeProject, projects, setActiveProjectId } = useActiveProject();
   const { company } = useCompanySettings();
 
   const [invoices, setInvoices] = useState<InvoiceApiRecord[]>([]);
@@ -68,6 +68,12 @@ export const InvoicesPage = () => {
 
   // Form state
   const [formType, setFormType] = useState<InvoiceType>("Invoice");
+  // A proforma is either a money request (plain amount) or a materials list.
+  const [proformaKind, setProformaKind] = useState<"money" | "materials">("materials");
+  const [moneyAmount, setMoneyAmount] = useState("");
+  const [moneyDescription, setMoneyDescription] = useState("");
+  // Picker filter: show materials by supply source.
+  const [materialSourceFilter, setMaterialSourceFilter] = useState<"All" | "Company Purchased" | "Client Supplied">("All");
   const [formProjectId, setFormProjectId] = useState(activeProjectId);
   const [clientName, setClientName] = useState("");
   const [clientAddress, setClientAddress] = useState("");
@@ -143,6 +149,15 @@ export const InvoicesPage = () => {
     return { subtotal, disc, vat, rate, total: round2(taxable + vat) };
   }, [items, discount, vatRate]);
 
+  // Materials shown in the picker, filtered by supply source.
+  const visibleMaterials = useMemo(
+    () =>
+      materialSourceFilter === "All"
+        ? formMaterials
+        : formMaterials.filter((m) => m.supplySource === materialSourceFilter),
+    [formMaterials, materialSourceFilter],
+  );
+
   // Load the chosen project's material requirements whenever the form's project changes.
   useEffect(() => {
     if (!showForm || !formProjectId) {
@@ -207,6 +222,10 @@ export const InvoicesPage = () => {
     setTerms(activeProject?.paymentTerms || company?.defaultPaymentTerms || "");
     setItems([emptyItem()]);
     setPicks({});
+    setProformaKind("materials");
+    setMoneyAmount("");
+    setMoneyDescription("");
+    setMaterialSourceFilter("All");
   };
 
   const openCreate = (type: InvoiceType) => {
@@ -217,6 +236,9 @@ export const InvoicesPage = () => {
   const openEdit = (invoice: InvoiceApiRecord) => {
     setEditingId(invoice.id);
     setFormType(invoice.type);
+    // Editing always uses the line-item view (works for both money and materials).
+    setProformaKind("materials");
+    setMaterialSourceFilter("All");
     setFormProjectId(invoice.projectId);
     setClientName(invoice.clientName);
     setClientAddress(invoice.clientAddress);
@@ -246,24 +268,38 @@ export const InvoicesPage = () => {
     setItems((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
   };
 
-  const handleSave = async () => {
-    const cleanItems: InvoiceItem[] = items
-      .filter((item) => item.description.trim().length > 0)
-      .map((item) => ({
-        description: item.description.trim(),
-        quantity: Number(item.quantity) || 0,
-        unit: item.unit.trim(),
-        unitPrice: Number(item.unitPrice) || 0,
-        requirementId: item.requirementId || undefined,
-      }));
+  const isMoneyRequest = formType === "Proforma" && proformaKind === "money";
 
+  const handleSave = async () => {
     if (formProjectId.trim().length === 0 || clientName.trim().length < 2) {
       setError("Please select a project and enter the client name.");
       return;
     }
-    if (cleanItems.length === 0) {
-      setError("Add at least one line item with a description.");
-      return;
+
+    let cleanItems: InvoiceItem[];
+    if (isMoneyRequest) {
+      // A money-request proforma is a single line: the amount + what it's for.
+      const amount = Number(moneyAmount) || 0;
+      const description = moneyDescription.trim();
+      if (amount <= 0 || description.length < 2) {
+        setError("Enter the amount and a description of what it's for.");
+        return;
+      }
+      cleanItems = [{ description, quantity: 1, unit: "", unitPrice: amount, requirementId: undefined }];
+    } else {
+      cleanItems = items
+        .filter((item) => item.description.trim().length > 0)
+        .map((item) => ({
+          description: item.description.trim(),
+          quantity: Number(item.quantity) || 0,
+          unit: item.unit.trim(),
+          unitPrice: Number(item.unitPrice) || 0,
+          requirementId: item.requirementId || undefined,
+        }));
+      if (cleanItems.length === 0) {
+        setError("Add at least one line item with a description.");
+        return;
+      }
     }
 
     setSaving(true);
@@ -277,8 +313,8 @@ export const InvoicesPage = () => {
         clientTin: clientTin.trim(),
         issueDate,
         dueDate: dueDate || undefined,
-        discountAmount: Number(discount) || 0,
-        vatRate: Number(vatRate) || 0,
+        discountAmount: isMoneyRequest ? 0 : Number(discount) || 0,
+        vatRate: isMoneyRequest ? 0 : Number(vatRate) || 0,
         notes: notes.trim(),
         terms: terms.trim(),
         items: cleanItems,
@@ -288,7 +324,14 @@ export const InvoicesPage = () => {
       } else {
         await api.createInvoice({ ...payload, type: formType });
       }
-      await load();
+      // Show what was just saved. If it belongs to a different project than the
+      // one currently in focus, switch focus to it (the list is scoped to the
+      // active project) so it never "disappears"; otherwise just reload in place.
+      if (activeProjectId && formProjectId && formProjectId !== activeProjectId) {
+        setActiveProjectId(formProjectId);
+      } else {
+        await load();
+      }
       markSaved();
       setShowForm(false);
     } catch (saveError) {
@@ -343,13 +386,13 @@ export const InvoicesPage = () => {
       setViewInvoice(updated);
       setPayAmount("");
       setPayRef("");
-      const becameInvoice = payingInvoice.type === "Proforma" && updated.type === "Invoice";
       pushTopToast({
         tone: "success",
         title: "Payment",
-        message: becameInvoice
-          ? `Proforma became ${updated.number} and the payment was recorded.`
-          : "Payment recorded against the invoice.",
+        message:
+          payingInvoice.type === "Proforma"
+            ? `Payment recorded. ${payingInvoice.number} became ${updated.number}.`
+            : "Client payment recorded against the invoice.",
       });
     } catch (payError) {
       setError(payError instanceof Error ? payError.message : "Failed to record payment.");
@@ -421,11 +464,8 @@ export const InvoicesPage = () => {
           </GuiSelect>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <button className="btn-secondary h-10 justify-center whitespace-nowrap" onClick={() => openCreate("Proforma")} type="button">
+          <button className="btn-primary h-10 justify-center whitespace-nowrap" onClick={() => openCreate("Proforma")} type="button">
             <Plus className="h-4 w-4" /> New Proforma
-          </button>
-          <button className="btn-primary h-10 justify-center whitespace-nowrap" onClick={() => openCreate("Invoice")} type="button">
-            <Plus className="h-4 w-4" /> New Invoice
           </button>
         </div>
       </div>
@@ -524,6 +564,34 @@ export const InvoicesPage = () => {
             title={`${editingId ? "Edit" : "New"} ${formType === "Proforma" ? "Proforma Invoice" : "Invoice"}`}
           >
             {error ? <p className="mb-3 text-sm text-red-700">{error}</p> : null}
+
+            {formType === "Proforma" && !editingId ? (
+              <div className="mb-4">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">This proforma is for</p>
+                <div className="inline-flex rounded-lg border border-[#0b2a53]/15 bg-white p-1 dark:border-white/10 dark:bg-white/5">
+                  <button
+                    className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${proformaKind === "money" ? "bg-[#0b2a53] text-white" : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10"}`}
+                    onClick={() => setProformaKind("money")}
+                    type="button"
+                  >
+                    Request Money
+                  </button>
+                  <button
+                    className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${proformaKind === "materials" ? "bg-[#0b2a53] text-white" : "text-[#0b2a53] hover:bg-[#0b2a53]/5 dark:text-slate-200 dark:hover:bg-white/10"}`}
+                    onClick={() => setProformaKind("materials")}
+                    type="button"
+                  >
+                    Materials List
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  {proformaKind === "money"
+                    ? "A plain amount you're asking the client to pay. When paid, it adds to Amount Received."
+                    : "A list of the project's materials. Converting it books their cost to the project (no client money)."}
+                </p>
+              </div>
+            ) : null}
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
                 <span>Project</span>
@@ -566,17 +634,34 @@ export const InvoicesPage = () => {
               </div>
             </div>
 
+            {isMoneyRequest ? (
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <FinancialInput label="Amount Requested (TZS)" onChange={setMoneyAmount} placeholder="e.g. 5000000" value={moneyAmount} />
+                <label className="form-field">
+                  <span>What is this payment for?</span>
+                  <input className="input-field" onChange={(e) => setMoneyDescription(e.target.value)} placeholder="e.g. Advance to continue foundation works" value={moneyDescription} />
+                </label>
+              </div>
+            ) : (
+              <>
             {/* Pull line items from the project's material requirements */}
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-white/5">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Add from Materials{formMaterials.length > 0 ? ` (${formMaterials.length})` : ""}
+                  Add from Materials{visibleMaterials.length > 0 ? ` (${visibleMaterials.length})` : ""}
                 </p>
-                {formMaterials.length > 0 ? (
-                  <button className="btn-primary py-1 px-3 text-xs" onClick={addPickedToItems} type="button">
-                    Add selected
-                  </button>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  <GuiSelect className="input-field h-8 py-0 text-xs" onChange={(e) => setMaterialSourceFilter(e.target.value as typeof materialSourceFilter)} value={materialSourceFilter}>
+                    <option value="All">All sources</option>
+                    <option value="Company Purchased">Company Purchased</option>
+                    <option value="Client Supplied">Client Supplied</option>
+                  </GuiSelect>
+                  {visibleMaterials.length > 0 ? (
+                    <button className="btn-primary py-1 px-3 text-xs" onClick={addPickedToItems} type="button">
+                      Add selected
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {loadingMaterials ? (
                 <p className="py-4 text-center text-sm text-slate-400">Loading materials…</p>
@@ -584,9 +669,13 @@ export const InvoicesPage = () => {
                 <p className="py-4 text-center text-sm text-slate-400">
                   No materials recorded for this project yet. Add them in the Materials module, or type line items manually below.
                 </p>
+              ) : visibleMaterials.length === 0 ? (
+                <p className="py-4 text-center text-sm text-slate-400">
+                  No “{materialSourceFilter}” materials for this project.
+                </p>
               ) : (
                 <div className="max-h-44 space-y-1 overflow-auto">
-                  {formMaterials.map((mat) => {
+                  {visibleMaterials.map((mat) => {
                     // Only what is still needed (required − received) can be
                     // invoiced; a fully-received material is shown but locked.
                     const remaining = Math.max(mat.remainingQuantity, 0);
@@ -699,6 +788,8 @@ export const InvoicesPage = () => {
                 <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-base font-bold text-slate-900 dark:border-white/10"><span>Total</span><span>{formatTzs(draftTotals.total)}</span></div>
               </div>
             </div>
+              </>
+            )}
 
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="form-field">
@@ -778,7 +869,7 @@ export const InvoicesPage = () => {
               </button>
               {viewInvoice.balance > 0 && viewInvoice.status !== "Cancelled" ? (
                 <button className="btn-primary" onClick={() => { const inv = viewInvoice; setViewInvoice(null); openPayment(inv); }} type="button">
-                  {viewInvoice.type === "Proforma" ? "Pay & Convert to Invoice" : "Record Payment"}
+                  {viewInvoice.type === "Proforma" ? "Pay & Convert" : "Record Payment"}
                 </button>
               ) : null}
               <button className="btn-secondary" onClick={() => setViewInvoice(null)} type="button">Close</button>
@@ -790,16 +881,16 @@ export const InvoicesPage = () => {
       {/* ── Record payment ── */}
       {payingInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <SurfaceCard className="w-full max-w-md" title={`${payingInvoice.type === "Proforma" ? "Pay Proforma" : "Record Payment"} — ${payingInvoice.number}`}>
+          <SurfaceCard className="w-full max-w-md" title={`Record Payment — ${payingInvoice.number}`}>
             {error ? <p className="mb-3 text-sm text-red-700">{error}</p> : null}
-            {!payingInvoice.materialsReceived ? (
-              <p className="mb-3 rounded-lg bg-[#0b2a53]/5 px-3 py-2 text-sm text-[#0b2a53] dark:bg-white/5 dark:text-blue-300">
-                {payingInvoice.type === "Proforma"
-                  ? "Recording this payment converts the proforma into a full invoice, marks its materials received, and books their cost to the project."
-                  : "Recording this payment marks this invoice's materials received and books their cost to the project."}
-              </p>
-            ) : null}
-            <p className="mb-3 text-sm text-slate-500">{payingInvoice.type === "Proforma" ? "Amount payable" : "Outstanding balance"}: <span className="font-semibold text-amber-700">{formatTzs(payingInvoice.balance)}</span></p>
+            <p className="mb-3 rounded-lg bg-[#0b2a53]/5 px-3 py-2 text-sm text-[#0b2a53] dark:bg-white/5 dark:text-blue-300">
+              {payingInvoice.type === "Proforma" && payingInvoice.items.some((it) => it.requirementId)
+                ? "Paying turns this proforma into an invoice. The materials' cost is booked to the project's Total Spent, and the amount you enter is the client's payment added to Amount Received — the two are kept separate."
+                : payingInvoice.type === "Proforma"
+                  ? "Paying turns this proforma into an invoice and records the client's payment (their money) into Amount Received. It never touches materials or costs."
+                  : "This records the client's actual payment (their money) against the invoice. It does not change materials or costs — only what the client has paid."}
+            </p>
+            <p className="mb-3 text-sm text-slate-500">Outstanding balance: <span className="font-semibold text-amber-700">{formatTzs(payingInvoice.balance)}</span></p>
             <div className="space-y-3">
               <FinancialInput label="Amount Received" onChange={setPayAmount} placeholder="0" value={payAmount} />
               <label className="form-field">

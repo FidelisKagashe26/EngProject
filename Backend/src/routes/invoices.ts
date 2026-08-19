@@ -755,6 +755,14 @@ router.post(
       res.status(404).json({ message: "Invoice not found." });
       return;
     }
+    // Paying does EVERYTHING in one step — the invoice only ever comes into
+    // existence once its payment is being recorded. For a proforma (money or
+    // materials) the same Pay action converts it to a real Invoice; for a
+    // materials proforma it additionally receives the materials. The two ledgers
+    // stay strictly separate and can never be conflated: material cost is booked
+    // from each requirement's estimated_unit_cost → Total Spent (a project cost),
+    // while the payment `amount` the user enters is the client's money →
+    // amount_received (revenue). They are different numbers by construction.
     if (amount > invoice.balance + 0.01) {
       res.status(400).json({
         message: `Payment exceeds the outstanding balance (${invoice.balance.toLocaleString("en-TZ")}).`,
@@ -762,9 +770,6 @@ router.post(
       return;
     }
 
-    // Paying a proforma converts it to a full invoice in the same action: the
-    // single "Pay" click books its materials against the project and assigns the
-    // invoice number, then records the payment — there is no separate convert.
     const company = await db.query<{ invoice_tax_prefix: string }>(
       "SELECT invoice_tax_prefix FROM engicost.companies WHERE id = $1",
       [companyId],
@@ -773,20 +778,19 @@ router.post(
 
     try {
       await withTransaction(async (client) => {
-        // Make sure this payment's materials are received exactly once:
-        //  • a proforma flips to an invoice in place (books materials, gets a number);
-        //  • a directly-created invoice that never received its materials books them now;
-        //  • an invoice that already received them just takes the payment.
+        // A proforma flips to a real invoice on payment. convertProformaInPlace
+        // also receives any material lines (booking their cost to Total Spent);
+        // a money-request proforma has no material lines, so nothing hits cost —
+        // it just gets its invoice number.
         let paidNumber = invoice.number;
         if (invoice.type === "Proforma") {
           paidNumber = await convertProformaInPlace(client, companyId, invoice, prefix, recordedBy);
-        } else if (!invoice.materialsReceived) {
-          await receiveDirectInvoiceMaterials(client, companyId, invoice, recordedBy);
         }
 
         // A real client payment, linked to this invoice. It flows into the
         // project's amount_received exactly like any other client payment, so the
-        // project financials and cash-on-hand move for real.
+        // project financials and cash-on-hand move for real. It never books
+        // material cost — that already happened when the materials were received.
         await client.query(
           `
           INSERT INTO engicost.client_payments (
